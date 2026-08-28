@@ -82,13 +82,24 @@ def verify_served_round(
             return None
         if not req.ok:
             return AuditVerdict(False, 0.0, float('inf'), req.detail or 'no completion')
-        try:
-            return verify_served(
-                reference, req.messages, req.completion, req.tokens, req.token_logprobs, token_ids=req.token_ids
-            )
-        except Exception as e:  # reference hiccup: neither credit nor blame
-            bt.logging.warning(f'Serving: could not verify a request served by UID {req.uid}: {e!r}')
-            return None
+        for attempt in range(2):  # a connection blip to the reference is retried once before going neutral
+            try:
+                return verify_served(
+                    reference,
+                    req.messages,
+                    req.completion,
+                    req.tokens,
+                    req.token_logprobs,
+                    token_ids=req.token_ids,
+                    token_bytes=req.token_bytes,
+                )
+            except Exception as e:  # reference hiccup: neither credit nor blame
+                if attempt == 0 and isinstance(e, (ConnectionError, OSError)) or 'Connect' in type(e).__name__:
+                    time.sleep(1.0)
+                    continue
+                bt.logging.warning(f'Serving: could not verify a request served by UID {req.uid}: {e!r}')
+                return None
+        return None
 
     with ThreadPoolExecutor(max_workers=SERVING_VERIFY_WORKERS) as pool:
         verdicts = list(pool.map(judge, mine))
@@ -191,6 +202,7 @@ async def baseline_round(
                 completion=response.completion if response is not None else None,
                 tokens=list(response.tokens) if response is not None and response.tokens else None,
                 token_ids=list(response.token_ids) if response is not None and response.token_ids else None,
+                token_bytes=list(response.token_bytes) if response is not None and response.token_bytes else None,
                 token_logprobs=list(response.token_logprobs)
                 if response is not None and response.token_logprobs
                 else None,

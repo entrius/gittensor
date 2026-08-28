@@ -50,6 +50,7 @@ class ServedRequest:
     completion: Optional[str] = None
     tokens: Optional[List[str]] = None
     token_ids: Optional[List[int]] = None
+    token_bytes: Optional[List[List[int]]] = None
     token_logprobs: Optional[List[float]] = None
     detail: str = ''  # axon status message when not ok
     source: str = 'gateway'  # 'gateway' | 'baseline'

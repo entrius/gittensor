@@ -237,6 +237,7 @@ class _FakeResponse:
         self.served_model_id = model_id
         self.tokens = result.tokens
         self.token_ids = result.token_ids
+        self.token_bytes = None
         self.token_logprobs = result.token_logprobs
         self.ttft_ms = 12.0
         self.decode_tps = 99.0
@@ -556,6 +557,28 @@ def test_verify_served_forces_miner_token_ids():
 
     lie = verify_served(BindingReference(), good.messages, good.completion, tokens, logprobs, token_ids=ids)
     assert not lie.passed and not lie.hard and 'do not spell' in lie.reason
+
+    class ExactReference(ForcingReference):
+        def score_served(self, messages, completion, token_ids=None):
+            out = super().score_served(messages, completion, token_ids)
+            out['bytes'] = [t.encode() for t in tokens]  # what the forced ids spell
+            return out
+
+    mine_bytes = [list(t.encode()) for t in tokens]
+    assert verify_served(
+        ExactReference(), good.messages, good.completion, tokens, logprobs, token_ids=ids, token_bytes=mine_bytes
+    ).passed
+    forged = [list(b'x')] + mine_bytes[1:]
+    assert (
+        'streamed bytes'
+        in verify_served(
+            ExactReference(), good.messages, good.completion, tokens, logprobs, token_ids=ids, token_bytes=forged
+        ).reason
+    )
+    # a multibyte character split across streamed tokens: the stream's text carries U+FFFD, the bytes are fine
+    assert good.completion is not None
+    split_text = '\ufffd' + good.completion[1:]
+    assert verify_served(ExactReference(), good.messages, split_text, tokens, logprobs, token_ids=ids).passed
 
 
 def test_stream_assembler_collects_token_ids():

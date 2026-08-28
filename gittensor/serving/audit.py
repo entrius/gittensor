@@ -382,6 +382,7 @@ def verify_served(
     token_logprobs: Optional[Sequence[float]],
     token_ids: Optional[Sequence[int]] = None,
     end_of_turn: Sequence[str] = ('<|im_end|>', '<|endoftext|>', '</s>'),
+    token_bytes: Optional[Sequence[Sequence[int]]] = None,
 ) -> AuditVerdict:
     """Verify a served (greedy) completion by teacher forcing it under the reference.
 
@@ -397,16 +398,28 @@ def verify_served(
         return AuditVerdict(False, 0.0, float('inf'), 'missing or malformed logprobs')
     mine, mine_lp = list(tokens), list(token_logprobs)
     mine_ids = list(token_ids) if token_ids and len(token_ids) == len(mine) else None
+    mine_bytes = [bytes(b) for b in token_bytes] if token_bytes and len(token_bytes) == len(mine) else None
     if mine and mine[-1] in end_of_turn:
         mine, mine_lp = mine[:-1], mine_lp[:-1]
         mine_ids = mine_ids[:-1] if mine_ids else None
+        mine_bytes = mine_bytes[:-1] if mine_bytes else None
     if not mine:
         return AuditVerdict(False, 0.0, float('inf'), 'empty completion')
     ref = reference.score_served(messages, completion, mine_ids)
     argmax, ref_lp = ref.get('argmax') or [], ref.get('logprobs') or []
     if len(argmax) != len(mine) or len(ref_lp) != len(mine):
         return AuditVerdict(False, 0.0, float('inf'), f'tokenization mismatch ({len(mine)} vs {len(argmax)})')
-    if mine_ids and ref.get('bytes') and b''.join(ref['bytes']).decode('utf-8', 'replace') != completion:
-        return AuditVerdict(False, 0.0, float('inf'), 'token ids do not spell the completion')
+    if mine_ids and ref.get('bytes'):
+        # Bind the forced ids to what the user received. Exact on bytes when the miner reported them; the decoded
+        # text is only compared when it decodes cleanly (a multibyte character split across streamed tokens shows
+        # up as replacement characters in the stream's text and is not the miner's doing).
+        ref_bytes = b''.join(ref['bytes'])
+        if mine_bytes is not None:
+            if b''.join(mine_bytes) != ref_bytes:
+                return AuditVerdict(False, 0.0, float('inf'), 'token ids do not spell the streamed bytes')
+        else:
+            text = ref_bytes.decode('utf-8', 'replace')
+            if '\ufffd' not in text and '\ufffd' not in completion and text != completion:
+                return AuditVerdict(False, 0.0, float('inf'), 'token ids do not spell the completion')
     case = AuditCase(messages=list(messages), max_tokens=len(mine), reference_tokens=argmax, reference_logprobs=ref_lp)
     return verify_response(case, mine, mine_lp)

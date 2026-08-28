@@ -152,6 +152,7 @@ def build_app(
                     completion=result.completion if result else None,
                     tokens=list(result.tokens) if result and result.tokens else None,
                     token_ids=list(result.token_ids) if result and result.token_ids else None,
+                    token_bytes=list(result.token_bytes) if result and result.token_bytes else None,
                     token_logprobs=list(result.token_logprobs) if result and result.token_logprobs else None,
                     detail=str(getattr(getattr(result, 'dendrite', None), 'status_message', None) or '')
                     if not ok

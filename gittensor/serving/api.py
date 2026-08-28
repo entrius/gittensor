@@ -130,6 +130,7 @@ def build_app(
         miner = state.acquire(release.model_id, probation=key in baseline)
         if miner is None:
             raise HTTPException(status_code=429, detail='no READY serving capacity')
+        inflight = state.inflight().get(miner.uid, 1)
 
         request_id = f'chatcmpl-{uuid.uuid4().hex[:24]}'
         created = int(time.time())
@@ -157,6 +158,7 @@ def build_app(
                     else '',
                     source='gateway',
                     ttft_ms=finite_or_none(getattr(result, 'observed_ttft_ms', None)) if result else None,
+                    inflight=inflight,
                 )
             )
             state.record(

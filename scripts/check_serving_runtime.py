@@ -308,6 +308,7 @@ def speed_profile(base_url: str, model_id: str, max_tokens: int, timeout: float,
         tokens, ttft, wall = _stream_once(base_url, model_id, messages, max_tokens, timeout)
         single.append((tokens / max(wall - ttft, 1e-3), ttft * 1000.0))
     aggregate = []
+    per_request = []
     for i in range(reps):
         batch = prompts[i * burst : (i + 1) * burst]
         started = time.monotonic()
@@ -317,8 +318,14 @@ def speed_profile(base_url: str, model_id: str, max_tokens: int, timeout: float,
         tokens = sum(t for t, _, _ in results)
         first = min(ttft for _, ttft, _ in results)
         aggregate.append(tokens / max(wall - first, 1e-3))
+        per_request.extend(t / max(w - tt, 1e-3) for t, tt, w in results)
     single_tps = statistics.median(t for t, _ in single)
     probe_tps = statistics.median(aggregate)
+    curve = {1: round(single_tps, 1), burst: round(statistics.median(per_request), 1)}
+    if burst != 6:  # a mid point so the validator's interpolation follows the real curve
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+            r6 = list(pool.map(lambda m: _stream_once(base_url, model_id, m, max_tokens, timeout), prompts[:6]))
+        curve[6] = round(statistics.median(t / max(w - tt, 1e-3) for t, tt, w in r6), 1)
     return {
         'single_stream_decode_tps': round(single_tps, 1),
         'probe_shaped_decode_tps': round(probe_tps, 1),
@@ -328,6 +335,9 @@ def speed_profile(base_url: str, model_id: str, max_tokens: int, timeout: float,
         # what the release carries: capacity = aggregate / decode_tps_target capped at 1, 0 under the floor ratio
         'decode_tps_target': round(probe_tps, 1),
         'burst_concurrency': burst,
+        # concurrent requests -> per-request decode tok/s of one honest card: the validator prices a served request
+        # against this curve at the load it had in flight to the miner
+        'decode_per_request': {str(k): v for k, v in sorted(curve.items())},
     }
 
 

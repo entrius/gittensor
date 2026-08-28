@@ -19,7 +19,14 @@
         "single_stream_decode_tps": 443.6,
         "probe_shaped_decode_tps": 280.0,
         "measured_on": "gittensor-ai-lab/sparkinfer@7498736 on a rented RTX 5090 (Lium brave-fox-20), 2026-08-27: 16-concurrent x 64 tokens aggregate 279-282 tok/s (6: 255, 24: 268, 32: 275 \u2014 queues past 16, wall 3.7 s -> 7 s)",
-        "burst_concurrency": 16
+        "burst_concurrency": 16,
+        "decode_per_request": {
+          "1": 443.6,
+          "6": 46.0,
+          "16": 19.4,
+          "24": 19.4,
+          "32": 19.5
+        }
       }
     }
   ]

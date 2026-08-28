@@ -54,6 +54,7 @@ class ServedRequest:
     detail: str = ''  # axon status message when not ok
     source: str = 'gateway'  # 'gateway' | 'baseline'
     ttft_ms: Optional[float] = None  # validator-observed time to first streamed event
+    inflight: int = 1  # this validator's requests in flight to the miner when this one was dispatched (incl. itself)
 
 
 @dataclass

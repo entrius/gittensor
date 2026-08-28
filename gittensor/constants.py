@@ -176,18 +176,17 @@ assert abs(OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE_CAP - 1.0) < EMISSION_SHA
 SERVING_SETTLEMENT_ROUNDS = 12  # 12 x 5-minute audit rounds
 SERVING_CHALLENGE_TIMEOUT = 30.0  # seconds before a probe request counts as failed
 SERVING_READY_TTL_S = 900.0  # gateway stops routing when the last audit round is older than this
-# Capacity probe: after settling the window, every READY miner is sent SERVING_PROBE_REQUESTS reference prompts at the
-# same instant as every other miner. Verified tokens delivered per wall-clock second, over
-# SERVING_PROBE_TARGET_TPS, capped at 1, is the miner's capacity. One RTX 5090 delivers a fixed throughput however many
-# hotkeys front it, so N hotkeys on one card share one card's pay; a hotkey with more than one card is capped at one
-# card's worth (register one hotkey per GPU). Target = what one honest 5090 delivers under this probe as measured by the
-# validator (RTT included). Calibrated on testnet 2026-08-25 (validator on a DO droplet, card in Romania): one miner alone
-# 183-186 tok/s; two hotkeys on the same card 104-115 tok/s each (sum 210-227) -> capacities ~1.0 vs ~0.6.
-# Probe outcomes affect capacity only, never the audit window (a slow host halves its pay; it does not flap out of READY).
-SERVING_PROBE_REQUESTS = 6
-# Fallback only: a release carries its own blessing-time `speed.decode_tps_target` (serving_loadout.json), measured on
-# that runtime by the conformance job as decode tok/s (TTFT excluded), so the bar moves with the runtime.
-SERVING_PROBE_TARGET_TPS = 180.0
+# Capacity = saturation burst. After settling the window, every READY miner is sent the blessed concurrency of
+# salted prompts at the same instant as every other miner (fleet-wide), verified afterwards by teacher forcing.
+# Verified tokens per second of decode time (batch wall-clock minus the first TTFT) over the release's blessed
+# aggregate at that concurrency (`speed.decode_tps_target`, measured on one honest 5090 by the conformance run) is
+# the capacity, capped at 1. Below SERVING_PROBE_FLOOR_RATIO x blessed the capacity is 0: sparkinfer queues rather
+# than 429s past its concurrency (2026-08-27: 16/24/32 concurrent all ~275 tok/s aggregate, wall 3.7 s -> 7 s), so
+# two hotkeys on one card each see ~half the blessed aggregate and fall under the floor. Probe outcomes affect
+# capacity only, never the window. The constants are fallbacks for a release without speed facts.
+SERVING_PROBE_REQUESTS = 16
+SERVING_PROBE_TARGET_TPS = 280.0
+SERVING_PROBE_FLOOR_RATIO = 0.6
 # A probe reading can only be too low (another validator's burst, a user spike, a blip), never too high: the miner
 # had to deliver those verified tokens. A reading under SERVING_PROBE_DIP_RATIO x the miner's median of its last
 # three is re-measured once after a random SERVING_PROBE_RETRY_DELAY_S and the better reading kept; a real slowdown

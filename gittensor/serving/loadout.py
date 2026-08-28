@@ -51,7 +51,8 @@ class ServingRelease:
     # Speed of one honest card on this exact runtime, measured at blessing time (scripts/check_serving_runtime.py
     # --speed-json on the conformance GPU) and written by the pin-bump PR. The validator prices capacity and latency
     # against these, so the "one card" bar tracks the runtime as it gets faster. None -> the constants' defaults.
-    decode_tps_target: Optional[float] = None  # probe-shaped aggregate decode tok/s that earns capacity 1.0
+    decode_tps_target: Optional[float] = None  # aggregate decode tok/s of one honest card at burst_concurrency
+    burst_concurrency: Optional[int] = None  # requests in the saturation burst (the runtime's blessed concurrency)
     ttft_full_ms: Optional[float] = None  # validator-observed TTFT up to which latency credit is 1.0
     ttft_zero_ms: Optional[float] = None  # ... and at which it reaches 0.0
 
@@ -71,6 +72,7 @@ class ServingRelease:
             reference_api_key=raw.get('reference_api_key'),
             request_timeout=float(raw.get('request_timeout', 60.0)),
             decode_tps_target=_optional_float(speed.get('decode_tps_target')),
+            burst_concurrency=int(speed['burst_concurrency']) if speed.get('burst_concurrency') else None,
             ttft_full_ms=_optional_float(speed.get('ttft_full_ms')),
             ttft_zero_ms=_optional_float(speed.get('ttft_zero_ms')),
         )

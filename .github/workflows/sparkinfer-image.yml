@@ -125,7 +125,7 @@ jobs:
                  decode_tps_target: $speed[0].decode_tps_target,
                  single_stream_decode_tps: $speed[0].single_stream_decode_tps,
                  probe_shaped_decode_tps: $speed[0].probe_shaped_decode_tps,
-                 probe_burst: $speed[0].probe_burst,
+                 burst_concurrency: $speed[0].burst_concurrency,
                  measured_on: ($pin + " on a rented RTX 5090, actions run " + $run)
                })' \
             gittensor/validator/weights/serving_loadout.json > /tmp/loadout.json
@@ -144,7 +144,7 @@ jobs:
             `entrius/sparkinfer:${{ env.REF }}` passed `scripts/check_serving_runtime.py` on a rented RTX 5090
             (run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} — report in the
             `serving-conformance-${{ env.REF }}` artifact). This bumps `runtime_pin` and writes the release's
-            blessing-time speed facts (`speed.decode_tps_target` = 0.9 x the probe-shaped decode tok/s of one honest
-            card on this runtime — what earns capacity 1.0). Update the sha named in the comments at
+            blessing-time speed facts (`speed.decode_tps_target` = aggregate decode tok/s of one honest card at the
+            blessed `burst_concurrency` — capacity 1.0; 0 under the floor ratio). Update the sha named in the comments at
             `gittensor/constants.py` and `gittensor/serving/audit.py` if the blessing rules changed.
           add-paths: gittensor/validator/weights/serving_loadout.json

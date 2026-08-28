@@ -1092,7 +1092,7 @@ def test_audit_round_skips_release_without_reference(monkeypatch):
 
 
 def test_capacity_probe_splits_a_shared_gpu(monkeypatch):
-    """Two hotkeys on one card each get about half the capacity a lone card gets; a lone card gets ~1."""
+    """Two hotkeys on one card each see about half the blessed aggregate and earn nothing; a lone card gets ~1."""
     from types import SimpleNamespace
 
     from gittensor.validator.serving import forward as fwd
@@ -1125,8 +1125,8 @@ def test_capacity_probe_splits_a_shared_gpu(monkeypatch):
     serving = [(1, 'hk1', lone), (2, 'hk2', a), (3, 'hk3', b)]
     scores = _round(state, dendrite, serving, good, monkeypatch, probes=4)
     assert scores['hk1'] == pytest.approx(1.0, abs=0.15)
-    assert scores['hk2'] == pytest.approx(0.5, abs=0.15) and scores['hk3'] == pytest.approx(0.5, abs=0.15)
-    assert scores['hk2'] + scores['hk3'] == pytest.approx(scores['hk1'], abs=0.2)
+    assert scores['hk2'] == 0.0 and scores['hk3'] == 0.0  # each sees ~half the blessed aggregate: under the floor
+    assert all(r.ok for r in state.recent(50) if r.kind == 'probe')  # the burst was answered correctly, just slowly
 
 
 def test_probe_misses_cost_capacity_not_the_window(monkeypatch):

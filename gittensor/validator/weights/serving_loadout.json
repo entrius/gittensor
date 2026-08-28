@@ -15,11 +15,11 @@
       "model_sha256": "ac0e2c1189e055faa36eff361580e79c5bd6f8e76bffb4ce547f167d53e31a61",
       "audit_bank": "serving_audit_bank.json",
       "speed": {
-        "decode_tps_target": 258.5,
+        "decode_tps_target": 280.0,
         "single_stream_decode_tps": 443.6,
-        "probe_shaped_decode_tps": 287.3,
-        "probe_burst": 6,
-        "measured_on": "gittensor-ai-lab/sparkinfer@7498736 on a rented RTX 5090 (Lium brave-fox-20), 2026-08-27 conformance + soak 4"
+        "probe_shaped_decode_tps": 280.0,
+        "measured_on": "gittensor-ai-lab/sparkinfer@7498736 on a rented RTX 5090 (Lium brave-fox-20), 2026-08-27: 16-concurrent x 64 tokens aggregate 279-282 tok/s (6: 255, 24: 268, 32: 275 \u2014 queues past 16, wall 3.7 s -> 7 s)",
+        "burst_concurrency": 16
       }
     }
   ]

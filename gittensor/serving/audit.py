@@ -40,8 +40,8 @@ publishes the miner while their mean clears ``SERVING_AUDIT_WINDOW_THRESHOLDS``
 — it absorbs transient misses; it is not there to average out model noise (that
 was the 1b8b962 design, 2026-08-22 notes).
 Missed or malformed responses enter the window as 0. The validator persists the
-window (``serving_audits.json`` next to ``state.npz``) so a restart is not a
-reset.
+window (``serving.db`` next to ``state.npz``, ``gittensor/serving/store.py``) so a
+restart is not a reset.
 
 There are no synthetic audit prompts: every request served through the gateway
 *is* the audit. ``verify_served`` teacher-forces the miner's completion under

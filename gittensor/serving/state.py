@@ -67,7 +67,7 @@ class ServedRequest:
 @dataclass
 class RequestRecord:
     ts: float
-    kind: str  # 'probe' | 'gateway'
+    kind: str  # 'verify' | 'gateway'
     uid: Optional[int]
     ok: bool
     latency_ms: Optional[float]  # None when the request produced no response
@@ -96,7 +96,6 @@ class ServingState:
     _served: Deque[ServedRequest] = field(default_factory=lambda: deque(maxlen=SERVING_REQUEST_LOG_SIZE))
     audits: AuditWindow = field(default_factory=AuditWindow)  # audit-loop thread only; persisted by the validator
     _history: Dict[str, Deque[float]] = field(default_factory=dict)  # hotkey -> last N round scores
-    probe_history: Dict[str, Deque[float]] = field(default_factory=dict)  # audit thread only: hotkey -> last tps
     dormant_rounds: Dict[str, int] = field(default_factory=dict)  # audit thread only: hotkey -> rounds w/o completion
     attest_status: Dict[str, dict] = field(default_factory=dict)  # audit thread only: hotkey -> last attest verdict
     uuid_owner: Dict[str, Tuple[str, int]] = field(default_factory=dict)  # GPU UUID -> (hotkey, round last seen)

@@ -4,11 +4,11 @@
 """Baseline prompts: what the validator sends serving miners when real traffic does not cover them.
 
 Served traffic is the only audit, so every miner needs a few verified requests per round whether or not a user
-showed up. These prompts only have to satisfy two things: the reference can answer them (any text can be greedy
-decoded) and a miner cannot pick them out of real traffic. The second is a matter of entropy and shape — random
-combinations, random lengths, random pasted code, prose as well as code — not of realism in any deeper sense; a
-small fixed bank and a fixed length were the tells the old synthetic audits had. Once real prompts exist, the
-validator with users can mix them in (``ServingState`` keeps them); validators without users run 100% baseline.
+showed up. These prompts only have to satisfy one thing: the reference can answer them (any text can be greedy
+decoded). They are template-shaped and a miner that wants to can recognise them; what stops it profiting from that
+is that a refusal or a wrong answer on any *other* request is judged the same way (a budget refusal is neutral only
+by the validator's own ledger; see ``forward.py``), so answering these and nothing else earns nothing extra. Mixing
+real user prompts into the baseline is not built.
 """
 
 import random

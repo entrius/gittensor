@@ -16,14 +16,15 @@ wipes the window and quarantines the hotkey. Miners whose window passes are
 published READY; serving axons that are not READY (and not quarantined) are
 published as *probation* so baseline traffic can give them a window.
 
-    round score = window passes (0/1) x mean speed credit over this round's served requests x attested (0/1)
+    round score = window passes (0/1) x mean speed credit over this round's served requests x attested cards
 
 Speed credit is measured on served traffic only (TTFT and decode rate against the
-blessing's curve at the load this validator imposed; ``scoring.py``). ``attested``
-is the miner's last hardware attestation verdict (``attest.py``: a random half of
-the READY miners is challenged every round; a miner with no verdict yet stays on
-probation). Round scores are settled over the trailing ``SERVING_SETTLEMENT_ROUNDS``
-rounds by ``ServingState``.
+blessing's curve at the load this validator imposed; ``scoring.py``); a round with
+nothing verified freezes at the last measured credit. ``attested cards`` is the
+miner's last hardware attestation verdict (``attest.py``: the least recently
+challenged half of the READY miners is challenged every round; a miner with no
+verdict yet stays on probation). Round scores are settled over the trailing
+``SERVING_SETTLEMENT_ROUNDS`` rounds by ``ServingState``.
 """
 
 import asyncio

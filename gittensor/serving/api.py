@@ -91,7 +91,8 @@ def build_app(
                     'id': release.release_id,
                     'object': 'model',
                     'owned_by': 'gittensor',
-                    # release identity (contract P2): what every READY miner behind this endpoint is verified against
+                    # release identity (contract P2), informational: READY miners are verified by greedy conformance
+                    # against a reference running this release and by the attestation digest, not by these strings
                     'model_id': release.model_id,
                     'runtime_pin': release.runtime_pin,
                     'model_sha256': release.model_sha256,

@@ -27,8 +27,9 @@ The release comes from the shared serving loadout (SERVING_RELEASE picks a
 release_id, default = primary; openai-compat = a local
 sparkinfer_server; echo = deterministic GPU-free mock for localnet via
 SERVING_LOADOUT_PATH=.../serving_loadout.echo.json).
-Miners run this blessed neuron unmodified — serving reward is availability
-and correctness based, so there is nothing to gain by editing it.
+Nothing in this neuron is trusted by a validator: every number it reports is
+either recomputed on the validator's reference (tokens, logprobs, attestation
+digests) or measured on the validator's own clock. Editing it earns nothing.
 """
 
 import asyncio

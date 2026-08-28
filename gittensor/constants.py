@@ -212,7 +212,7 @@ SERVING_VERIFY_WORKERS = 8  # concurrent /v1/score calls to the reference per ro
 # falls linearly to 0 at ZERO, so a miner proxying to a GPU in another region or queueing requests loses credit
 # in proportion. Generation length does not enter (mini-soak 2026-08-27: total latency of 64-512-token answers
 # scored a perfect miner at 0.24). Same-region proxying is NOT visible here; that is the one-GPU-many-hotkeys
-# case, caught by the concurrent capacity probe.
+# case, caught by the attestation overlap and the decode floor under load.
 SERVING_LATENCY_FULL_CREDIT_MS = 500.0
 SERVING_LATENCY_ZERO_CREDIT_MS = 1_500.0
 # Decode speed on served traffic. Each served request with at least SERVING_DECODE_MIN_TOKENS completion tokens

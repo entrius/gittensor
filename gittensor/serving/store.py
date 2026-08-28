@@ -22,7 +22,6 @@ CREATE TABLE IF NOT EXISTS audit_values (hotkey TEXT, release_id TEXT, seq INTEG
     PRIMARY KEY (hotkey, release_id, seq));
 CREATE TABLE IF NOT EXISTS quarantine (hotkey TEXT, release_id TEXT, until REAL, strikes INTEGER DEFAULT 0,
     PRIMARY KEY (hotkey, release_id));
-CREATE TABLE IF NOT EXISTS probe_history (hotkey TEXT, seq INTEGER, tps REAL, PRIMARY KEY (hotkey, seq));
 CREATE TABLE IF NOT EXISTS round_history (hotkey TEXT, seq INTEGER, score REAL, PRIMARY KEY (hotkey, seq));
 CREATE TABLE IF NOT EXISTS dormant (hotkey TEXT PRIMARY KEY, rounds INTEGER);
 CREATE TABLE IF NOT EXISTS attest (hotkey TEXT PRIMARY KEY, status TEXT);
@@ -62,7 +61,6 @@ class ServingStore:
             for table in (
                 'audit_values',
                 'quarantine',
-                'probe_history',
                 'round_history',
                 'dormant',
                 'attest',
@@ -89,10 +87,6 @@ class ServingStore:
                 [(hk, rid, until.get((hk, rid), 0.0), strikes.get((hk, rid), 0)) for hk, rid in sorted(keys)],
             )
             db.executemany(
-                'INSERT INTO probe_history VALUES (?, ?, ?)',
-                [(hk, i, x) for hk, xs in state.probe_history.items() for i, x in enumerate(xs)],
-            )
-            db.executemany(
                 'INSERT INTO round_history VALUES (?, ?, ?)',
                 [(hk, i, x) for hk, xs in state._history.items() for i, x in enumerate(xs)],
             )
@@ -115,8 +109,6 @@ class ServingStore:
                         state.audits._quarantine[(hk, rid)] = float(until)
                     if int(strikes or 0) > 0:
                         state.audits._strikes[(hk, rid)] = int(strikes)
-                for hk, x in db.execute('SELECT hotkey, tps FROM probe_history ORDER BY hotkey, seq'):
-                    state.probe_history.setdefault(hk, deque(maxlen=3)).append(float(x))
                 for hk, x in db.execute('SELECT hotkey, score FROM round_history ORDER BY hotkey, seq'):
                     state._history.setdefault(hk, deque(maxlen=state.settlement_rounds)).append(float(x))
                 for hk, rounds in db.execute('SELECT hotkey, rounds FROM dormant'):

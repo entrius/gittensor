@@ -3,7 +3,6 @@
 import asyncio
 import json
 import time
-from collections import deque
 from types import SimpleNamespace
 from typing import Dict
 
@@ -449,7 +448,6 @@ def test_serving_store_round_trips_audit_thread_state(tmp_path):
         state.audits.record('hk', 'm', x)
     state.audits.record('hk2', 'm', 1.0)
     state.audits.strike('hk3', 'm', now=1000.0)
-    state.probe_history['hk'] = deque([180.0, 178.0], maxlen=3)
     state.publish_round([], {'hk': 0.9})
     state.publish_round([], {'hk': 1.0})
     state.dormant_rounds['dead'] = 2
@@ -461,7 +459,6 @@ def test_serving_store_round_trips_audit_thread_state(tmp_path):
     assert loaded.audits.quarantined_until('hk3', 'm', now=1500.0) == state.audits.quarantined_until(
         'hk3', 'm', now=1500.0
     )
-    assert list(loaded.probe_history['hk']) == [180.0, 178.0]
     assert loaded.settled_scores() == state.settled_scores()
     assert loaded.dormant_rounds == {'dead': 2}
 

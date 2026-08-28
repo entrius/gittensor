@@ -33,7 +33,7 @@ class ReadyMiner:
     hotkey: str
     axon: bt.AxonInfo
     score: float
-    model_id: str = ''  # release this miner passed audits for
+    release_id: str = ''  # release this miner passed audits for
 
 
 @dataclass
@@ -43,7 +43,7 @@ class ServedRequest:
     ts: float
     uid: int
     hotkey: str
-    model_id: str
+    model_id: str  # the model the miner reported serving
     messages: List[Dict[str, str]]
     ok: bool
     latency_ms: Optional[float]
@@ -56,6 +56,11 @@ class ServedRequest:
     source: str = 'gateway'  # 'gateway' | 'baseline'
     ttft_ms: Optional[float] = None  # validator-observed time to first streamed event
     inflight: int = 1  # this validator's requests in flight to the miner when this one was dispatched (incl. itself)
+    release_id: str = ''  # the release this request was routed for; audited against that release's reference
+
+    def __post_init__(self) -> None:
+        if not self.release_id:
+            self.release_id = self.model_id
 
 
 @dataclass
@@ -158,8 +163,8 @@ class ServingState:
         with self._lock:
             return list(self._ready.values()) if self._fresh() else []
 
-    def acquire(self, model_id: Optional[str] = None, probation: bool = False) -> Optional[ReadyMiner]:
-        """Pick the READY miner (for ``model_id`` if given) with the fewest in-flight requests (ties -> higher score).
+    def acquire(self, release_id: Optional[str] = None, probation: bool = False) -> Optional[ReadyMiner]:
+        """Pick the READY miner (for ``release_id`` if given) with the fewest in-flight requests (ties -> higher score).
 
         With ``probation`` (baseline traffic) an idle probation miner is preferred, at most one request in flight
         each, so unverified miners get exactly the traffic they need to earn a window and no more.
@@ -172,13 +177,13 @@ class ServingState:
                 idle = [
                     u
                     for u, m in self._probation.items()
-                    if (model_id is None or m.model_id == model_id) and self._inflight.get(u, 0) == 0
+                    if (release_id is None or m.release_id == release_id) and self._inflight.get(u, 0) == 0
                 ]
                 if idle:
                     uid = min(idle)
                     self._inflight[uid] = 1
                     return self._probation[uid]
-            candidates = [u for u, m in self._ready.items() if model_id is None or m.model_id == model_id]
+            candidates = [u for u, m in self._ready.items() if release_id is None or m.release_id == release_id]
             if not candidates:
                 return None
             uid = min(candidates, key=lambda u: (self._inflight.get(u, 0), -self._ready[u].score))

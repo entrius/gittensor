@@ -45,13 +45,14 @@ class InferenceSynapse(bt.StreamingSynapse):
     the validator checks against its reference (``gittensor/serving/audit.py``).
     """
 
-    required_hash_fields: ClassVar[tuple[str, ...]] = ('messages', 'model_id', 'max_tokens', 'logprobs')
+    required_hash_fields: ClassVar[tuple[str, ...]] = ('messages', 'model_id', 'max_tokens', 'logprobs', 'release_id')
 
     # Request
     messages: List[Dict[str, str]]
     model_id: str
     max_tokens: int = 64
     logprobs: bool = False
+    release_id: str = ''  # loadout release the caller routed for; a miner serving another release refuses
 
     # Response
     completion: Optional[str] = None

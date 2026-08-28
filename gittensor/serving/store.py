@@ -18,9 +18,10 @@ from typing import Optional
 from gittensor.serving.state import ServingState
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS audit_values (hotkey TEXT, model_id TEXT, seq INTEGER, value REAL,
-    PRIMARY KEY (hotkey, model_id, seq));
-CREATE TABLE IF NOT EXISTS quarantine (hotkey TEXT, model_id TEXT, until REAL, PRIMARY KEY (hotkey, model_id));
+CREATE TABLE IF NOT EXISTS audit_values (hotkey TEXT, release_id TEXT, seq INTEGER, value REAL,
+    PRIMARY KEY (hotkey, release_id, seq));
+CREATE TABLE IF NOT EXISTS quarantine (hotkey TEXT, release_id TEXT, until REAL, strikes INTEGER DEFAULT 0,
+    PRIMARY KEY (hotkey, release_id));
 CREATE TABLE IF NOT EXISTS probe_history (hotkey TEXT, seq INTEGER, tps REAL, PRIMARY KEY (hotkey, seq));
 CREATE TABLE IF NOT EXISTS round_history (hotkey TEXT, seq INTEGER, score REAL, PRIMARY KEY (hotkey, seq));
 CREATE TABLE IF NOT EXISTS dormant (hotkey TEXT PRIMARY KEY, rounds INTEGER);
@@ -33,7 +34,18 @@ class ServingStore:
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as db:
+            self._migrate(db)
             db.executescript(SCHEMA)
+
+    @staticmethod
+    def _migrate(db: sqlite3.Connection) -> None:
+        """Pre-release_id stores keyed the window by model_id; the values carry over under the same key."""
+        for table in ('audit_values', 'quarantine'):
+            columns = [row[1] for row in db.execute(f'PRAGMA table_info({table})')]
+            if 'model_id' in columns:
+                db.execute(f'ALTER TABLE {table} RENAME COLUMN model_id TO release_id')
+            if table == 'quarantine' and columns and 'strikes' not in columns:
+                db.execute('ALTER TABLE quarantine ADD COLUMN strikes INTEGER DEFAULT 0')
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=10.0)
@@ -48,9 +60,15 @@ class ServingStore:
                 db.execute(f'DELETE FROM {table}')
             db.executemany(
                 'INSERT INTO audit_values VALUES (?, ?, ?, ?)',
-                [(hk, mid, i, x) for hk, mid, xs in audits['values'] for i, x in enumerate(xs)],
+                [(hk, rid, i, x) for hk, rid, xs in audits['values'] for i, x in enumerate(xs)],
             )
-            db.executemany('INSERT INTO quarantine VALUES (?, ?, ?)', audits['quarantine'])
+            strikes = {(hk, rid): n for hk, rid, n in audits['strikes']}
+            keys = {(hk, rid) for hk, rid, _ in audits['quarantine']} | set(strikes)
+            until = {(hk, rid): t for hk, rid, t in audits['quarantine']}
+            db.executemany(
+                'INSERT INTO quarantine VALUES (?, ?, ?, ?)',
+                [(hk, rid, until.get((hk, rid), 0.0), strikes.get((hk, rid), 0)) for hk, rid in sorted(keys)],
+            )
             db.executemany(
                 'INSERT INTO probe_history VALUES (?, ?, ?)',
                 [(hk, i, x) for hk, xs in state.probe_history.items() for i, x in enumerate(xs)],
@@ -68,11 +86,16 @@ class ServingStore:
         """Restore a snapshot into ``state``; an empty or unreadable store leaves it untouched."""
         try:
             with self._connect() as db:
-                values = db.execute('SELECT hotkey, model_id, value FROM audit_values ORDER BY hotkey, model_id, seq')
-                for hk, mid, x in values:
-                    state.audits.record(hk, mid, x)
-                for hk, mid, until in db.execute('SELECT hotkey, model_id, until FROM quarantine'):
-                    state.audits._quarantine[(hk, mid)] = float(until)
+                values = db.execute(
+                    'SELECT hotkey, release_id, value FROM audit_values ORDER BY hotkey, release_id, seq'
+                )
+                for hk, rid, x in values:
+                    state.audits.record(hk, rid, x)
+                for hk, rid, until, strikes in db.execute('SELECT hotkey, release_id, until, strikes FROM quarantine'):
+                    if float(until) > 0.0:
+                        state.audits._quarantine[(hk, rid)] = float(until)
+                    if int(strikes or 0) > 0:
+                        state.audits._strikes[(hk, rid)] = int(strikes)
                 for hk, x in db.execute('SELECT hotkey, tps FROM probe_history ORDER BY hotkey, seq'):
                     state.probe_history.setdefault(hk, deque(maxlen=3)).append(float(x))
                 for hk, x in db.execute('SELECT hotkey, score FROM round_history ORDER BY hotkey, seq'):

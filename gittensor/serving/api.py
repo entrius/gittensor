@@ -33,7 +33,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from gittensor.constants import SERVING_MAX_TOKENS
-from gittensor.serving.loadout import ServingRelease
+from gittensor.serving.loadout import ServingLoadout, ServingRelease
 from gittensor.serving.state import ReadyMiner, RequestRecord, ServedRequest, ServingState, finite_or_none
 from gittensor.serving.stream import SSE_DONE, Event, consume_stream, sse_event
 from gittensor.synapses import InferenceSynapse
@@ -50,13 +50,14 @@ def parse_api_keys(raw: Optional[str]) -> Set[str]:
 
 def build_app(
     state: ServingState,
-    release: ServingRelease,
+    loadout: ServingLoadout,
     api_keys: Set[str],
     dendrite_factory,
     request_timeout: float,
     baseline_keys: Optional[Set[str]] = None,
 ) -> FastAPI:
     baseline = set(baseline_keys or ())
+    primary = loadout.primary
     app = FastAPI(title='Gittensor Serving API', version='0.1.0-beta')
     dendrite_holder: Dict[str, bt.Dendrite] = {}
 
@@ -87,20 +88,24 @@ def build_app(
             'object': 'list',
             'data': [
                 {
-                    'id': release.model_id,
+                    'id': release.release_id,
                     'object': 'model',
                     'owned_by': 'gittensor',
                     # release identity (contract P2): what every READY miner behind this endpoint is verified against
+                    'model_id': release.model_id,
                     'runtime_pin': release.runtime_pin,
                     'model_sha256': release.model_sha256,
                 }
+                for release in loadout.releases
             ],
         }
 
     @app.get('/v1/serving/status')
     async def status(_: str = Depends(require_key)):
         snap = state.snapshot()
-        snap['model_id'] = release.model_id
+        snap['model_id'] = primary.model_id
+        snap['release_id'] = primary.release_id
+        snap['releases'] = [r.release_id for r in loadout.releases]
         snap['recent'] = [r.__dict__ for r in state.recent(50)]
         return snap
 
@@ -119,6 +124,11 @@ def build_app(
             )
         if body.get('n', 1) != 1:
             raise HTTPException(status_code=400, detail='n must be 1')
+        wanted = body.get('model')
+        try:  # `model` = a release_id (or a model_id: its first release); absent -> the primary release
+            release = loadout.get(str(wanted)) if wanted else primary
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f'model {wanted!r} is not served; see /v1/models')
         try:
             max_tokens = int(body.get('max_tokens') or body.get('max_completion_tokens') or release.max_tokens)
         except (TypeError, ValueError):
@@ -127,7 +137,7 @@ def build_app(
         want_logprobs = bool(body.get('logprobs', False))
         want_stream = bool(body.get('stream', False))
 
-        miner = state.acquire(release.model_id, probation=key in baseline)
+        miner = state.acquire(release.release_id, probation=key in baseline)
         if miner is None:
             raise HTTPException(status_code=429, detail='no READY serving capacity')
         inflight = state.inflight().get(miner.uid, 1)
@@ -146,6 +156,7 @@ def build_app(
                     uid=miner.uid,
                     hotkey=miner.hotkey,
                     model_id=release.model_id,
+                    release_id=release.release_id,
                     messages=messages,
                     ok=ok and (result.served_model_id == release.model_id if result else False),
                     latency_ms=latency_ms,
@@ -265,7 +276,13 @@ async def _dispatch(
     on_event: Optional[Callable[[Event], Awaitable[None]]] = None,
 ) -> InferenceSynapse:
     # logprobs always requested so organic traffic is indistinguishable from audits on the wire.
-    synapse = InferenceSynapse(messages=messages, model_id=release.model_id, max_tokens=max_tokens, logprobs=True)
+    synapse = InferenceSynapse(
+        messages=messages,
+        model_id=release.model_id,
+        release_id=release.release_id,
+        max_tokens=max_tokens,
+        logprobs=True,
+    )
     return await consume_stream(dendrite, miner.axon, synapse, timeout, on_event)
 
 
@@ -295,7 +312,7 @@ class ServingApiThread:
 
 def start_serving_api(
     state: ServingState,
-    release: ServingRelease,
+    loadout: ServingLoadout,
     wallet: bt.Wallet,
     api_keys: Set[str],
     host: str,
@@ -307,7 +324,7 @@ def start_serving_api(
         raise ValueError('SERVING_API_KEYS is empty; refusing to start without API keys')
     app = build_app(
         state,
-        release,
+        loadout,
         api_keys | set(baseline_keys or ()),
         lambda: bt.Dendrite(wallet=wallet),
         request_timeout,

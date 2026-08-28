@@ -24,7 +24,7 @@ validator challenges, get scored. Run it like the validator entrypoint:
         --subtensor.network local --axon.port 8091
 
 The release comes from the shared serving loadout (SERVING_RELEASE picks a
-model_id, default = primary; openai-compat = a local
+release_id, default = primary; openai-compat = a local
 sparkinfer_server; echo = deterministic GPU-free mock for localnet via
 SERVING_LOADOUT_PATH=.../serving_loadout.echo.json).
 Miners run this blessed neuron unmodified — serving reward is availability
@@ -103,7 +103,9 @@ class ServingMiner(BaseNeuron):
     def run(self):
         self.subtensor.serve_axon(netuid=self.config.netuid, axon=self.axon)
         self.axon.start()
-        bt.logging.info(f'ServingMiner serving | uid {self.uid} | model {self.release.model_id}')
+        bt.logging.info(
+            f'ServingMiner serving | uid {self.uid} | release {self.release.release_id} | model {self.release.model_id}'
+        )
 
         try:
             while True:
@@ -235,6 +237,8 @@ async def blacklist_inference(miner: ServingMiner, synapse: InferenceSynapse) ->
     hotkey = synapse.dendrite.hotkey if synapse.dendrite else None
     if not hotkey or hotkey not in miner.metagraph.hotkeys:
         return True, 'Unrecognized hotkey'
+    if synapse.release_id and synapse.release_id != miner.release.release_id:
+        return True, f'serving release {miner.release.release_id}, not {synapse.release_id}'
     try:
         uid = miner.metagraph.hotkeys.index(hotkey)
         stake = float(miner.metagraph.S[uid])

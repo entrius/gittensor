@@ -132,6 +132,7 @@ class WindowVerdict:
     mean: float
     threshold: float
     quarantined_until: float = 0.0
+    strikes: int = 0  # lifetime wrong answers on this (hotkey, release)
 
     def as_dict(self) -> dict:
         return {
@@ -140,6 +141,7 @@ class WindowVerdict:
             'mean': round(self.mean, 4),
             'threshold': round(self.threshold, 4),
             'quarantined_until': round(self.quarantined_until, 1),
+            'strikes': self.strikes,
         }
 
 
@@ -154,51 +156,60 @@ class AuditWindow:
     thresholds: Sequence[Tuple[int, float]] = SERVING_AUDIT_WINDOW_THRESHOLDS
     quarantine_s: float = SERVING_QUARANTINE_S
     _values: Dict[Tuple[str, str], Deque[float]] = field(default_factory=dict)
-    _quarantine: Dict[Tuple[str, str], float] = field(default_factory=dict)  # (hotkey, model) -> until ts
+    _quarantine: Dict[Tuple[str, str], float] = field(default_factory=dict)  # (hotkey, release) -> until ts
+    _strikes: Dict[Tuple[str, str], int] = field(default_factory=dict)  # (hotkey, release) -> wrong answers, ever
 
-    def record(self, hotkey: str, model_id: str, value: float) -> None:
-        key = (hotkey, model_id)
+    def record(self, hotkey: str, release_id: str, value: float) -> None:
+        key = (hotkey, release_id)
         if key not in self._values:
             self._values[key] = deque(maxlen=self.size)
         self._values[key].append(max(0.0, min(1.0, float(value))))
 
-    def strike(self, hotkey: str, model_id: str, now: Optional[float] = None) -> float:
+    def strike(self, hotkey: str, release_id: str, now: Optional[float] = None) -> float:
         """A wrong answer: wipe the window and quarantine the (hotkey, release) until the returned timestamp."""
-        key = (hotkey, model_id)
+        key = (hotkey, release_id)
         self._values.pop(key, None)
+        self._strikes[key] = self._strikes.get(key, 0) + 1
         until = (now if now is not None else time.time()) + self.quarantine_s
         self._quarantine[key] = until
         return until
 
-    def quarantined_until(self, hotkey: str, model_id: str, now: Optional[float] = None) -> float:
-        until = self._quarantine.get((hotkey, model_id), 0.0)
+    def strikes(self, hotkey: str, release_id: str) -> int:
+        return self._strikes.get((hotkey, release_id), 0)
+
+    def quarantined_until(self, hotkey: str, release_id: str, now: Optional[float] = None) -> float:
+        until = self._quarantine.get((hotkey, release_id), 0.0)
         return until if until > (now if now is not None else time.time()) else 0.0
 
     def to_dict(self) -> dict:
         return {
             'size': self.size,
-            'values': [[hk, mid, list(xs)] for (hk, mid), xs in self._values.items()],
-            'quarantine': [[hk, mid, until] for (hk, mid), until in self._quarantine.items()],
+            'values': [[hk, rid, list(xs)] for (hk, rid), xs in self._values.items()],
+            'quarantine': [[hk, rid, until] for (hk, rid), until in self._quarantine.items()],
+            'strikes': [[hk, rid, n] for (hk, rid), n in self._strikes.items()],
         }
 
     @classmethod
     def from_dict(cls, raw: dict, **kwargs) -> 'AuditWindow':
         window = cls(**kwargs)
-        for hk, mid, xs in raw.get('values', []):
+        for hk, rid, xs in raw.get('values', []):
             for x in xs[-window.size :]:
-                window.record(str(hk), str(mid), float(x))
-        for hk, mid, until in raw.get('quarantine', []):
-            window._quarantine[(str(hk), str(mid))] = float(until)
+                window.record(str(hk), str(rid), float(x))
+        for hk, rid, until in raw.get('quarantine', []):
+            window._quarantine[(str(hk), str(rid))] = float(until)
+        for hk, rid, n in raw.get('strikes', []):
+            window._strikes[(str(hk), str(rid))] = int(n)
         return window
 
-    def verdict(self, hotkey: str, model_id: str, now: Optional[float] = None) -> WindowVerdict:
-        until = self.quarantined_until(hotkey, model_id, now)
-        xs = self._values.get((hotkey, model_id))
+    def verdict(self, hotkey: str, release_id: str, now: Optional[float] = None) -> WindowVerdict:
+        until = self.quarantined_until(hotkey, release_id, now)
+        strikes = self.strikes(hotkey, release_id)
+        xs = self._values.get((hotkey, release_id))
         if not xs:
-            return WindowVerdict(False, 0, 0.0, float('inf'), until)
+            return WindowVerdict(False, 0, 0.0, float('inf'), until, strikes)
         mean = sum(xs) / len(xs)
         threshold = window_threshold(len(xs), self.thresholds)
-        return WindowVerdict(mean >= threshold and until == 0.0, len(xs), mean, threshold, until)
+        return WindowVerdict(mean >= threshold and until == 0.0, len(xs), mean, threshold, until, strikes)
 
 
 class Reference(Protocol):
@@ -383,6 +394,7 @@ def verify_served(
     token_ids: Optional[Sequence[int]] = None,
     end_of_turn: Sequence[str] = ('<|im_end|>', '<|endoftext|>', '</s>'),
     token_bytes: Optional[Sequence[Sequence[int]]] = None,
+    release: Optional[ServingRelease] = None,
 ) -> AuditVerdict:
     """Verify a served (greedy) completion by teacher forcing it under the reference.
 
@@ -390,8 +402,8 @@ def verify_served(
     must match it and the miner's logprobs must match the reference's logprob of that same token. When the miner
     reported ``token_ids`` the reference forces exactly that sequence; otherwise it re-tokenizes the text, and a
     text that re-tokenizes to a different length (a greedy decode is not always the canonical tokenization of
-    its own output) is not comparable position by position and counts as a soft miss. The bands failing on
-    aligned lengths is a wrong answer (``hard``). A reference that echoes the forced tokens' bytes lets the ids
+    its own output) is not comparable position by position and counts as a soft miss. The bands (the release's,
+    else the constants) failing on aligned lengths is a wrong answer (``hard``). A reference that echoes the forced tokens' bytes lets the ids
     be bound to the text the user actually received.
     """
     if completion is None or not tokens or token_logprobs is None or len(tokens) != len(token_logprobs):
@@ -422,4 +434,13 @@ def verify_served(
             if '\ufffd' not in text and '\ufffd' not in completion and text != completion:
                 return AuditVerdict(False, 0.0, float('inf'), 'token ids do not spell the completion')
     case = AuditCase(messages=list(messages), max_tokens=len(mine), reference_tokens=argmax, reference_logprobs=ref_lp)
-    return verify_response(case, mine, mine_lp)
+    if release is None:
+        return verify_response(case, mine, mine_lp)
+    return verify_response(
+        case,
+        mine,
+        mine_lp,
+        release.min_prefix_agreement,
+        release.max_mean_abs_logprob_diff,
+        release.max_abs_logprob_diff,
+    )

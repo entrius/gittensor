@@ -36,7 +36,7 @@ import os
 import time
 from collections import OrderedDict
 from functools import partial
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Set, Tuple
 
 import bittensor as bt
 import requests
@@ -91,6 +91,7 @@ class ServingMiner(BaseNeuron):
         )
         self.seen_nonces: 'OrderedDict[str, None]' = OrderedDict()
         self.audit_budget: Dict[str, Tuple[int, int]] = {}  # validator hotkey -> (tempo, completion tokens used)
+        self.attest_inflight: Set[str] = set()  # validator hotkeys with a challenge running on the sidecar now
         bt.logging.info(f'ServingMiner axon: {self.axon}')
 
     async def forward(self, synapse: bt.Synapse) -> bt.Synapse:
@@ -157,21 +158,27 @@ async def handle_attest(miner: ServingMiner, synapse: AttestSynapse) -> AttestSy
     if not url:
         synapse.error = 'no attest_url on the release'
         return synapse
+    caller = synapse.dendrite.hotkey if synapse.dendrite and synapse.dendrite.hotkey else ''
+    key = miner.release.attest_api_key
 
     def call() -> dict:
         r = requests.post(
             f'{url.rstrip("/")}/v1/attest',
             json={'seed': int(synapse.seed), 'iters': int(synapse.iters), 'fill': bool(synapse.fill)},
+            headers={'Authorization': f'Bearer {key}'} if key else {},
             timeout=max(5.0, float(synapse.timeout or 45.0) - 2.0),
         )
         r.raise_for_status()
         return r.json()
 
+    miner.attest_inflight.add(caller)
     try:
         payload = await asyncio.get_running_loop().run_in_executor(None, call)
     except Exception as e:
         synapse.error = f'attest sidecar: {e!r}'[:300]
         return synapse
+    finally:
+        miner.attest_inflight.discard(caller)
     devices = payload.get('devices') or [payload]
     synapse.devices = [dict(d) for d in devices]
     synapse.wall_ms = float(devices[0].get('wall_ms') or 0.0) if devices else None
@@ -259,9 +266,28 @@ async def blacklist_inference(miner: ServingMiner, synapse: InferenceSynapse) ->
 
 
 # bt.Axon.attach asserts each hook's signature against the forward's synapse type, so the attestation hooks are
-# typed AttestSynapse and delegate to the inference gate. An attestation charges no tokens to a validator's budget.
+# typed AttestSynapse and delegate to the inference gate. An attestation charges no tokens to a validator's budget,
+# so it is open only to hotkeys that are actually validating (validator_trust > 0) or clear the stake floor, and to
+# one challenge at a time per caller: the sidecar fills the card's free VRAM and serialises challenges, so an open
+# door here is a free way to stall a competitor's runtime and queue every real validator's challenge behind it.
 async def blacklist_attest(miner: ServingMiner, synapse: AttestSynapse) -> Tuple[bool, str]:
-    return await blacklist_inference(miner, _as_budget_free(synapse))
+    refused, reason = await blacklist_inference(miner, _as_budget_free(synapse))
+    if refused:
+        return True, reason
+    hotkey = synapse.dendrite.hotkey if synapse.dendrite and synapse.dendrite.hotkey else ''
+    if reason != 'Staked caller' and not is_validating(miner, hotkey):
+        return True, 'Attestation is for validating hotkeys'
+    if hotkey in miner.attest_inflight:
+        return True, 'Attestation already in flight for this caller'
+    return False, reason
+
+
+def is_validating(miner: ServingMiner, hotkey: str) -> bool:
+    vtrust = getattr(miner.metagraph, 'validator_trust', None)
+    try:
+        return vtrust is not None and float(vtrust[miner.metagraph.hotkeys.index(hotkey)]) > 0.0
+    except (ValueError, IndexError, TypeError):
+        return False
 
 
 async def priority_attest(miner: ServingMiner, synapse: AttestSynapse) -> float:

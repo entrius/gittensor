@@ -1615,6 +1615,61 @@ def test_miner_axon_hooks_match_their_forward_synapse_types():
             assert param.name == 'synapse' and getattr(param.annotation, '__name__', param.annotation) == syn
 
 
+def test_attest_is_for_validating_hotkeys_one_challenge_at_a_time(monkeypatch):
+    """A permit alone opened a free, unlimited, VRAM-filling call on every miner; now it takes validator_trust > 0
+    (or the stake floor), and one challenge per caller at a time. The miner sends its sidecar's bearer."""
+    import asyncio
+    from types import SimpleNamespace
+
+    import requests
+
+    from gittensor.synapses import AttestSynapse
+    from neurons.serving_miner import blacklist_attest, handle_attest
+
+    monkeypatch.setenv('SERVING_MIN_CALLER_STAKE', '100')
+    miner = SimpleNamespace(
+        metagraph=SimpleNamespace(
+            hotkeys=['vali', 'staked', 'permitted'],
+            S=[5.0, 100.0, 50.0],
+            validator_permit=[True, True, True],
+            validator_trust=[0.9, 0.0, 0.0],
+            block=720,
+        ),
+        audit_budget={},
+        attest_inflight=set(),
+        release=SimpleNamespace(attest_url='http://sidecar:8081', attest_api_key='sekrit'),
+    )
+
+    def gate(hotkey):
+        syn = AttestSynapse(seed=1)
+        assert syn.dendrite is not None
+        syn.dendrite.hotkey = hotkey
+        return asyncio.run(blacklist_attest(miner, syn))  # type: ignore[arg-type]
+
+    assert gate('vali') == (False, 'Permitted validator')
+    assert gate('staked') == (False, 'Staked caller')
+    assert gate('permitted') == (True, 'Attestation is for validating hotkeys')
+    assert gate('nobody') == (True, 'Unrecognized hotkey')
+    assert all(used == 0 for _, used in miner.audit_budget.values())  # nothing charged
+    miner.attest_inflight.add('vali')
+    assert gate('vali') == (True, 'Attestation already in flight for this caller')
+    miner.attest_inflight.clear()
+
+    seen = {}
+
+    def post(url, json, headers, timeout):
+        seen.update(url=url, headers=headers, inflight=set(miner.attest_inflight))
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {'devices': [{'uuid': 'g'}], 'queued_ms': 1})
+
+    monkeypatch.setattr(requests, 'post', post)
+    syn = AttestSynapse(seed=1)
+    assert syn.dendrite is not None
+    syn.dendrite.hotkey = 'vali'
+    out = asyncio.run(handle_attest(miner, syn))  # type: ignore[arg-type]
+    assert out.devices == [{'uuid': 'g'}] and seen['headers'] == {'Authorization': 'Bearer sekrit'}
+    assert seen['inflight'] == {'vali'} and miner.attest_inflight == set()
+
+
 def _card(uuid: str, digest: str = 'd', wall_ms: float = 1500.0, filled: int = 8_000_000_000, free_before=None):
     dev = {'uuid': uuid, 'digest': digest, 'wall_ms': wall_ms, 'filled_bytes': filled, 'vram_total': 34e9}
     if free_before is not None:

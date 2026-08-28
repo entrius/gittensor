@@ -65,6 +65,7 @@ class ServingRelease:
     # beside the reference (default: reference_url host, port 8081).
     attest_image: Optional[str] = None  # the attest container every box runs (entrius/gt-attest:<tag>)
     attest_url: Optional[str] = None
+    attest_api_key: Optional[str] = None  # miner side: bearer for its own sidecar (ATTEST_API_KEY there)
     attest_reference_url: Optional[str] = None
     attest_reference_api_key: Optional[str] = None  # bearer for a keyed reference sidecar (ATTEST_API_KEY there)
     attest_iters: Optional[int] = None
@@ -121,6 +122,7 @@ class ServingRelease:
             decode_per_request={int(k): float(v) for k, v in (speed.get('decode_per_request') or {}).items()} or None,
             attest_image=attest.get('image'),
             attest_url=attest.get('url') or _sidecar_url(raw.get('base_url')),
+            attest_api_key=attest.get('api_key') or os.getenv('SERVING_ATTEST_API_KEY') or None,
             attest_reference_url=attest.get('reference_url') or _sidecar_url(raw.get('reference_url')),
             attest_reference_api_key=attest.get('reference_api_key'),
             attest_iters=int(attest['iters']) if attest.get('iters') else None,

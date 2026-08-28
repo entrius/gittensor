@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
 import aiohttp
 import bittensor as bt
 
+from gittensor.classes import RequestSpeed
 from gittensor.constants import (
     SERVING_BASELINE_PER_ROUND,
     SERVING_DORMANT_AFTER_ROUNDS,
@@ -53,7 +54,7 @@ from gittensor.serving.stream import consume_stream
 from gittensor.synapses import InferenceSynapse
 from gittensor.validator.serving.attest import attest_round
 from gittensor.validator.serving.persist import ServingRoundStorage
-from gittensor.validator.serving.scoring import request_speed_credit
+from gittensor.validator.serving.scoring import request_speed
 from gittensor.validator.utils.config import STORE_DB_RESULTS
 
 if TYPE_CHECKING:
@@ -67,8 +68,8 @@ def verify_served_round(
     served: Sequence[ServedRequest],
     summary: Optional[Dict[str, int]] = None,
     last_miss: Optional[Dict[str, str]] = None,
-) -> Dict[str, List[float]]:
-    """Verify every served request for ``release`` into the window; return latency credits per hotkey.
+) -> Dict[str, List[RequestSpeed]]:
+    """Verify every served request for ``release`` into the window; return per-request speed per hotkey.
 
     Reference calls run on a small thread pool; window updates stay on this thread. ``last_miss`` (hotkey ->
     reason) is filled with the most recent miss or strike reason so the round report can show a miner why.
@@ -108,7 +109,7 @@ def verify_served_round(
         summary[key] = summary.get(key, 0) + 1
 
     ready_uids = {m.uid for m in state.ready_miners()}
-    credits: Dict[str, List[float]] = {}
+    speeds: Dict[str, List[RequestSpeed]] = {}
     for req, verdict in zip(mine, verdicts):
         bump('served')
         bump(req.source)
@@ -134,7 +135,9 @@ def verify_served_round(
             bump('pass' if verdict.passed else 'miss')
         # Speed is priced on served traffic: time to first token and decode rate against the blessing's curve at
         # the load this validator had in flight to the miner (gittensor/validator/serving/scoring.py).
-        credits.setdefault(req.hotkey, []).append(request_speed_credit(req, release) if verdict.passed else 0.0)
+        speeds.setdefault(req.hotkey, []).append(
+            request_speed(req, release) if verdict.passed else RequestSpeed(credit=0.0)
+        )
         state.record(
             RequestRecord(
                 ts=time.time(),
@@ -146,7 +149,11 @@ def verify_served_round(
                 detail=verdict.reason,
             )
         )
-    return credits
+    return speeds
+
+
+def _mean(xs: List[float]) -> Optional[float]:
+    return round(sum(xs) / len(xs), 1) if xs else None
 
 
 async def baseline_round(
@@ -257,26 +264,27 @@ async def audit_round(
                 'set SERVING_REFERENCE_URL to a conformant runtime'
             )
             continue
-        credits = verify_served_round(state, reference, release, served, summary, last_miss)
+        speeds = verify_served_round(state, reference, release, served, summary, last_miss)
         passing: List[Tuple[int, str, bt.AxonInfo, float]] = []
         for uid, hotkey, axon in active:
             window = state.audits.verdict(hotkey, release.model_id)
-            round_credits = credits.get(hotkey)
-            credit = sum(round_credits) / len(round_credits) if round_credits else 1.0
+            round_speeds = speeds.get(hotkey) or []
+            credit = sum(sp.credit for sp in round_speeds) / len(round_speeds) if round_speeds else 1.0
             windows[uid] = {
                 **window.as_dict(),
                 'hotkey': hotkey,
                 'model_id': release.model_id,
-                'served': len(round_credits or []),
+                'served': len(round_speeds),
                 'credit': round(credit, 4),
-                'probe_tps': None,
+                'ttft_ms': _mean([sp.ttft_ms for sp in round_speeds if sp.ttft_ms is not None]),
+                'decode_tps': _mean([sp.decode_tps for sp in round_speeds if sp.decode_tps is not None]),
                 'capacity': 0.0,
                 'score': 0.0,
                 'last_miss': last_miss.get(hotkey, ''),
             }
             bt.logging.debug(
                 f'Serving: UID {uid} {release.model_id} window {window.as_dict()} '
-                f'served {len(round_credits or [])} credit {credit:.3f}'
+                f'served {len(round_speeds)} credit {credit:.3f}'
             )
             if window.passed and credit > 0.0:
                 passing.append((uid, hotkey, axon, credit))
@@ -303,6 +311,8 @@ async def audit_round(
                 capacity=1.0 if ok else 0.0,
                 score=round(score, 4),
             )
+            if not ok and not windows[uid]['last_miss']:
+                windows[uid]['last_miss'] = f'not attested: {st.get("reason", "not attested yet")}'
             if not ok and uid not in probation:  # admission / failed attest: not READY, keep receiving baseline
                 probation[uid] = ReadyMiner(
                     uid=uid, hotkey=hotkey, axon=axon_of[uid], score=0.0, model_id=release.model_id

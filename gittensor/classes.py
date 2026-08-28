@@ -720,3 +720,12 @@ class ServingPricing:
     @property
     def usable(self) -> bool:
         return self.alpha_per_hour_to_miners > 0 and self.alpha_usd > 0
+
+
+@dataclass
+class RequestSpeed:
+    """One verified served request's speed: the credit it earned plus the raw validator-observed numbers behind it."""
+
+    credit: float
+    ttft_ms: Optional[float] = None
+    decode_tps: Optional[float] = None

@@ -17,6 +17,7 @@ misses earn 0 credit, which folds availability in.
 
 from typing import Dict, Optional, Sequence, Tuple
 
+from gittensor.classes import RequestSpeed
 from gittensor.constants import (
     SERVING_DECODE_FLOOR_RATIO,
     SERVING_DECODE_MIN_TOKENS,
@@ -65,19 +66,20 @@ def decode_credit(
     return 0.0 if ratio < floor_ratio else min(1.0, ratio / tolerance_ratio)
 
 
-def request_speed_credit(req: ServedRequest, release: ServingRelease) -> float:
-    """Speed credit of one verified served request: TTFT band × decode band (decode only when measurable)."""
+def request_speed(req: ServedRequest, release: ServingRelease) -> RequestSpeed:
+    """Speed of one verified served request: TTFT band × decode band (decode only when measurable)."""
     speed_ms = req.ttft_ms if req.ttft_ms is not None else req.latency_ms
     if speed_ms is None:
-        return 0.0
+        return RequestSpeed(credit=0.0)
     credit = latency_credit(speed_ms, release.ttft_full_ms, release.ttft_zero_ms)
     tokens = len(req.tokens or [])
+    decode_tps = None
     if (
         tokens >= SERVING_DECODE_MIN_TOKENS
         and req.ttft_ms is not None
         and req.latency_ms is not None
         and req.latency_ms > req.ttft_ms
     ):
-        observed = tokens / ((req.latency_ms - req.ttft_ms) / 1000.0)
-        credit *= decode_credit(observed, expected_decode_tps(release.decode_per_request, req.inflight))
-    return credit
+        decode_tps = tokens / ((req.latency_ms - req.ttft_ms) / 1000.0)
+        credit *= decode_credit(decode_tps, expected_decode_tps(release.decode_per_request, req.inflight))
+    return RequestSpeed(credit=credit, ttft_ms=req.ttft_ms, decode_tps=decode_tps)

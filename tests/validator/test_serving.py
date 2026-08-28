@@ -1012,7 +1012,7 @@ def test_audit_round_skips_release_without_reference(monkeypatch):
 
 
 def test_decode_speed_prices_served_requests_against_the_blessing_curve():
-    from gittensor.validator.serving.scoring import decode_credit, expected_decode_tps, request_speed_credit
+    from gittensor.validator.serving.scoring import decode_credit, expected_decode_tps, request_speed
 
     curve = {1: 440.0, 6: 46.0, 16: 19.0}
     assert expected_decode_tps(curve, 1) == 440.0 and expected_decode_tps(curve, 0) == 440.0
@@ -1044,17 +1044,19 @@ def test_decode_speed_prices_served_requests_against_the_blessing_curve():
         )
 
     honest = req(64, 100.0, 100.0 + 64 / 440.0 * 1000.0)  # 440 tok/s after a 100 ms TTFT
-    assert request_speed_credit(honest, release) == pytest.approx(1.0)
+    honest_speed = request_speed(honest, release)
+    assert honest_speed.credit == pytest.approx(1.0)
+    assert honest_speed.ttft_ms == 100.0 and honest_speed.decode_tps == pytest.approx(440.0)
     busy = req(64, 100.0, 100.0 + 64 / 19.0 * 1000.0, inflight=16)  # 19 tok/s is what one card does at 16 in flight
-    assert request_speed_credit(busy, release) == pytest.approx(1.0)
+    assert request_speed(busy, release).credit == pytest.approx(1.0)
     shared = req(64, 100.0, 100.0 + 64 / 19.0 * 1000.0, inflight=1)  # 19 tok/s while we sent it one request
-    assert request_speed_credit(shared, release) == 0.0
+    assert request_speed(shared, release).credit == 0.0
     slowish = req(64, 100.0, 100.0 + 64 / 264.0 * 1000.0)
-    assert request_speed_credit(slowish, release) == pytest.approx(0.75)
+    assert request_speed(slowish, release).credit == pytest.approx(0.75)
     short = req(8, 100.0, 5_000.0)  # too few tokens to measure decode: TTFT band only
-    assert request_speed_credit(short, release) == 1.0
+    assert request_speed(short, release).credit == 1.0 and request_speed(short, release).decode_tps is None
     slow_ttft = req(64, 1_000.0, 1_000.0 + 64 / 440.0 * 1000.0)
-    assert request_speed_credit(slow_ttft, release) == pytest.approx(0.5)
+    assert request_speed(slow_ttft, release).credit == pytest.approx(0.5)
 
 
 def test_gateway_and_baseline_record_inflight_at_dispatch(monkeypatch):

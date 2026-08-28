@@ -776,6 +776,51 @@ def test_runtime_rejected_prompt_is_checked_against_the_reference(monkeypatch):
     assert run(EchoReference(good)) == (0, 1)
 
 
+def test_strikes_need_the_fleet_to_agree_with_the_reference():
+    """When most hotkeys judged this round fail the bands, the reference drifted: misses, not strikes."""
+    from gittensor.validator.serving.forward import verify_served_round
+
+    good = _echo_release()
+    ref = EchoReference(good)
+    state = ServingState()
+    summary = {}
+    served = [_served(1, good, wrong=True), _served(2, good, wrong=True), _served(3, good)]
+    verify_served_round(state, ref, good, served, summary)
+    assert summary.get('strike', 0) == 0 and summary.get('miss') == 2 and summary.get('reference_disagreement') == 1
+    assert state.audits.verdict('hk1', good.model_id).quarantined_until == 0.0
+    state = ServingState()
+    summary = {}
+    served = [_served(1, good, wrong=True), _served(2, good), _served(3, good)]
+    verify_served_round(state, ref, good, served, summary)
+    assert summary.get('strike') == 1 and state.audits.verdict('hk1', good.model_id).quarantined_until > 0.0
+    state = ServingState()
+    summary = {}
+    verify_served_round(state, ref, good, [_served(1, good, wrong=True)], summary)  # one hotkey: nothing to compare
+    assert summary.get('strike') == 1
+
+
+def test_quarantine_escalates_with_strikes():
+    w = AuditWindow(quarantine_s=100.0)
+    assert w.strike('hk', 'r', now=0.0) == 100.0
+    assert w.strike('hk', 'r', now=0.0) == 400.0
+    assert w.strike('hk', 'r', now=0.0) == 1600.0
+    assert w.strike('hk', 'r', now=0.0) == 6400.0
+    assert w.strike('hk', 'r', now=0.0) == 6400.0
+    assert w.strike('other', 'r', now=0.0) == 100.0
+
+
+def test_last_credit_survives_a_restart_and_tao_usd_is_the_repos(tmp_path, monkeypatch):
+    from gittensor.serving.store import ServingStore
+
+    state = ServingState()
+    state.last_credit['hk1'] = 0.75
+    store = ServingStore(tmp_path / 'serving.db')
+    store.save(state)
+    assert store.load(ServingState()).last_credit == {'hk1': 0.75}
+    monkeypatch.setenv('SERVING_TAO_USD', '1')
+    assert load_serving_loadout().tao_usd != 1.0
+
+
 def test_stream_assembler_collects_token_ids():
     from gittensor.serving.stream import SSEParser, StreamAssembler, result_to_sse
     from gittensor.synapses import InferenceSynapse
@@ -2197,7 +2242,7 @@ def test_strikes_count_up_and_survive_a_restart(tmp_path):
     store.save(ServingState(audits=w))
     again = store.load(ServingState(audits=AuditWindow(quarantine_s=100.0))).audits
     assert again.strikes('hk', 'r1') == 2 and again.strikes('hk', 'r2') == 1
-    assert again.quarantined_until('hk', 'r1', now=2050.0) == 2100.0
+    assert again.quarantined_until('hk', 'r1', now=2050.0) == 2400.0  # the second strike: 4x the first
 
 
 def test_store_migrates_a_model_id_keyed_database(tmp_path):

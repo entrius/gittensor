@@ -254,6 +254,16 @@ SERVING_AUDIT_WINDOW_THRESHOLDS = ((1, 0.8),)
 SERVING_AUDIT_SAMPLE_FRACTION = 0.2
 SERVING_AUDIT_SAMPLE_MIN = 10
 SERVING_QUARANTINE_S = 3600.0
+# Each further strike on the same (hotkey, release) quarantines ESCALATION times longer, up to MAX_STEPS steps
+# (1 h, 4 h, 16 h, 64 h): one wrong answer costs an hour, a pattern of them costs days, and rotating to a fresh
+# hotkey to reset it costs a registration plus a settlement window from zero.
+SERVING_QUARANTINE_ESCALATION = 4.0
+SERVING_QUARANTINE_MAX_STEPS = 3
+# A wrong answer is a strike only while the reference agrees with most of the fleet this round. When fewer than
+# this fraction of the hotkeys judged this round passed anything, the reference is the odd one out (a driver or
+# image drift on this validator's box) and the round's band failures are misses, not strikes — otherwise one
+# drifted reference quarantines every honest miner each time its quarantine lifts. Needs two judged hotkeys to say.
+SERVING_STRIKE_MIN_FLEET_PASS = 0.5
 # Baseline traffic: every round the validator sends each serving axon this many baseline prompts of its own, at
 # random moments spread over the round (so they do not mark the round boundary), over the same path as user
 # traffic. Real traffic does not displace them — 2 x ~256 tokens per miner per round is noise for a card and well

@@ -68,6 +68,8 @@ from gittensor.constants import (
     SERVING_AUDIT_MIN_PREFIX_AGREEMENT,
     SERVING_AUDIT_WINDOW,
     SERVING_AUDIT_WINDOW_THRESHOLDS,
+    SERVING_QUARANTINE_ESCALATION,
+    SERVING_QUARANTINE_MAX_STEPS,
     SERVING_QUARANTINE_S,
 )
 from gittensor.serving.backends import Message, expected_completion
@@ -169,11 +171,14 @@ class AuditWindow:
         self._values[key].append(max(0.0, min(1.0, float(value))))
 
     def strike(self, hotkey: str, release_id: str, now: Optional[float] = None) -> float:
-        """A wrong answer: wipe the window and quarantine the (hotkey, release) until the returned timestamp."""
+        """A wrong answer: wipe the window and quarantine the (hotkey, release) until the returned timestamp. Each
+        strike on the same (hotkey, release) quarantines ``SERVING_QUARANTINE_ESCALATION`` times longer than the last,
+        up to ``SERVING_QUARANTINE_MAX_STEPS`` steps: a strike costs a fresh hotkey an hour, a repeat offender days."""
         key = (hotkey, release_id)
         self._values.pop(key, None)
         self._strikes[key] = self._strikes.get(key, 0) + 1
-        until = (now if now is not None else time.time()) + self.quarantine_s
+        step = min(self._strikes[key] - 1, SERVING_QUARANTINE_MAX_STEPS)
+        until = (now if now is not None else time.time()) + self.quarantine_s * SERVING_QUARANTINE_ESCALATION**step
         self._quarantine[key] = until
         return until
 

@@ -52,6 +52,7 @@ from gittensor.constants import (
     SERVING_DORMANT_RETRY_ROUNDS,
     SERVING_MAX_TOKENS,
     SERVING_MIN_CALLER_STAKE,
+    SERVING_STRIKE_MIN_FLEET_PASS,
     SERVING_VALIDATOR_TOKENS_PER_TEMPO,
     SERVING_VERIFY_WORKERS,
 )
@@ -91,6 +92,23 @@ def sample_for_audit(
         if k < n:
             keep.difference_update(set(idxs) - set(rng.sample(idxs, k)))
     return [r for i, r in enumerate(served) if i in keep], [r for i, r in enumerate(served) if i not in keep]
+
+
+def reference_agrees_with_fleet(
+    served: Sequence[ServedRequest],
+    verdicts: Sequence[Optional[AuditVerdict]],
+    min_fleet_pass: float = SERVING_STRIKE_MIN_FLEET_PASS,
+) -> bool:
+    """Did at least ``min_fleet_pass`` of the hotkeys judged this round pass something? With two or more hotkeys
+    judged and most of them failing the bands, the reference — not the fleet — is what drifted."""
+    passed_by: Dict[str, bool] = {}
+    for req, verdict in zip(served, verdicts):
+        if verdict is None:
+            continue
+        passed_by[req.hotkey] = passed_by.get(req.hotkey, False) or verdict.passed
+    if len(passed_by) < 2 or not any(v.hard for v in verdicts if v is not None):
+        return True
+    return sum(passed_by.values()) / len(passed_by) >= min_fleet_pass
 
 
 def reference_rejects(reference: Reference, messages: List[Dict[str, str]]) -> bool:
@@ -188,6 +206,17 @@ def verify_served_round(
 
     def bump(key: str) -> None:
         summary[key] = summary.get(key, 0) + 1
+
+    if not reference_agrees_with_fleet(mine, verdicts):
+        # The reference is the odd one out this round (its own drift, not a fleet of wrong answers): band failures
+        # are misses, not strikes.
+        bump('reference_disagreement')
+        verdicts = [
+            AuditVerdict(False, v.prefix_agreement, v.mean_abs_logprob_diff, f'reference disagreement: {v.reason}')
+            if v is not None and v.hard
+            else v
+            for v in verdicts
+        ]
 
     ready_uids = {m.uid for m in state.ready_miners()}
     speeds: Dict[str, List[RequestSpeed]] = {}
@@ -530,8 +559,10 @@ class ServingAuditThread:
                     audit_round(self.state, dendrite, serving, staked_caller=is_staked_caller(self.validator))
                 )
             except Exception as e:  # a serving fault must never take the validator down
-                bt.logging.error(f'Serving round failed, no serving scores this round: {e!r}')
-                self.state.publish_round([], {})
+                # Nothing is published: the READY set stands until the TTL runs out and no hotkey records a zero
+                # for a round this validator did not run. Publishing an empty round here zeroed every settled
+                # score and blanked the gateway on any hiccup — a metagraph read, one malformed reply.
+                bt.logging.error(f'Serving round failed, nothing settled this round: {e!r}')
             if self.store is not None:
                 try:
                     self.store.save(self.state)

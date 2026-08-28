@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS dormant (hotkey TEXT PRIMARY KEY, rounds INTEGER);
 CREATE TABLE IF NOT EXISTS attest (hotkey TEXT PRIMARY KEY, status TEXT);
 CREATE TABLE IF NOT EXISTS uuid_owner (uuid TEXT PRIMARY KEY, hotkey TEXT, round INTEGER);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS last_credit (hotkey TEXT PRIMARY KEY, credit REAL);
 """
 
 
@@ -67,8 +68,10 @@ class ServingStore:
                 'attest',
                 'uuid_owner',
                 'meta',
+                'last_credit',
             ):
                 db.execute(f'DELETE FROM {table}')
+            db.executemany('INSERT INTO last_credit VALUES (?, ?)', list(state.last_credit.items()))
             db.executemany(
                 'INSERT INTO uuid_owner VALUES (?, ?, ?)',
                 [(uuid, hk, rnd) for uuid, (hk, rnd) in state.uuid_owner.items()],
@@ -125,6 +128,8 @@ class ServingStore:
                 for key, value in db.execute('SELECT key, value FROM meta'):
                     if key == 'attest_round':
                         state.attest_round = int(value)
+                for hk, credit in db.execute('SELECT hotkey, credit FROM last_credit'):
+                    state.last_credit[str(hk)] = float(credit)
         except sqlite3.Error:
             pass
         return state

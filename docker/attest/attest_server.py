@@ -40,6 +40,7 @@ def run(args, timeout=120.0):
         }
     out = json.loads(proc.stdout)
     out['queued_ms'] = round(queued_ms, 1)
+    out['version'] = VERSION
     return 200, out
 
 

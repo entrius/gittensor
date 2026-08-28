@@ -28,6 +28,12 @@ from typing import Dict, List, Optional
 
 import bittensor as bt
 
+from gittensor.constants import (
+    SERVING_AUDIT_MAX_ABS_LOGPROB_DIFF,
+    SERVING_AUDIT_MAX_MEAN_ABS_LOGPROB_DIFF,
+    SERVING_AUDIT_MIN_PREFIX_AGREEMENT,
+)
+
 WEIGHTS_DIR = Path(__file__).parent.parent / 'validator' / 'weights'
 DEFAULT_LOADOUT_PATH = WEIGHTS_DIR / 'serving_loadout.json'
 ECHO_LOADOUT_PATH = WEIGHTS_DIR / 'serving_loadout.echo.json'
@@ -37,6 +43,7 @@ ECHO_LOADOUT_PATH = WEIGHTS_DIR / 'serving_loadout.echo.json'
 class ServingRelease:
     model_id: str
     backend: str
+    release_id: str = ''  # what the validator keys audits, quarantine and READY sets by; defaults to model_id
     max_tokens: int = 64
     base_url: Optional[str] = None  # miner side: the runtime this miner serves from
     runtime_pin: Optional[str] = None
@@ -63,14 +70,43 @@ class ServingRelease:
     vram_model_reserved_bytes: Optional[float] = None
     ttft_full_ms: Optional[float] = None  # validator-observed TTFT up to which latency credit is 1.0
     ttft_zero_ms: Optional[float] = None  # ... and at which it reaches 0.0
+    # Audit bands for this release (``audit`` block); None -> the constants' defaults, which are calibrated for a
+    # bit-reproducible pin. A runtime that is not deterministic ships its own bands here.
+    audit_min_prefix_agreement: Optional[float] = None
+    audit_max_mean_abs_logprob_diff: Optional[float] = None
+    audit_max_abs_logprob_diff: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        if not self.release_id:
+            self.release_id = self.model_id
+
+    @property
+    def min_prefix_agreement(self) -> float:
+        if self.audit_min_prefix_agreement is None:
+            return SERVING_AUDIT_MIN_PREFIX_AGREEMENT
+        return self.audit_min_prefix_agreement
+
+    @property
+    def max_mean_abs_logprob_diff(self) -> float:
+        if self.audit_max_mean_abs_logprob_diff is None:
+            return SERVING_AUDIT_MAX_MEAN_ABS_LOGPROB_DIFF
+        return self.audit_max_mean_abs_logprob_diff
+
+    @property
+    def max_abs_logprob_diff(self) -> float:
+        if self.audit_max_abs_logprob_diff is None:
+            return SERVING_AUDIT_MAX_ABS_LOGPROB_DIFF
+        return self.audit_max_abs_logprob_diff
 
     @classmethod
     def from_dict(cls, raw: dict) -> 'ServingRelease':
         speed = raw.get('speed') or {}
         attest = raw.get('attest') or {}
+        audit = raw.get('audit') or {}
         return cls(
             model_id=raw['model_id'],
             backend=raw['backend'],
+            release_id=str(raw.get('release_id') or raw['model_id']),
             max_tokens=int(raw.get('max_tokens', 64)),
             base_url=raw.get('base_url'),
             runtime_pin=raw.get('runtime_pin'),
@@ -89,6 +125,9 @@ class ServingRelease:
             vram_model_reserved_bytes=_optional_float(attest.get('vram_model_reserved_bytes')),
             ttft_full_ms=_optional_float(speed.get('ttft_full_ms')),
             ttft_zero_ms=_optional_float(speed.get('ttft_zero_ms')),
+            audit_min_prefix_agreement=_optional_float(audit.get('min_prefix_agreement')),
+            audit_max_mean_abs_logprob_diff=_optional_float(audit.get('max_mean_abs_logprob_diff')),
+            audit_max_abs_logprob_diff=_optional_float(audit.get('max_abs_logprob_diff')),
         )
 
 
@@ -117,20 +156,24 @@ class ServingLoadout:
     def __post_init__(self) -> None:
         if not self.releases:
             raise ValueError('serving loadout has no releases')
-        ids = [r.model_id for r in self.releases]
+        ids = [r.release_id for r in self.releases]
         if len(set(ids)) != len(ids):
-            raise ValueError(f'duplicate model_id in serving loadout: {ids}')
+            raise ValueError(f'duplicate release_id in serving loadout: {ids}')
 
     @property
     def primary(self) -> ServingRelease:
         """The first release: what the inference API serves and what a miner runs unless SERVING_RELEASE says otherwise."""
         return self.releases[0]
 
-    def get(self, model_id: str) -> ServingRelease:
+    def get(self, release_id: str) -> ServingRelease:
+        """By release_id, then by model_id (the first release serving that model)."""
         for release in self.releases:
-            if release.model_id == model_id:
+            if release.release_id == release_id:
                 return release
-        raise KeyError(f'release {model_id!r} not in serving loadout: {[r.model_id for r in self.releases]}')
+        for release in self.releases:
+            if release.model_id == release_id:
+                return release
+        raise KeyError(f'release {release_id!r} not in serving loadout: {[r.release_id for r in self.releases]}')
 
 
 def resolve_loadout_path(path: Optional[Path] = None) -> Path:
@@ -161,7 +204,7 @@ def load_serving_loadout(path: Optional[Path] = None) -> ServingLoadout:
         loadout.primary.reference_api_key = key_override
 
     lines = [
-        f'Serving release: model={release.model_id} backend={release.backend} pin={release.runtime_pin} '
+        f'Serving release {release.release_id}: model={release.model_id} backend={release.backend} pin={release.runtime_pin} '
         f'reference={"live " + release.reference_url if release.reference_url else (release.audit_bank or "echo")}'
         for release in loadout.releases
     ]

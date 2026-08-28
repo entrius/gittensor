@@ -104,7 +104,7 @@ def verify_served_round(
     """
     summary = summary if summary is not None else {}
     last_miss = last_miss if last_miss is not None else {}
-    mine, skipped = sample_for_audit([req for req in served if req.model_id == release.model_id], rng=rng)
+    mine, skipped = sample_for_audit([req for req in served if req.release_id == release.release_id], rng=rng)
     for req in skipped:
         summary['served'] = summary.get('served', 0) + 1
         summary[req.source] = summary.get(req.source, 0) + 1
@@ -125,6 +125,7 @@ def verify_served_round(
                     req.token_logprobs,
                     token_ids=req.token_ids,
                     token_bytes=req.token_bytes,
+                    release=release,
                 )
             except Exception as e:  # reference hiccup: neither credit nor blame
                 if attempt == 0 and isinstance(e, (ConnectionError, OSError)) or 'Connect' in type(e).__name__:
@@ -156,14 +157,14 @@ def verify_served_round(
         if not verdict.passed:
             last_miss[req.hotkey] = verdict.reason
         if verdict.hard:
-            until = state.audits.strike(req.hotkey, release.model_id)
+            until = state.audits.strike(req.hotkey, release.release_id)
             bump('strike')
             bt.logging.warning(
                 f'Serving: UID {req.uid} served a WRONG answer ({verdict.reason}); window wiped, '
                 f'quarantined until {time.strftime("%H:%M:%S", time.gmtime(until))} UTC'
             )
         else:
-            state.audits.record(req.hotkey, release.model_id, verdict.value)
+            state.audits.record(req.hotkey, release.release_id, verdict.value)
             bump('pass' if verdict.passed else 'miss')
         # Speed is priced on served traffic: time to first token and decode rate against the blessing's curve at
         # the load this validator had in flight to the miner (gittensor/validator/serving/scoring.py).
@@ -206,14 +207,20 @@ async def baseline_round(
     targets = [
         (uid, hotkey, axon)
         for uid, hotkey, axon in serving
-        if state.audits.quarantined_until(hotkey, release.model_id) == 0.0 and not skip_baseline(state, hotkey)
+        if state.audits.quarantined_until(hotkey, release.release_id) == 0.0 and not skip_baseline(state, hotkey)
     ]
 
     async def one(uid: int, hotkey: str, axon: bt.AxonInfo, delay_s: float) -> None:
         await asyncio.sleep(delay_s)
         messages = make_baseline_prompt(rng)
         max_tokens = baseline_max_tokens(rng, min(SERVING_MAX_TOKENS, max(release.max_tokens, 512)))
-        synapse = InferenceSynapse(messages=messages, model_id=release.model_id, max_tokens=max_tokens, logprobs=True)
+        synapse = InferenceSynapse(
+            messages=messages,
+            model_id=release.model_id,
+            release_id=release.release_id,
+            max_tokens=max_tokens,
+            logprobs=True,
+        )
         inflight = state.inflight().get(uid, 0) + 1
         started = time.monotonic()
         try:
@@ -235,6 +242,7 @@ async def baseline_round(
                 uid=uid,
                 hotkey=hotkey,
                 model_id=release.model_id,
+                release_id=release.release_id,
                 messages=messages,
                 ok=ok,
                 latency_ms=(time.monotonic() - started) * 1000.0 if ok else None,
@@ -292,20 +300,21 @@ async def audit_round(
             reference = reference_for(release)
         except Exception as e:  # reference down / bank missing: skip this release, keep the others
             bt.logging.error(
-                f'Serving: no reference for {release.model_id} this round ({e!r}); '
+                f'Serving: no reference for {release.release_id} this round ({e!r}); '
                 'set SERVING_REFERENCE_URL to a conformant runtime'
             )
             continue
         speeds = verify_served_round(state, reference, release, served, summary, last_miss)
         passing: List[Tuple[int, str, bt.AxonInfo, float]] = []
         for uid, hotkey, axon in active:
-            window = state.audits.verdict(hotkey, release.model_id)
+            window = state.audits.verdict(hotkey, release.release_id)
             round_speeds = speeds.get(hotkey) or []
             credit = sum(sp.credit for sp in round_speeds) / len(round_speeds) if round_speeds else 1.0
             windows[uid] = {
                 **window.as_dict(),
                 'hotkey': hotkey,
                 'model_id': release.model_id,
+                'release_id': release.release_id,
                 'served': len(round_speeds),
                 'credit': round(credit, 4),
                 'ttft_ms': _mean([sp.ttft_ms for sp in round_speeds if sp.ttft_ms is not None]),
@@ -315,13 +324,13 @@ async def audit_round(
                 'last_miss': last_miss.get(hotkey, ''),
             }
             bt.logging.debug(
-                f'Serving: UID {uid} {release.model_id} window {window.as_dict()} '
+                f'Serving: UID {uid} {release.release_id} window {window.as_dict()} '
                 f'served {len(round_speeds)} credit {credit:.3f}'
             )
             if window.passed and credit > 0.0:
                 passing.append((uid, hotkey, axon, credit))
             elif window.quarantined_until == 0.0 and uid not in probation:
-                probation[uid] = ReadyMiner(uid=uid, hotkey=hotkey, axon=axon, score=0.0, model_id=release.model_id)
+                probation[uid] = ReadyMiner(uid=uid, hotkey=hotkey, axon=axon, score=0.0, release_id=release.release_id)
         if not passing:
             continue
         attested = await attest_round(
@@ -333,7 +342,7 @@ async def audit_round(
             score = credit * cards  # one card-hour per attested card at this speed
             st = state.attest_status.get(hotkey, {})
             bt.logging.info(
-                f'Serving: UID {uid} {release.model_id} attested {"yes" if ok else "no"} cards {cards} '
+                f'Serving: UID {uid} {release.release_id} attested {"yes" if ok else "no"} cards {cards} '
                 f'speed credit {credit:.2f} score {score:.3f}'
             )
             windows[uid].update(
@@ -349,17 +358,17 @@ async def audit_round(
                 windows[uid]['last_miss'] = f'not attested: {st.get("reason", "not attested yet")}'
             if not ok and uid not in probation:  # admission / failed attest: not READY, keep receiving baseline
                 probation[uid] = ReadyMiner(
-                    uid=uid, hotkey=hotkey, axon=axon_of[uid], score=0.0, model_id=release.model_id
+                    uid=uid, hotkey=hotkey, axon=axon_of[uid], score=0.0, release_id=release.release_id
                 )
             if score > best[hotkey][0]:
-                best[hotkey] = (score, release.model_id)
+                best[hotkey] = (score, release.release_id)
 
     scores = {hotkey: score for hotkey, (score, _) in best.items()}
     ready: List[ReadyMiner] = []
     for uid, hotkey, axon in active:
-        score, model_id = best[hotkey]
+        score, release_id = best[hotkey]
         if score > 0.0:
-            ready.append(ReadyMiner(uid=uid, hotkey=hotkey, axon=axon, score=score, model_id=model_id))
+            ready.append(ReadyMiner(uid=uid, hotkey=hotkey, axon=axon, score=score, release_id=release_id))
             probation.pop(uid, None)
     for uid, report in windows.items():
         report['status'] = miner_status(report)

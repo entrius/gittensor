@@ -107,15 +107,15 @@ class Validator(BaseValidatorNeuron):
         if SERVING_ENABLED:
             api_keys = parse_api_keys(SERVING_API_KEYS)
             if api_keys:
-                release = load_serving_loadout().primary
+                loadout = load_serving_loadout()
                 self.serving_api = start_serving_api(
                     state=self.serving_state,
-                    release=release,
+                    loadout=loadout,
                     wallet=self.wallet,
                     api_keys=api_keys,
                     host=SERVING_API_HOST,
                     port=SERVING_API_PORT,
-                    request_timeout=release.request_timeout,
+                    request_timeout=loadout.primary.request_timeout,
                     baseline_keys=parse_api_keys(SERVING_BASELINE_API_KEYS),
                 )
             else:

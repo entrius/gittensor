@@ -1,14 +1,22 @@
 """Tests for the serving beta: deterministic backend, audit verification, gateway dispatch, emission pool blending."""
 
+import asyncio
 import json
 from collections import deque
+from types import SimpleNamespace
 from typing import Dict
 
 import bittensor as bt
 import pytest
 from fastapi.testclient import TestClient
 
-from gittensor.constants import SERVING_AUDIT_WINDOW, SERVING_AUDIT_WINDOW_THRESHOLDS
+from gittensor.constants import (
+    SERVING_AUDIT_MAX_ABS_LOGPROB_DIFF,
+    SERVING_AUDIT_MAX_MEAN_ABS_LOGPROB_DIFF,
+    SERVING_AUDIT_MIN_PREFIX_AGREEMENT,
+    SERVING_AUDIT_WINDOW,
+    SERVING_AUDIT_WINDOW_THRESHOLDS,
+)
 from gittensor.serving.api import build_app, parse_api_keys
 from gittensor.serving.audit import (
     AuditCase,
@@ -22,6 +30,7 @@ from gittensor.serving.audit import (
 from gittensor.serving.backends import EchoBackend, GenerationResult, expected_completion
 from gittensor.serving.loadout import ECHO_LOADOUT_PATH, ServingLoadout, ServingRelease, load_serving_loadout
 from gittensor.serving.state import ReadyMiner, RequestRecord, ServedRequest, ServingState
+from gittensor.synapses import InferenceSynapse
 from gittensor.validator.serving.scoring import latency_credit
 
 MSGS = [{'role': 'user', 'content': 'prompt'}]
@@ -194,7 +203,7 @@ def test_audit_bank_roundtrip(tmp_path):
 
 
 def _ready(uid: int, score: float = 1.0) -> ReadyMiner:
-    return ReadyMiner(uid=uid, hotkey=f'hk{uid}', axon=None, score=score, model_id='echo-v0')  # type: ignore[arg-type]
+    return ReadyMiner(uid=uid, hotkey=f'hk{uid}', axon=None, score=score, release_id='echo-v0')  # type: ignore[arg-type]
 
 
 def test_state_least_inflight_dispatch():
@@ -220,7 +229,7 @@ def test_state_least_inflight_dispatch():
 
 def test_acquire_filters_by_release():
     state = ServingState()
-    other = ReadyMiner(uid=9, hotkey='hk9', axon=None, score=1.0, model_id='other-model')  # type: ignore[arg-type]
+    other = ReadyMiner(uid=9, hotkey='hk9', axon=None, score=1.0, release_id='other-model')  # type: ignore[arg-type]
     state.publish_round([_ready(1), other], {})
     assert state.acquire('other-model') is other
     assert state.acquire('missing') is None
@@ -245,8 +254,8 @@ class _FakeResponse:
         self.usage = result.usage
 
 
-def _gateway_client(state: ServingState, monkeypatch):
-    loadout = _echo_release()
+def _gateway_client(state: ServingState, monkeypatch, releases=None):
+    loadout = ServingLoadout(releases=list(releases) if releases else [_echo_release()])
 
     async def fake_dispatch(dendrite, miner, messages, max_tokens, lo, timeout, on_event=None):
         result = expected_completion(messages, max_tokens, lo.model_id)
@@ -738,7 +747,7 @@ def test_state_settles_over_trailing_rounds_and_serves_probation():
 
     state = ServingState(settlement_rounds=4)
     axon = SimpleNamespace()
-    new = ReadyMiner(uid=5, hotkey='hk5', axon=axon, score=0.0, model_id='echo-v0')  # type: ignore[arg-type]
+    new = ReadyMiner(uid=5, hotkey='hk5', axon=axon, score=0.0, release_id='echo-v0')  # type: ignore[arg-type]
     state.publish_round([_ready(1)], {'hk1': 1.0}, probation=[new])
     assert state.scores_for(['v', 'hk1', 'hk5']) == {1: 0.25}  # one clean round out of four
     user = state.acquire('echo-v0')
@@ -765,9 +774,9 @@ def test_gateway_enqueues_served_requests_and_routes_baseline_to_probation(monke
 
     from gittensor.serving.api import build_app
 
-    loadout = _echo_release()
+    loadout = ServingLoadout(releases=[_echo_release()])
     state = ServingState()
-    probation = ReadyMiner(uid=9, hotkey='hk9', axon=SimpleNamespace(), score=0.0, model_id='echo-v0')  # type: ignore[arg-type]
+    probation = ReadyMiner(uid=9, hotkey='hk9', axon=SimpleNamespace(), score=0.0, release_id='echo-v0')  # type: ignore[arg-type]
     state.publish_round([_ready(7)], {}, probation=[probation])
 
     async def fake_dispatch(dendrite, miner, messages, max_tokens, lo, timeout, on_event=None):
@@ -1131,7 +1140,7 @@ def test_ready_set_expires_after_ttl():
     from types import SimpleNamespace
 
     state = ServingState(ready_ttl_s=10.0, settlement_rounds=1)
-    miner = ReadyMiner(uid=1, hotkey='hk1', axon=SimpleNamespace(), score=1.0, model_id='m')  # type: ignore[arg-type]
+    miner = ReadyMiner(uid=1, hotkey='hk1', axon=SimpleNamespace(), score=1.0, release_id='m')  # type: ignore[arg-type]
     state.publish_round([miner], {'hk1': 1.0})
     assert state.acquire('m') is miner
     state.last_round_ts -= 11.0  # the audit thread stopped publishing
@@ -1593,3 +1602,155 @@ def test_sample_for_audit_keeps_baseline_and_failures_and_draws_the_rest():
     assert [id(r) for r in keep] == [id(r) for r in served if id(r) in kept]  # input order kept
     tiny = [req('busy') for _ in range(50)]
     assert len(sample_for_audit(tiny, fraction=0.2, minimum=10, rng=random.Random(1))[0]) == 10
+
+
+def test_release_id_defaults_to_model_id_and_keys_the_loadout():
+    bare = ServingRelease(model_id='qwen', backend='echo')
+    assert bare.release_id == 'qwen'
+    assert (bare.min_prefix_agreement, bare.max_mean_abs_logprob_diff, bare.max_abs_logprob_diff) == (
+        SERVING_AUDIT_MIN_PREFIX_AGREEMENT,
+        SERVING_AUDIT_MAX_MEAN_ABS_LOGPROB_DIFF,
+        SERVING_AUDIT_MAX_ABS_LOGPROB_DIFF,
+    )
+    tuned = ServingRelease.from_dict(
+        {
+            'model_id': 'qwen',
+            'backend': 'echo',
+            'release_id': 'qwen-sparkinfer-abc',
+            'audit': {'min_prefix_agreement': 0.9, 'max_abs_logprob_diff': 0.4},
+        }
+    )
+    assert tuned.release_id == 'qwen-sparkinfer-abc'
+    assert (tuned.min_prefix_agreement, tuned.max_abs_logprob_diff) == (0.9, 0.4)
+    assert tuned.max_mean_abs_logprob_diff == SERVING_AUDIT_MAX_MEAN_ABS_LOGPROB_DIFF  # unset -> the constant
+    lo = ServingLoadout(releases=[tuned, bare])
+    assert lo.get('qwen-sparkinfer-abc') is tuned and lo.get('qwen') is bare
+    with pytest.raises(KeyError):
+        lo.get('nope')
+    with pytest.raises(ValueError):  # two runtimes of one model are distinct releases, one id each
+        ServingLoadout(releases=[tuned, ServingRelease(model_id='x', backend='echo', release_id='qwen-sparkinfer-abc')])
+
+
+def test_two_releases_of_one_model_keep_separate_windows_and_pools():
+    fast = ServingRelease(model_id='qwen', backend='echo', release_id='qwen-fast')
+    slow = ServingRelease(model_id='qwen', backend='echo', release_id='qwen-slow')
+    w = AuditWindow(size=2, thresholds=((1, 0.5),))
+    w.record('hk', fast.release_id, 1.0)
+    w.record('hk', slow.release_id, 0.0)
+    assert w.verdict('hk', fast.release_id).passed and not w.verdict('hk', slow.release_id).passed
+
+    state = ServingState()
+    state.publish_round(
+        [
+            ReadyMiner(uid=1, hotkey='hk1', axon=None, score=1.0, release_id='qwen-fast'),  # type: ignore[arg-type]
+            ReadyMiner(uid=2, hotkey='hk2', axon=None, score=1.0, release_id='qwen-slow'),  # type: ignore[arg-type]
+        ],
+        {},
+    )
+    fast_miner, slow_miner = state.acquire('qwen-fast'), state.acquire('qwen-slow')
+    assert fast_miner is not None and fast_miner.uid == 1
+    assert slow_miner is not None and slow_miner.uid == 2
+
+
+def test_gateway_routes_by_requested_model(monkeypatch):
+    other = ServingRelease(model_id='other-v0', backend='echo', release_id='other-v0', max_tokens=8)
+    state = ServingState()
+    state.publish_round(
+        [
+            _ready(7),  # echo-v0
+            ReadyMiner(uid=8, hotkey='hk8', axon=None, score=1.0, release_id='other-v0'),  # type: ignore[arg-type]
+        ],
+        {},
+    )
+    client = _gateway_client(state, monkeypatch, releases=[_echo_release(), other])
+    listed = client.get('/v1/models', headers={'Authorization': 'Bearer k1'}).json()['data']
+    assert [m['id'] for m in listed] == ['echo-v0', 'other-v0']
+
+    def ask(model=None):
+        body = {'messages': MSGS, 'max_tokens': 2}
+        if model is not None:
+            body['model'] = model
+        return client.post('/v1/chat/completions', json=body, headers={'Authorization': 'Bearer k1'})
+
+    assert ask().json()['gittensor']['served_uid'] == 7  # no model -> the primary release
+    assert ask('other-v0').json()['gittensor']['served_uid'] == 8
+    assert ask('nope').status_code == 404
+    served = state.drain_served()
+    assert {r.release_id for r in served} == {'echo-v0', 'other-v0'}
+
+
+def test_miner_refuses_a_request_routed_for_another_release():
+    from neurons.serving_miner import blacklist_inference
+
+    miner = SimpleNamespace(
+        release=ServingRelease(model_id='qwen', backend='echo', release_id='qwen-fast'),
+        metagraph=SimpleNamespace(hotkeys=['vali'], S=[2_000_000.0]),
+    )
+    syn = InferenceSynapse(messages=MSGS, model_id='qwen', release_id='qwen-slow', max_tokens=4)
+    syn.dendrite = bt.TerminalInfo(hotkey='vali')
+    blocked, reason = asyncio.run(blacklist_inference(miner, syn))  # type: ignore[arg-type]
+    assert blocked and 'qwen-slow' in reason
+    syn.release_id = 'qwen-fast'
+    assert not asyncio.run(blacklist_inference(miner, syn))[0]  # type: ignore[arg-type]
+    syn.release_id = ''  # a caller that does not name a release is served as before
+    assert not asyncio.run(blacklist_inference(miner, syn))[0]  # type: ignore[arg-type]
+
+
+def test_strikes_count_up_and_survive_a_restart(tmp_path):
+    from gittensor.serving.store import ServingStore
+
+    w = AuditWindow(quarantine_s=100.0)
+    w.record('hk', 'r1', 1.0)
+    assert w.verdict('hk', 'r1').strikes == 0
+    w.strike('hk', 'r1', now=1000.0)
+    w.strike('hk', 'r1', now=2000.0)
+    w.strike('hk', 'r2', now=1000.0)
+    assert w.strikes('hk', 'r1') == 2 and w.strikes('hk', 'r2') == 1 and w.strikes('hk2', 'r1') == 0
+    assert w.verdict('hk', 'r1', now=3000.0).as_dict()['strikes'] == 2
+
+    store = ServingStore(tmp_path / 'serving.db')
+    store.save(ServingState(audits=w))
+    again = store.load(ServingState(audits=AuditWindow(quarantine_s=100.0))).audits
+    assert again.strikes('hk', 'r1') == 2 and again.strikes('hk', 'r2') == 1
+    assert again.quarantined_until('hk', 'r1', now=2050.0) == 2100.0
+
+
+def test_store_migrates_a_model_id_keyed_database(tmp_path):
+    import sqlite3
+
+    from gittensor.serving.store import ServingStore
+
+    path = tmp_path / 'serving.db'
+    with sqlite3.connect(path) as db:  # the pre-release_id schema
+        db.execute('CREATE TABLE audit_values (hotkey TEXT, model_id TEXT, seq INTEGER, value REAL)')
+        db.execute('CREATE TABLE quarantine (hotkey TEXT, model_id TEXT, until REAL)')
+        db.execute("INSERT INTO audit_values VALUES ('hk', 'qwen', 0, 1.0)")
+        db.execute("INSERT INTO quarantine VALUES ('hk2', 'qwen', 9e12)")
+    loaded = ServingStore(path).load(ServingState())
+    assert loaded.audits.verdict('hk', 'qwen').n_audits == 1  # rows carry over keyed by the old model_id
+    assert loaded.audits.quarantined_until('hk2', 'qwen') > 0 and loaded.audits.strikes('hk2', 'qwen') == 0
+
+
+def test_release_audit_bands_override_the_constants():
+    case = AuditCase(
+        messages=MSGS,
+        max_tokens=4,
+        reference_tokens=['a', 'b', 'c', 'd'],
+        reference_logprobs=[-0.1, -0.2, -0.3, -0.4],
+    )
+    drifted = [x - 0.05 for x in case.reference_logprobs]  # past the default mean band (0.005)
+    assert not verify_response(case, case.reference_tokens, drifted).passed
+    loose = ServingRelease(
+        model_id='qwen',
+        backend='echo',
+        audit_max_mean_abs_logprob_diff=0.1,
+        audit_max_abs_logprob_diff=0.2,
+    )
+    assert verify_response(
+        case,
+        case.reference_tokens,
+        drifted,
+        loose.min_prefix_agreement,
+        loose.max_mean_abs_logprob_diff,
+        loose.max_abs_logprob_diff,
+    ).passed

@@ -5,6 +5,7 @@
   },
   "releases": [
     {
+      "release_id": "qwen3.6-35b-a3b-sparkinfer-7498736",
       "model_id": "qwen3.6-35b-a3b",
       "backend": "openai-compat",
       "base_url": "http://127.0.0.1:8080",
@@ -17,7 +18,7 @@
       "audit_bank": "serving_audit_bank.json",
       "speed": {
         "single_stream_decode_tps": 443.6,
-        "measured_on": "gittensor-ai-lab/sparkinfer@7498736 on a rented RTX 5090 (Lium brave-fox-20), 2026-08-27: 16-concurrent x 64 tokens aggregate 279-282 tok/s (6: 255, 24: 268, 32: 275 \u2014 queues past 16, wall 3.7 s -> 7 s)",
+        "measured_on": "gittensor-ai-lab/sparkinfer@7498736 on a rented RTX 5090 (Lium brave-fox-20), 2026-08-27: 16-concurrent x 64 tokens aggregate 279-282 tok/s (6: 255, 24: 268, 32: 275 — queues past 16, wall 3.7 s -> 7 s)",
         "decode_per_request": {
           "1": 443.6,
           "6": 46.0,

@@ -16,18 +16,19 @@ wipes the window and quarantines the hotkey. Miners whose window passes are
 published READY; serving axons that are not READY (and not quarantined) are
 published as *probation* so baseline traffic can give them a window.
 
-    round score = window passes (0/1) x mean latency credit over this round's served requests x capacity
+    round score = window passes (0/1) x mean speed credit over this round's served requests
 
-``capacity`` comes from the round's saturation burst: every READY miner gets
+Speed credit is measured on served traffic only (TTFT and decode rate against the
+blessing's curve at the load this validator imposed; ``scoring.py``). The load
+burst is telemetry: every READY miner gets
 the release's blessed concurrency of prompts at the same instant as every other miner —
 each prompt unique to that hotkey and round (salted), verified afterwards by
 teacher forcing under the reference like any served request, so an answer can
 neither be shared between hotkeys on one card nor precomputed. Verified tokens
 per second of *decode* time (batch wall-clock minus the first observed TTFT, so
 network distance prices latency, not throughput) over the release's blessed
-``decode_tps_target`` (capped at 1, 0 under ``SERVING_PROBE_FLOOR_RATIO``) is its
-capacity — hotkeys sharing one GPU each fall under the floor. Probe outcomes
-affect capacity only, never the window. Round scores are settled
+``decode_tps_target`` (capped at 1) is reported and persisted per round so a
+shared or slow card is visible; it does not enter pay and never touches the window. Round scores are settled
 over the trailing ``SERVING_SETTLEMENT_ROUNDS`` rounds by ``ServingState``.
 """
 
@@ -53,7 +54,6 @@ from gittensor.constants import (
     SERVING_DORMANT_RETRY_ROUNDS,
     SERVING_MAX_TOKENS,
     SERVING_PROBE_DIP_RATIO,
-    SERVING_PROBE_FLOOR_RATIO,
     SERVING_PROBE_REQUESTS,
     SERVING_PROBE_RETRY_DELAY_S,
     SERVING_PROBE_TARGET_TPS,
@@ -68,7 +68,7 @@ from gittensor.serving.store import ServingStore
 from gittensor.serving.stream import consume_stream
 from gittensor.synapses import InferenceSynapse
 from gittensor.validator.serving.persist import ServingRoundStorage
-from gittensor.validator.serving.scoring import latency_credit
+from gittensor.validator.serving.scoring import request_speed_credit
 from gittensor.validator.utils.config import STORE_DB_RESULTS
 
 if TYPE_CHECKING:
@@ -227,14 +227,9 @@ def verify_served_round(
         else:
             state.audits.record(req.hotkey, release.model_id, verdict.value)
             bump('pass' if verdict.passed else 'miss')
-        # Speed is priced on time to first token (network + queue + prefill); generation length is the user's
-        # choice and throughput is priced by the capacity probe. Fall back to total latency for legacy records.
-        speed_ms = req.ttft_ms if req.ttft_ms is not None else req.latency_ms
-        credits.setdefault(req.hotkey, []).append(
-            latency_credit(speed_ms, release.ttft_full_ms, release.ttft_zero_ms)
-            if verdict.passed and speed_ms is not None
-            else 0.0
-        )
+        # Speed is priced on served traffic: time to first token and decode rate against the blessing's curve at
+        # the load this validator had in flight to the miner (gittensor/validator/serving/scoring.py).
+        credits.setdefault(req.hotkey, []).append(request_speed_credit(req, release) if verdict.passed else 0.0)
         state.record(
             RequestRecord(
                 ts=time.time(),
@@ -275,6 +270,7 @@ async def baseline_round(
         messages = make_baseline_prompt(rng)
         max_tokens = baseline_max_tokens(rng, min(SERVING_MAX_TOKENS, max(release.max_tokens, 512)))
         synapse = InferenceSynapse(messages=messages, model_id=release.model_id, max_tokens=max_tokens, logprobs=True)
+        inflight = state.inflight().get(uid, 0) + 1
         started = time.monotonic()
         try:
             response = await consume_stream(dendrite, axon, synapse, release.request_timeout)
@@ -307,6 +303,7 @@ async def baseline_round(
                 detail='' if ok else str(status or err or 'no response'),
                 source='baseline',
                 ttft_ms=getattr(response, 'observed_ttft_ms', None) if ok else None,
+                inflight=inflight,
             )
         )
 
@@ -433,14 +430,11 @@ async def audit_round(
         else:  # probe disabled: capacity is not measured
             rates = [target_tps] * len(passing)
         for (uid, hotkey, _, credit), tps in zip(passing, rates):
-            ratio = tps / target_tps
-            capacity = (
-                min(1.0, ratio) if ratio >= SERVING_PROBE_FLOOR_RATIO else 0.0
-            )  # under the floor = shared / not a card
-            score = credit * capacity
+            capacity = min(1.0, tps / target_tps)  # telemetry: this card's burst aggregate against one 5090's
+            score = credit
             bt.logging.info(
-                f'Serving: UID {uid} {release.model_id} probe {tps:.0f} tok/s capacity {capacity:.2f} '
-                f'latency credit {credit:.2f} score {score:.3f}'
+                f'Serving: UID {uid} {release.model_id} burst {tps:.0f} tok/s ({capacity:.2f}x blessed) '
+                f'speed credit {credit:.2f} score {score:.3f}'
             )
             if score > best[hotkey][0]:
                 best[hotkey] = (score, release.model_id)

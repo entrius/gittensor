@@ -126,6 +126,7 @@ jobs:
                  single_stream_decode_tps: $speed[0].single_stream_decode_tps,
                  probe_shaped_decode_tps: $speed[0].probe_shaped_decode_tps,
                  burst_concurrency: $speed[0].burst_concurrency,
+                 decode_per_request: $speed[0].decode_per_request,
                  measured_on: ($pin + " on a rented RTX 5090, actions run " + $run)
                })' \
             gittensor/validator/weights/serving_loadout.json > /tmp/loadout.json

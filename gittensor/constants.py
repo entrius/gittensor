@@ -176,17 +176,13 @@ assert abs(OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE_CAP - 1.0) < EMISSION_SHA
 SERVING_SETTLEMENT_ROUNDS = 12  # 12 x 5-minute audit rounds
 SERVING_CHALLENGE_TIMEOUT = 30.0  # seconds before a probe request counts as failed
 SERVING_READY_TTL_S = 900.0  # gateway stops routing when the last audit round is older than this
-# Capacity = saturation burst. After settling the window, every READY miner is sent the blessed concurrency of
-# salted prompts at the same instant as every other miner (fleet-wide), verified afterwards by teacher forcing.
-# Verified tokens per second of decode time (batch wall-clock minus the first TTFT) over the release's blessed
-# aggregate at that concurrency (`speed.decode_tps_target`, measured on one honest 5090 by the conformance run) is
-# the capacity, capped at 1. Below SERVING_PROBE_FLOOR_RATIO x blessed the capacity is 0: sparkinfer queues rather
-# than 429s past its concurrency (2026-08-27: 16/24/32 concurrent all ~275 tok/s aggregate, wall 3.7 s -> 7 s), so
-# two hotkeys on one card each see ~half the blessed aggregate and fall under the floor. Probe outcomes affect
-# capacity only, never the window. The constants are fallbacks for a release without speed facts.
+# Load burst (telemetry). After settling the window, every READY miner is sent the blessed concurrency of salted
+# prompts at the same instant, verified afterwards by teacher forcing; verified tokens per second of decode time over
+# the release's blessed aggregate at that concurrency (`speed.decode_tps_target`) is reported per round and persisted
+# (dashboard: does this card's aggregate look like one 5090's?). It does not enter pay: capacity is priced by speed on
+# served traffic (below). The constants are fallbacks for a release without speed facts.
 SERVING_PROBE_REQUESTS = 16
 SERVING_PROBE_TARGET_TPS = 280.0
-SERVING_PROBE_FLOOR_RATIO = 0.6
 # A probe reading can only be too low (another validator's burst, a user spike, a blip), never too high: the miner
 # had to deliver those verified tokens. A reading under SERVING_PROBE_DIP_RATIO x the miner's median of its last
 # three is re-measured once after a random SERVING_PROBE_RETRY_DELAY_S and the better reading kept; a real slowdown
@@ -203,6 +199,16 @@ SERVING_VERIFY_WORKERS = 8  # concurrent /v1/score calls to the reference per ro
 # case, caught by the concurrent capacity probe.
 SERVING_LATENCY_FULL_CREDIT_MS = 500.0
 SERVING_LATENCY_ZERO_CREDIT_MS = 1_500.0
+# Decode speed on served traffic. Each served request with at least SERVING_DECODE_MIN_TOKENS completion tokens
+# yields a validator-observed decode rate, tokens / (total - TTFT); it is compared with what one honest card does on
+# this runtime at the number of requests THIS validator had in flight to the miner (the release's blessing-time
+# `speed.decode_per_request` curve, interpolated), so a miner busy with our own load is not penalised for it.
+# Credit = min(1, observed / expected); under SERVING_DECODE_FLOOR_RATIO it is 0 — a card shared between hotkeys or a
+# runtime that is not the blessed one is slower by integer factors under load, honest variance is +-10%. Round credit
+# is the mean over the round's served requests (misses 0), so availability, latency and speed price together.
+SERVING_DECODE_FLOOR_RATIO = 0.5
+SERVING_DECODE_MIN_TOKENS = 32
+SERVING_DECODE_PER_REQUEST_FALLBACK = ((1, 440.0), (6, 46.0), (16, 19.0))  # (concurrent requests, tok/s each)
 # Per-audit verdict. The blessed runtime is bit-reproducible (sparkinfer 7498736, SPARKINFER_DETERMINISTIC=1), so an
 # honest miner reproduces the reference's greedy tokens exactly and its logprobs to float noise; every planted
 # cheater differs on every prompt (measured 2026-08-24, internal serving-experiments notes: honest max |delta| 0.0000,

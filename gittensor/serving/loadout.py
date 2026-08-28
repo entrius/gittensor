@@ -24,7 +24,7 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import bittensor as bt
 
@@ -52,7 +52,8 @@ class ServingRelease:
     # --speed-json on the conformance GPU) and written by the pin-bump PR. The validator prices capacity and latency
     # against these, so the "one card" bar tracks the runtime as it gets faster. None -> the constants' defaults.
     decode_tps_target: Optional[float] = None  # aggregate decode tok/s of one honest card at burst_concurrency
-    burst_concurrency: Optional[int] = None  # requests in the saturation burst (the runtime's blessed concurrency)
+    burst_concurrency: Optional[int] = None  # requests in the load burst (the runtime's blessed concurrency)
+    decode_per_request: Optional[Dict[int, float]] = None  # concurrent requests -> per-request decode tok/s, one card
     ttft_full_ms: Optional[float] = None  # validator-observed TTFT up to which latency credit is 1.0
     ttft_zero_ms: Optional[float] = None  # ... and at which it reaches 0.0
 
@@ -73,6 +74,7 @@ class ServingRelease:
             request_timeout=float(raw.get('request_timeout', 60.0)),
             decode_tps_target=_optional_float(speed.get('decode_tps_target')),
             burst_concurrency=int(speed['burst_concurrency']) if speed.get('burst_concurrency') else None,
+            decode_per_request={int(k): float(v) for k, v in (speed.get('decode_per_request') or {}).items()} or None,
             ttft_full_ms=_optional_float(speed.get('ttft_full_ms')),
             ttft_zero_ms=_optional_float(speed.get('ttft_zero_ms')),
         )

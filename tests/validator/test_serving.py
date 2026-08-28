@@ -1092,7 +1092,7 @@ def test_audit_round_skips_release_without_reference(monkeypatch):
 
 
 def test_capacity_probe_splits_a_shared_gpu(monkeypatch):
-    """Two hotkeys on one card each see about half the blessed aggregate and earn nothing; a lone card gets ~1."""
+    """Two hotkeys on one card each report about half the blessed burst aggregate (telemetry); a lone card ~1."""
     from types import SimpleNamespace
 
     from gittensor.validator.serving import forward as fwd
@@ -1124,13 +1124,15 @@ def test_capacity_probe_splits_a_shared_gpu(monkeypatch):
         state.enqueue_served(_served(uid, good))
     serving = [(1, 'hk1', lone), (2, 'hk2', a), (3, 'hk3', b)]
     scores = _round(state, dendrite, serving, good, monkeypatch, probes=4)
-    assert scores['hk1'] == pytest.approx(1.0, abs=0.15)
-    assert scores['hk2'] == 0.0 and scores['hk3'] == 0.0  # each sees ~half the blessed aggregate: under the floor
-    assert all(r.ok for r in state.recent(50) if r.kind == 'probe')  # the burst was answered correctly, just slowly
+    assert scores == {'hk1': 1.0, 'hk2': 1.0, 'hk3': 1.0}  # the burst is telemetry: pay comes from served speed
+    tele = state.last_round['windows']
+    assert tele[1]['capacity'] == pytest.approx(1.0, abs=0.15)
+    assert tele[2]['capacity'] == pytest.approx(0.5, abs=0.15) and tele[3]['capacity'] == pytest.approx(0.5, abs=0.15)
+    assert all(r.ok for r in state.recent(50) if r.kind == 'probe')  # answered correctly, just slowly
 
 
-def test_probe_misses_cost_capacity_not_the_window(monkeypatch):
-    """A miner that serves traffic honestly but chokes on the burst keeps its window and is probed again."""
+def test_probe_misses_are_telemetry_not_the_window(monkeypatch):
+    """A miner that serves traffic honestly but chokes on the burst keeps its window and pay; the burst is re-sent."""
     from types import SimpleNamespace
 
     good = _echo_release()
@@ -1140,11 +1142,75 @@ def test_probe_misses_cost_capacity_not_the_window(monkeypatch):
     for _ in range(2):
         state.enqueue_served(_served(1, good))
         scores = _round(state, dendrite, [(1, 'hk1', axon)], good, monkeypatch, probes=6)
-        assert scores == {'hk1': 0.0}
+        assert scores == {'hk1': 1.0} and state.last_round['windows'][1]['capacity'] == 0.0
     assert calls == {id(axon): 12}
     window = state.audits.verdict('hk1', good.model_id)
     assert window.passed and window.n_audits == 2 and window.mean == 1.0
     assert sum(1 for r in state.recent(50) if r.kind == 'probe' and not r.ok) == 12
+
+
+def test_decode_speed_prices_served_requests_against_the_blessing_curve():
+    from gittensor.validator.serving.scoring import decode_credit, expected_decode_tps, request_speed_credit
+
+    curve = {1: 440.0, 6: 46.0, 16: 19.0}
+    assert expected_decode_tps(curve, 1) == 440.0 and expected_decode_tps(curve, 0) == 440.0
+    assert expected_decode_tps(curve, 16) == 19.0 and expected_decode_tps(curve, 40) == 19.0
+    assert expected_decode_tps(curve, 11) == pytest.approx(32.5)  # linear between 6 and 16
+    assert expected_decode_tps(None, 6) == 46.0  # constants' fallback curve
+    assert decode_credit(440.0, 440.0) == 1.0 and decode_credit(600.0, 440.0) == 1.0  # never more than one card
+    assert decode_credit(330.0, 440.0) == pytest.approx(0.75)
+    assert decode_credit(200.0, 440.0) == 0.0  # under the floor: shared card / not the blessed runtime
+
+    release = _echo_release()
+    release.decode_per_request = curve
+
+    def req(tokens: int, ttft_ms: float, latency_ms: float, inflight: int = 1) -> ServedRequest:
+        return ServedRequest(
+            ts=0.0,
+            uid=1,
+            hotkey='hk1',
+            model_id=release.model_id,
+            messages=MSGS,
+            ok=True,
+            latency_ms=latency_ms,
+            completion='x',
+            tokens=['t'] * tokens,
+            token_logprobs=[0.0] * tokens,
+            ttft_ms=ttft_ms,
+            inflight=inflight,
+        )
+
+    honest = req(64, 100.0, 100.0 + 64 / 440.0 * 1000.0)  # 440 tok/s after a 100 ms TTFT
+    assert request_speed_credit(honest, release) == pytest.approx(1.0)
+    busy = req(64, 100.0, 100.0 + 64 / 19.0 * 1000.0, inflight=16)  # 19 tok/s is what one card does at 16 in flight
+    assert request_speed_credit(busy, release) == pytest.approx(1.0)
+    shared = req(64, 100.0, 100.0 + 64 / 19.0 * 1000.0, inflight=1)  # 19 tok/s while we sent it one request
+    assert request_speed_credit(shared, release) == 0.0
+    slowish = req(64, 100.0, 100.0 + 64 / 330.0 * 1000.0)
+    assert request_speed_credit(slowish, release) == pytest.approx(0.75)
+    short = req(8, 100.0, 5_000.0)  # too few tokens to measure decode: TTFT band only
+    assert request_speed_credit(short, release) == 1.0
+    slow_ttft = req(64, 1_000.0, 1_000.0 + 64 / 440.0 * 1000.0)
+    assert request_speed_credit(slow_ttft, release) == pytest.approx(0.5)
+
+
+def test_gateway_and_baseline_record_inflight_at_dispatch(monkeypatch):
+    state = ServingState()
+    state.publish_round([_ready(7)], {})
+    client = _gateway_client(state, monkeypatch)
+    h = {'Authorization': 'Bearer k1'}
+    assert client.post('/v1/chat/completions', json={'messages': MSGS}, headers=h).status_code == 200
+    (served,) = state.drain_served()
+    assert served.inflight == 1  # the only request in flight when it was dispatched
+
+
+def test_release_speed_curve_parses(tmp_path):
+    from gittensor.serving.loadout import load_serving_loadout
+
+    raw = {'releases': [{'model_id': 'm', 'backend': 'echo', 'speed': {'decode_per_request': {'1': 440, '16': 19.5}}}]}
+    path = tmp_path / 'loadout.json'
+    path.write_text(json.dumps(raw))
+    assert load_serving_loadout(path).primary.decode_per_request == {1: 440.0, 16: 19.5}
 
 
 def test_serving_share_prices_gpu_hours_inside_the_cap(monkeypatch):

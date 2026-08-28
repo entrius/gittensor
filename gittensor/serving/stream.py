@@ -65,6 +65,7 @@ class StreamAssembler:
     content: str = ''
     tokens: List[str] = field(default_factory=list)
     token_ids: List[int] = field(default_factory=list)
+    token_bytes: List[List[int]] = field(default_factory=list)
     token_logprobs: List[float] = field(default_factory=list)
     model_id: Optional[str] = None
     finish_reason: Optional[str] = None
@@ -89,6 +90,8 @@ class StreamAssembler:
                 self.token_logprobs.append(float(entry['logprob']))
                 if entry.get('token_id') is not None:
                     self.token_ids.append(int(entry['token_id']))
+                if isinstance(entry.get('bytes'), list):
+                    self.token_bytes.append([int(b) for b in entry['bytes']])
             if choice.get('finish_reason'):
                 self.finish_reason = choice['finish_reason']
         usage = event.get('usage')
@@ -106,6 +109,9 @@ class StreamAssembler:
         synapse.served_model_id = self.model_id
         synapse.tokens = self.tokens or None
         synapse.token_ids = self.token_ids if self.token_ids and len(self.token_ids) == len(self.tokens) else None
+        synapse.token_bytes = (
+            self.token_bytes if self.token_bytes and len(self.token_bytes) == len(self.tokens) else None
+        )
         synapse.token_logprobs = self.token_logprobs or None
         synapse.finish_reason = self.finish_reason
         synapse.usage = self.usage

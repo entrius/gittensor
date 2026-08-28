@@ -61,6 +61,7 @@ class InferenceSynapse(bt.StreamingSynapse):
     decode_tps: Optional[float] = None
     tokens: Optional[List[str]] = None
     token_ids: Optional[List[int]] = None
+    token_bytes: Optional[List[List[int]]] = None  # raw UTF-8 bytes of each token, as the runtime reports them
     token_logprobs: Optional[List[float]] = None
     finish_reason: Optional[str] = None
     usage: Optional[Dict[str, int]] = None

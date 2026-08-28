@@ -188,6 +188,10 @@ SERVING_ATTEST_BUDGET_RATIO = 1.6
 SERVING_ATTEST_MIN_FILL_RATIO = 0.6
 SERVING_ATTEST_TIMEOUT = 45.0  # seconds: fill + chain on a 5090 is ~1.5 s; queued challenges show up as slow
 SERVING_ATTEST_UUID_MEMORY_ROUNDS = 12
+# A card counts only with the model resident: free VRAM before the fill must be at most total minus this fraction of
+# the reservation (a bare 5090 shows ~32 GB free, one holding the model ~8 GB). Every passing card is a card-hour, so
+# a multi-GPU hotkey earns per card it actually serves from — a second card with nothing loaded earns nothing.
+SERVING_ATTEST_MODEL_RESIDENT_RATIO = 0.8
 SERVING_VRAM_MODEL_RESERVED_BYTES = 24e9  # what sparkinfer holds with the model loaded (7498736 on a 5090: 23.7 GB)
 SERVING_VERIFY_WORKERS = 8  # concurrent /v1/score calls to the reference per round
 # Latency credit on the validator-observed time to first streamed token (network + queue + prefill). An honest
@@ -231,6 +235,12 @@ SERVING_AUDIT_MAX_ABS_LOGPROB_DIFF = 0.10  # largest single-position |logprob de
 #   python scripts/serving_cheat_experiment.py analyze --honest <honest rows> --cheaters <cheater rows>
 SERVING_AUDIT_WINDOW = 10
 SERVING_AUDIT_WINDOW_THRESHOLDS = ((1, 0.8),)
+# Verification is one reference prefill per request, so it is sampled: per (hotkey, round) every baseline prompt and
+# every failed request is judged, and of the completed gateway requests a random max(SAMPLE_MIN, SAMPLE_FRACTION x n)
+# — the floor fills a window in one round, the fraction bounds reference load under real traffic. Nothing on the
+# wire says which requests were drawn.
+SERVING_AUDIT_SAMPLE_FRACTION = 0.2
+SERVING_AUDIT_SAMPLE_MIN = 10
 SERVING_QUARANTINE_S = 3600.0
 # Baseline traffic: every round the validator sends each serving axon this many baseline prompts of its own, at
 # random moments spread over the round (so they do not mark the round boundary), over the same path as user

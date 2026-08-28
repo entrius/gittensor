@@ -1,0 +1,74 @@
+name: attest image
+
+# Builds the attestation sidecar (docker/attest) and publishes it as entrius/gt-attest:<tag>. One image for every
+# blessed release: miners run it beside their runtime container, validators beside their reference. Bump the tag
+# (v1, v2, ...) when docker/attest changes and point `attest.image` in serving_loadout.json at it. No GPU in CI: the
+# build proves it compiles; the sparkinfer conformance job exercises it on a rented 5090.
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Tag to push (e.g. v1). Empty = the tag in attest.image of serving_loadout.json."
+        required: false
+        default: ""
+      cuda_archs:
+        description: "CMAKE_CUDA_ARCHITECTURES"
+        required: false
+        default: "120"
+  push:
+    paths:
+      - docker/attest/**
+      - .github/workflows/attest-image.yml
+
+jobs:
+  image:
+    name: ${{ github.event_name == 'workflow_dispatch' && 'build and push' || 'build only (dry run)' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Resolve the tag (input, else attest.image in serving_loadout.json)
+        id: tag
+        run: |
+          TAG="${{ inputs.image_tag }}"
+          if [ -z "$TAG" ]; then
+            TAG=$(jq -r '.releases[0].attest.image // "entrius/gt-attest:dev"' gittensor/validator/weights/serving_loadout.json | sed 's/.*://')
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "building docker/attest as entrius/gt-attest:$TAG"
+
+      - name: Free disk space (CUDA devel image is large)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker system prune -af
+
+      - name: Log in to Docker Hub
+        if: github.event_name == 'workflow_dispatch'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/attest/Dockerfile
+          push: ${{ github.event_name == 'workflow_dispatch' }}
+          build-args: |
+            CUDA_ARCHS=${{ inputs.cuda_archs || '120' }}
+            GT_ATTEST_VERSION=${{ steps.tag.outputs.tag }}
+          tags: |
+            entrius/gt-attest:${{ steps.tag.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Digest
+        if: github.event_name == 'workflow_dispatch'
+        run: echo "entrius/gt-attest:${{ steps.tag.outputs.tag }}@${{ steps.build.outputs.digest }}"

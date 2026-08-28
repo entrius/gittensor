@@ -70,6 +70,8 @@ def round_rows(
         release.runtime_pin if release else None,
         release.model_sha256 if release else None,
         release.model_file if release else None,
+        release.runtime_image if release else None,
+        release.attest_image if release else None,
     )
     miners = []
     for uid, w in windows.items():

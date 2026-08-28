@@ -341,14 +341,15 @@ def speed_profile(base_url: str, model_id: str, max_tokens: int, timeout: float,
     }
 
 
-def check_attest(rep: Report, base_url: str, timeout: float) -> Dict:
-    """A1: the runtime image's attestation sidecar (:8081) answers a seeded challenge with a digest inside 3 s idle,
-    and two simultaneous challenges each take >= 1.6x a single one (the property the cohort check rests on)."""
+def check_attest(rep: Report, base_url: str, timeout: float, attest_url: Optional[str] = None) -> Dict:
+    """A1: the attest container beside the runtime (entrius/gt-attest, :8081 on the runtime's host unless
+    ``attest_url`` says otherwise) answers a seeded challenge with a digest inside 3 s idle, and two simultaneous
+    challenges each take >= 1.6x a single one (the property the cohort check rests on)."""
     from urllib.parse import urlsplit, urlunsplit
 
     parts = urlsplit(base_url)
     host = parts.hostname or ''
-    attest_url = urlunsplit((parts.scheme or 'http', f'{host}:8081', '', '', ''))
+    attest_url = (attest_url or urlunsplit((parts.scheme or 'http', f'{host}:8081', '', '', ''))).rstrip('/')
     facts: Dict = {}
     try:
         single = requests.post(
@@ -402,6 +403,7 @@ def main() -> int:
     )
     ap.add_argument('--overload-max-tokens', type=int, default=512)
     ap.add_argument('--api-key', default=None, help='bearer for a remote runtime (sparkinfer --api-key)')
+    ap.add_argument('--attest-url', default=None, help='the attest container (default: the runtime host, port 8081)')
     ap.add_argument(
         '--speed-json',
         default=None,
@@ -428,7 +430,7 @@ def main() -> int:
     if args.parallel > 0:
         check_overload(rep, base_url, args.model_id, args.parallel, args.overload_max_tokens, args.timeout)
 
-    attest_facts = check_attest(rep, base_url, args.timeout)
+    attest_facts = check_attest(rep, base_url, args.timeout, args.attest_url)
     if args.speed_json:
         profile = speed_profile(base_url, args.model_id, args.max_tokens, args.timeout, args.speed_burst)
         profile['attest'] = attest_facts

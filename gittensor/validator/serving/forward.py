@@ -28,7 +28,9 @@ rounds by ``ServingState``.
 
 import asyncio
 import hashlib
+import math
 import random
+import secrets
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -39,6 +41,8 @@ import bittensor as bt
 
 from gittensor.classes import RequestSpeed
 from gittensor.constants import (
+    SERVING_AUDIT_SAMPLE_FRACTION,
+    SERVING_AUDIT_SAMPLE_MIN,
     SERVING_BASELINE_PER_ROUND,
     SERVING_DORMANT_AFTER_ROUNDS,
     SERVING_DORMANT_RETRY_ROUNDS,
@@ -61,6 +65,28 @@ if TYPE_CHECKING:
     from neurons.validator import Validator
 
 
+def sample_for_audit(
+    served: Sequence[ServedRequest],
+    fraction: float = SERVING_AUDIT_SAMPLE_FRACTION,
+    minimum: int = SERVING_AUDIT_SAMPLE_MIN,
+    rng=None,
+) -> Tuple[List[ServedRequest], List[ServedRequest]]:
+    """(to verify, skipped): per hotkey every baseline prompt and every failed request, plus a random
+    max(minimum, fraction x n) of the completed gateway requests. Order of the input is kept."""
+    rng = rng or secrets.SystemRandom()
+    by_hotkey: Dict[str, List[int]] = {}
+    for i, req in enumerate(served):
+        if req.ok and req.source == 'gateway':
+            by_hotkey.setdefault(req.hotkey, []).append(i)
+    keep = set(range(len(served)))
+    for idxs in by_hotkey.values():
+        n = len(idxs)
+        k = max(minimum, math.ceil(fraction * n))
+        if k < n:
+            keep.difference_update(set(idxs) - set(rng.sample(idxs, k)))
+    return [r for i, r in enumerate(served) if i in keep], [r for i, r in enumerate(served) if i not in keep]
+
+
 def verify_served_round(
     state: ServingState,
     reference: Reference,
@@ -68,15 +94,21 @@ def verify_served_round(
     served: Sequence[ServedRequest],
     summary: Optional[Dict[str, int]] = None,
     last_miss: Optional[Dict[str, str]] = None,
+    rng=None,
 ) -> Dict[str, List[RequestSpeed]]:
-    """Verify every served request for ``release`` into the window; return per-request speed per hotkey.
+    """Verify this round's audit sample of the requests served for ``release`` into the window; return per-request
+    speed per hotkey.
 
     Reference calls run on a small thread pool; window updates stay on this thread. ``last_miss`` (hotkey ->
     reason) is filled with the most recent miss or strike reason so the round report can show a miner why.
     """
     summary = summary if summary is not None else {}
     last_miss = last_miss if last_miss is not None else {}
-    mine = [req for req in served if req.model_id == release.model_id]
+    mine, skipped = sample_for_audit([req for req in served if req.model_id == release.model_id], rng=rng)
+    for req in skipped:
+        summary['served'] = summary.get('served', 0) + 1
+        summary[req.source] = summary.get(req.source, 0) + 1
+        summary['unsampled'] = summary.get('unsampled', 0) + 1
 
     def judge(req: ServedRequest) -> Optional[AuditVerdict]:
         if not req.ok and 'budget' in req.detail.lower():  # this validator over-sent; not the miner's fault
@@ -296,19 +328,21 @@ async def audit_round(
             state, dendrite, [(uid, hotkey, axon) for uid, hotkey, axon, _ in passing], release, rng=attest_rng
         )
         for uid, hotkey, _, credit in passing:
-            ok = attested.get(hotkey, False)
-            score = credit if ok else 0.0
+            cards = int(attested.get(hotkey, 0))
+            ok = cards > 0
+            score = credit * cards  # one card-hour per attested card at this speed
             st = state.attest_status.get(hotkey, {})
             bt.logging.info(
-                f'Serving: UID {uid} {release.model_id} attested {"yes" if ok else "no"} speed credit {credit:.2f} '
-                f'score {score:.3f}'
+                f'Serving: UID {uid} {release.model_id} attested {"yes" if ok else "no"} cards {cards} '
+                f'speed credit {credit:.2f} score {score:.3f}'
             )
             windows[uid].update(
                 attested=ok,
                 gpu_uuid=st.get('uuid', ''),
+                gpu_uuids=st.get('uuids', [st['uuid']] if st.get('uuid') else []),
                 attest_ms=st.get('wall_ms'),
                 attest_reason=st.get('reason', 'not attested yet'),
-                capacity=1.0 if ok else 0.0,
+                capacity=float(cards),
                 score=round(score, 4),
             )
             if not ok and not windows[uid]['last_miss']:

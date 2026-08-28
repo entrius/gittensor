@@ -325,8 +325,9 @@ def speed_profile(base_url: str, model_id: str, max_tokens: int, timeout: float,
         'probe_burst': burst,
         'client_ttft_ms_median': round(statistics.median(t for _, t in single), 1),
         'max_tokens': max_tokens,
-        # what the release carries: 90% of one honest card leaves room for normal variance, none for a shared card
-        'decode_tps_target': round(0.9 * probe_tps, 1),
+        # what the release carries: capacity = aggregate / decode_tps_target capped at 1, 0 under the floor ratio
+        'decode_tps_target': round(probe_tps, 1),
+        'burst_concurrency': burst,
     }
 
 
@@ -348,7 +349,9 @@ def main() -> int:
         default=None,
         help='also measure the speed profile (single-stream and probe-shaped decode tok/s) and write it here',
     )
-    ap.add_argument('--speed-burst', type=int, default=6, help='concurrent requests in the probe-shaped measurement')
+    ap.add_argument(
+        '--speed-burst', type=int, default=16, help='concurrent requests in the saturation burst (blessed concurrency)'
+    )
     args = ap.parse_args()
     global API_KEY
     API_KEY = args.api_key

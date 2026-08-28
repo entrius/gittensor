@@ -18,15 +18,16 @@ published as *probation* so baseline traffic can give them a window.
 
     round score = window passes (0/1) x mean latency credit over this round's served requests x capacity
 
-``capacity`` comes from the round's load probe: every READY miner gets
-``SERVING_PROBE_REQUESTS`` prompts at the same instant as every other miner —
+``capacity`` comes from the round's saturation burst: every READY miner gets
+the release's blessed concurrency of prompts at the same instant as every other miner —
 each prompt unique to that hotkey and round (salted), verified afterwards by
 teacher forcing under the reference like any served request, so an answer can
 neither be shared between hotkeys on one card nor precomputed. Verified tokens
 per second of *decode* time (batch wall-clock minus the first observed TTFT, so
 network distance prices latency, not throughput) over the release's blessed
-``decode_tps_target`` (capped at 1) is its capacity — so hotkeys sharing one
-GPU share one GPU's pay. Probe outcomes affect capacity only, never the window. Round scores are settled
+``decode_tps_target`` (capped at 1, 0 under ``SERVING_PROBE_FLOOR_RATIO``) is its
+capacity — hotkeys sharing one GPU each fall under the floor. Probe outcomes
+affect capacity only, never the window. Round scores are settled
 over the trailing ``SERVING_SETTLEMENT_ROUNDS`` rounds by ``ServingState``.
 """
 
@@ -52,6 +53,7 @@ from gittensor.constants import (
     SERVING_DORMANT_RETRY_ROUNDS,
     SERVING_MAX_TOKENS,
     SERVING_PROBE_DIP_RATIO,
+    SERVING_PROBE_FLOOR_RATIO,
     SERVING_PROBE_REQUESTS,
     SERVING_PROBE_RETRY_DELAY_S,
     SERVING_PROBE_TARGET_TPS,
@@ -410,7 +412,8 @@ async def audit_round(
         if not passing:
             continue
         target_tps = release.decode_tps_target or SERVING_PROBE_TARGET_TPS
-        if SERVING_PROBE_REQUESTS > 0:
+        burst = release.burst_concurrency or SERVING_PROBE_REQUESTS
+        if burst > 0:
             rates = await asyncio.gather(
                 *(
                     probe_with_retry(
@@ -421,7 +424,7 @@ async def audit_round(
                         axon,
                         release,
                         reference,
-                        probe_prompts(SERVING_PROBE_REQUESTS),
+                        probe_prompts(burst),
                         probe_retry_delay_s,
                     )
                     for uid, hotkey, axon, _ in passing
@@ -430,7 +433,10 @@ async def audit_round(
         else:  # probe disabled: capacity is not measured
             rates = [target_tps] * len(passing)
         for (uid, hotkey, _, credit), tps in zip(passing, rates):
-            capacity = min(1.0, tps / target_tps)
+            ratio = tps / target_tps
+            capacity = (
+                min(1.0, ratio) if ratio >= SERVING_PROBE_FLOOR_RATIO else 0.0
+            )  # under the floor = shared / not a card
             score = credit * capacity
             bt.logging.info(
                 f'Serving: UID {uid} {release.model_id} probe {tps:.0f} tok/s capacity {capacity:.2f} '

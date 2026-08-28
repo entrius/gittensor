@@ -27,7 +27,11 @@ def run(args, timeout=120.0):
         queued_ms = (time.monotonic() - started) * 1000.0
         proc = subprocess.run([BIN, *args], capture_output=True, text=True, timeout=timeout)
     if proc.returncode != 0:
-        return 500, {'error': (proc.stdout or proc.stderr).strip()[:500], 'exit': proc.returncode, 'queued_ms': queued_ms}
+        return 500, {
+            'error': (proc.stdout or proc.stderr).strip()[:500],
+            'exit': proc.returncode,
+            'queued_ms': queued_ms,
+        }
     out = json.loads(proc.stdout)
     out['queued_ms'] = round(queued_ms, 1)
     return 200, out
@@ -51,7 +55,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path != '/v1/attest/info' or not self._auth():
             return self._send(404, {'error': 'not found'})
-        self._send(*run(['--seed', '1', '--iters', '1', '--dim', '256', '--matrices', '2', '--device', 'all'], timeout=30.0))
+        self._send(
+            *run(['--seed', '1', '--iters', '1', '--dim', '256', '--matrices', '2', '--device', 'all'], timeout=30.0)
+        )
 
     def do_POST(self):
         if self.path != '/v1/attest' or not self._auth():

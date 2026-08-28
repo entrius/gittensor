@@ -34,7 +34,8 @@ ROUND = {
             'model_id': 'qwen',
             'served': 3,
             'credit': 1.0,
-            'probe_tps': 190.0,
+            'ttft_ms': 48.3,
+            'decode_tps': 190.0,
             'capacity': 1.0,
             'score': 1.0,
             'last_miss': '',
@@ -50,7 +51,8 @@ ROUND = {
             'model_id': 'qwen',
             'served': 1,
             'credit': 0.0,
-            'probe_tps': None,
+            'ttft_ms': None,
+            'decode_tps': None,
             'capacity': 0.0,
             'score': 0.0,
             'last_miss': 'tokenization mismatch (3 vs 4)',
@@ -80,11 +82,11 @@ def test_round_rows_shape_and_pricing():
     assert summary[18:] == (None, None, None, None)
     assert len(miners) == 2
     ready = next(m for m in miners if m[2] == 16)
-    assert ready[5] == 'ready' and ready[12] == 190.0 and ready[15] == 0.5 and ready[16] is None
+    assert ready[5] == 'ready' and ready[12] == 48.3 and ready[13] == 190.0 and ready[16] == 0.5 and ready[17] is None
     quarantined = next(m for m in miners if m[2] == 27)
     assert quarantined[5] == 'quarantined'
     assert quarantined[9] == dt.datetime.fromtimestamp(1_800_000_000.0, dt.timezone.utc)
-    assert quarantined[16].startswith('tokenization mismatch')
+    assert quarantined[17].startswith('tokenization mismatch')
 
 
 def test_round_rows_carry_the_enforced_release():

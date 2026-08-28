@@ -209,8 +209,8 @@ ON CONFLICT (validator_hotkey, round_ts) DO NOTHING
 BULK_INSERT_SERVING_MINER_ROUNDS = """
 INSERT INTO serving_miner_rounds (
     validator_hotkey, round_ts, uid, hotkey, model_id, status, window_mean, window_n, window_passed,
-    quarantined_until, served, credit, probe_tps, capacity, round_score, settled_score, last_miss_reason
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    quarantined_until, served, credit, ttft_ms, decode_tps, capacity, round_score, settled_score, last_miss_reason
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (validator_hotkey, round_ts, uid, hotkey) DO NOTHING
 """
 

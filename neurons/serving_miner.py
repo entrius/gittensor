@@ -81,9 +81,9 @@ class ServingMiner(BaseNeuron):
             verify_fn=partial(verify_inference, self),
         ).attach(
             forward_fn=partial(handle_attest, self),
-            blacklist_fn=partial(blacklist_inference, self),
-            priority_fn=partial(priority_inference, self),
-            verify_fn=partial(verify_inference, self),
+            blacklist_fn=partial(blacklist_attest, self),
+            priority_fn=partial(priority_attest, self),
+            verify_fn=partial(verify_attest, self),
         )
         self.backend_slots = asyncio.Semaphore(SERVING_BACKEND_CONCURRENCY)
         self.seen_nonces: 'OrderedDict[str, None]' = OrderedDict()
@@ -249,6 +249,27 @@ async def blacklist_inference(miner: ServingMiner, synapse: InferenceSynapse) ->
     if not reserve_audit_budget(miner, hotkey, int(synapse.max_tokens)):
         return True, f'Validator audit budget spent ({validator_tokens_per_tempo()} tokens per tempo)'
     return False, 'Permitted validator'
+
+
+# bt.Axon.attach asserts each hook's signature against the forward's synapse type, so the attestation hooks are
+# typed AttestSynapse and delegate to the inference gate. An attestation charges no tokens to a validator's budget.
+async def blacklist_attest(miner: ServingMiner, synapse: AttestSynapse) -> Tuple[bool, str]:
+    return await blacklist_inference(miner, _as_budget_free(synapse))
+
+
+async def priority_attest(miner: ServingMiner, synapse: AttestSynapse) -> float:
+    return await priority_inference(miner, _as_budget_free(synapse))
+
+
+async def verify_attest(miner: ServingMiner, synapse: AttestSynapse) -> None:
+    await verify_inference(miner, synapse)  # type: ignore[arg-type]
+
+
+def _as_budget_free(synapse: AttestSynapse) -> InferenceSynapse:
+    """The inference gate reads dendrite + max_tokens; an attestation is the same caller charging zero tokens."""
+    shim = InferenceSynapse(messages=[], model_id='', max_tokens=0)
+    shim.dendrite = synapse.dendrite
+    return shim
 
 
 async def priority_inference(miner: ServingMiner, synapse: InferenceSynapse) -> float:

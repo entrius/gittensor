@@ -1442,3 +1442,19 @@ def test_sidecar_url_derives_from_the_runtime_url():
     assert _sidecar_url('http://82.76.142.91:45565') == 'http://82.76.142.91:8081'
     assert _sidecar_url('http://reference:8080/') == 'http://reference:8081'
     assert _sidecar_url(None) is None
+
+
+def test_miner_axon_hooks_match_their_forward_synapse_types():
+    """bt.Axon.attach asserts blacklist/priority/verify signatures against the forward's synapse annotation."""
+    import inspect
+    from functools import partial
+
+    from neurons import serving_miner as sm
+
+    for fwd, bl, pr, vf, syn in (
+        (sm.handle_inference, sm.blacklist_inference, sm.priority_inference, sm.verify_inference, 'InferenceSynapse'),
+        (sm.handle_attest, sm.blacklist_attest, sm.priority_attest, sm.verify_attest, 'AttestSynapse'),
+    ):
+        for fn in (fwd, bl, pr, vf):
+            (param,) = inspect.signature(partial(fn, None)).parameters.values()
+            assert param.name == 'synapse' and getattr(param.annotation, '__name__', param.annotation) == syn

@@ -27,6 +27,11 @@ on:
         type: boolean
         required: false
         default: true
+      build:
+        description: "Build and push the image. Uncheck to conformance-check a tag already on Docker Hub without republishing it (the digest is read from the registry)."
+        type: boolean
+        required: false
+        default: true
   # Build-only check (never pushes) whenever the Dockerfile or this workflow changes.
   push:
     paths:
@@ -35,6 +40,7 @@ on:
 
 jobs:
   image:
+    if: github.event_name != 'workflow_dispatch' || inputs.build
     outputs:
       ref: ${{ steps.ref.outputs.ref }}
       tag: ${{ steps.ref.outputs.tag }}
@@ -91,17 +97,40 @@ jobs:
   conformance:
     name: conformance on a rented 5090
     needs: image
-    if: github.event_name == 'workflow_dispatch' && inputs.conformance
+    # Runs whether or not the image job ran: with `build` unchecked it checks a tag already on Docker Hub, so a
+    # blessed tag is never republished just to re-measure it.
+    if: |
+      always() && github.event_name == 'workflow_dispatch' && inputs.conformance
+      && (needs.image.result == 'success' || needs.image.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 150
     env:
       LIUM_API_KEY: ${{ secrets.LIUM_API_KEY }}
-      REF: ${{ needs.image.outputs.ref }}
-      TAG: ${{ needs.image.outputs.tag }}
-      DIGEST: ${{ needs.image.outputs.digest }}
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
+
+      - name: Resolve ref, tag and digest (from the build job, else from the registry)
+        id: img
+        run: |
+          REF="${{ needs.image.outputs.ref }}"
+          TAG="${{ needs.image.outputs.tag }}"
+          DIGEST="${{ needs.image.outputs.digest }}"
+          if [ -z "$REF" ]; then
+            REF="${{ inputs.sparkinfer_ref }}"
+            [ -n "$REF" ] || REF=$(jq -r '.releases[0].runtime_pin' gittensor/validator/weights/serving_loadout.json | sed 's/.*@//')
+          fi
+          if [ -z "$TAG" ]; then
+            TAG="${{ inputs.image_tag }}"; TAG="${TAG:-$REF}"
+          fi
+          if [ -z "$DIGEST" ]; then
+            DIGEST=$(curl -fsS "https://hub.docker.com/v2/repositories/entrius/sparkinfer/tags/$TAG" | jq -r '.digest // empty')
+            [ -n "$DIGEST" ] || { echo "entrius/sparkinfer:$TAG is not on Docker Hub; build it first"; exit 1; }
+            echo "checking the published entrius/sparkinfer:$TAG ($DIGEST) — not rebuilt"
+          fi
+          echo "REF=$REF" >> "$GITHUB_ENV"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "DIGEST=$DIGEST" >> "$GITHUB_ENV"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4

@@ -10,6 +10,7 @@
       "backend": "openai-compat",
       "base_url": "http://127.0.0.1:8080",
       "max_tokens": 64,
+      "end_of_turn_token_id": 151645,
       "request_timeout": 60,
       "runtime_pin": "gittensor-ai-lab/sparkinfer@7498736",
       "runtime_image": "entrius/sparkinfer:7498736",

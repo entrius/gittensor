@@ -677,6 +677,53 @@ def test_verify_served_early_stop_must_be_the_models_own():
     assert not no_ids.passed and no_ids.reason == 'no token ids'
 
 
+def test_early_stop_without_a_listed_end_of_turn_is_verified_by_forcing_the_releases_eos_id():
+    """sparkinfer 7498736 lists only the content tokens on a natural stop (measured 2026-08-28), so the validator
+    appends the release's end-of-turn id and asks the reference whether the model would have stopped there."""
+    from gittensor.serving.audit import verify_served
+
+    release = ServingRelease(model_id='m', backend='openai-compat', base_url='http://x', end_of_turn_token_id=151645)
+    tokens, logprobs, ids = ['Hi', ' there', '!'], [-0.1, -0.2, -0.3], [12675, 1017, 0]
+    forced_ids = []
+
+    class Reference:
+        model_id = 'm'
+
+        def __init__(self, stops: bool):
+            self.stops = stops
+
+        def score_served(self, messages, completion, token_ids=None):
+            forced_ids.append(list(token_ids))
+            k = len(token_ids)
+            argmax = tokens + (['<|im_end|>'] if self.stops else [' and']) if k == 4 else tokens[:k]
+            return {'tokens': tokens[:k], 'logprobs': (logprobs + [-0.5])[:k], 'argmax': argmax, 'usage': {}}
+
+        def sample(self):
+            raise NotImplementedError
+
+        def __len__(self):
+            return 1
+
+    msgs = [{'role': 'user', 'content': 'Say hi in three words.'}]
+    ok = verify_served(
+        Reference(True), msgs, 'Hi there!', tokens, logprobs, token_ids=ids, release=release, max_tokens=64
+    )
+    assert ok.passed and forced_ids[-1] == ids + [151645]
+    cut = verify_served(
+        Reference(False), msgs, 'Hi there!', tokens, logprobs, token_ids=ids, release=release, max_tokens=64
+    )
+    assert not cut.passed and cut.hard and 'would have continued' in cut.reason
+    full = verify_served(
+        Reference(False), msgs, 'Hi there!', tokens, logprobs, token_ids=ids, release=release, max_tokens=3
+    )
+    assert full.passed and forced_ids[-1] == ids  # used the whole budget: nothing to append
+    bare = ServingRelease(model_id='m', backend='openai-compat', base_url='http://x')
+    no_id = verify_served(
+        Reference(True), msgs, 'Hi there!', tokens, logprobs, token_ids=ids, release=bare, max_tokens=64
+    )
+    assert not no_id.passed and not no_id.hard and 'without end-of-turn' in no_id.reason
+
+
 def test_verified_bytes_must_spell_the_users_completion():
     from gittensor.serving.audit import spells
 

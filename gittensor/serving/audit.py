@@ -447,15 +447,25 @@ def verify_served(
     content_n = len(mine) - 1 if ended else len(mine)
     if content_n <= 0:
         return AuditVerdict(False, 0.0, float('inf'), 'empty completion')
+    appended = False
     if max_tokens is not None and content_n < max_tokens and not ended:
-        # Stopped short of the budget without an end-of-turn token: the model did not choose to stop here.
-        return AuditVerdict(
-            False, 0.0, float('inf'), f'stopped at {content_n} of {max_tokens} tokens without end-of-turn'
-        )
-    # The end-of-turn token is forced and judged like any other position: the reference's argmax there must be the
-    # end-of-turn, which is what makes an early stop the model's own decision and not the miner's.
+        # Stopped short of the budget with no end-of-turn token in the transcript (sparkinfer 7498736 lists only
+        # the content tokens on a natural stop). The validator appends the release's end-of-turn id itself and
+        # judges that position on the reference's argmax alone: the model must have chosen to stop here.
+        eos_id = release.end_of_turn_token_id if release is not None else None
+        if mine_ids is None or eos_id is None:
+            return AuditVerdict(
+                False, 0.0, float('inf'), f'stopped at {content_n} of {max_tokens} tokens without end-of-turn'
+            )
+        mine_ids, appended = mine_ids + [eos_id], True
+    # An end-of-turn position — the miner's or the appended one — is forced like any other: the reference's argmax
+    # there must be the end-of-turn, which is what makes an early stop the model's own decision and not the miner's.
     ref = reference.score_served(messages, completion, mine_ids)
-    argmax, ref_lp = ref.get('argmax') or [], ref.get('logprobs') or []
+    argmax, ref_lp = list(ref.get('argmax') or []), list(ref.get('logprobs') or [])
+    if appended:
+        if len(argmax) == len(mine) + 1 and argmax[-1] not in end_of_turn:
+            return AuditVerdict(False, 0.0, float('inf'), 'stopped early: the model would have continued', hard=True)
+        argmax, ref_lp = argmax[: len(mine)], ref_lp[: len(mine)]
     if len(argmax) != len(mine) or len(ref_lp) != len(mine):
         return AuditVerdict(False, 0.0, float('inf'), f'tokenization mismatch ({len(mine)} vs {len(argmax)})')
     if mine_ids and ref.get('bytes'):

@@ -45,6 +45,7 @@ class ServingRelease:
     backend: str
     release_id: str = ''  # what the validator keys audits, quarantine and READY sets by; defaults to model_id
     max_tokens: int = 64
+    end_of_turn_token_id: Optional[int] = None  # the model's end-of-turn id; forced to verify an early stop
     base_url: Optional[str] = None  # miner side: the runtime this miner serves from
     runtime_pin: Optional[str] = None
     runtime_image: Optional[str] = None  # the blessed image by digest (entrius/sparkinfer:<tag>@sha256:...)
@@ -110,6 +111,9 @@ class ServingRelease:
             backend=raw['backend'],
             release_id=str(raw.get('release_id') or raw['model_id']),
             max_tokens=int(raw.get('max_tokens', 64)),
+            end_of_turn_token_id=int(raw['end_of_turn_token_id'])
+            if raw.get('end_of_turn_token_id') is not None
+            else None,
             base_url=raw.get('base_url'),
             runtime_pin=raw.get('runtime_pin'),
             runtime_image=raw.get('runtime_image'),

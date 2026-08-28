@@ -298,9 +298,11 @@ SERVING_SEEN_NONCES = 10_000  # miner: replay guard size; covers many minutes of
 SERVING_MAX_TOKENS = 1024  # hard cap per request (API and miner both enforce)
 # Gateway: total characters across a request's messages (~4 per token). A prompt past the release's context makes
 # the runtime answer 400 — not the miner's fault, but every such request used to land in its window as a miss, so
-# one key holder could take any miner off READY with a few oversized prompts. The cap is set under the blessed
-# release's context; a request the runtime still rejects is checked against the reference before it counts.
-SERVING_MAX_PROMPT_CHARS = 16_000
+# one key holder could take any miner off READY with a few oversized prompts. Sized from the blessed release on a
+# 5090 (2026-08-28: ctx 36864; TTFT 403 ms at 8.9k prompt tokens, 500 ms at ~11.5k, 1453 ms at 35.6k): ~10k tokens
+# keeps an honest prefill inside the full-credit TTFT band. A request the runtime still rejects is checked against
+# the reference before it counts.
+SERVING_MAX_PROMPT_CHARS = 40_000
 SERVING_DB_RETENTION_DAYS = 7  # validator: per-round serving rows older than this are pruned on each write
 SERVING_REQUEST_LOG_SIZE = 5_000  # in-memory ring of recent API/audit requests (telemetry)
 

@@ -237,6 +237,7 @@ class _FakeResponse:
         self.served_model_id = model_id
         self.tokens = result.tokens
         self.token_ids = result.token_ids
+        self.token_bytes = None
         self.token_logprobs = result.token_logprobs
         self.ttft_ms = 12.0
         self.decode_tps = 99.0
@@ -556,6 +557,28 @@ def test_verify_served_forces_miner_token_ids():
 
     lie = verify_served(BindingReference(), good.messages, good.completion, tokens, logprobs, token_ids=ids)
     assert not lie.passed and not lie.hard and 'do not spell' in lie.reason
+
+    class ExactReference(ForcingReference):
+        def score_served(self, messages, completion, token_ids=None):
+            out = super().score_served(messages, completion, token_ids)
+            out['bytes'] = [t.encode() for t in tokens]  # what the forced ids spell
+            return out
+
+    mine_bytes = [list(t.encode()) for t in tokens]
+    assert verify_served(
+        ExactReference(), good.messages, good.completion, tokens, logprobs, token_ids=ids, token_bytes=mine_bytes
+    ).passed
+    forged = [list(b'x')] + mine_bytes[1:]
+    assert (
+        'streamed bytes'
+        in verify_served(
+            ExactReference(), good.messages, good.completion, tokens, logprobs, token_ids=ids, token_bytes=forged
+        ).reason
+    )
+    # a multibyte character split across streamed tokens: the stream's text carries U+FFFD, the bytes are fine
+    assert good.completion is not None
+    split_text = '\ufffd' + good.completion[1:]
+    assert verify_served(ExactReference(), good.messages, split_text, tokens, logprobs, token_ids=ids).passed
 
 
 def test_stream_assembler_collects_token_ids():
@@ -1428,3 +1451,19 @@ def test_sidecar_url_derives_from_the_runtime_url():
     assert _sidecar_url('http://82.76.142.91:45565') == 'http://82.76.142.91:8081'
     assert _sidecar_url('http://reference:8080/') == 'http://reference:8081'
     assert _sidecar_url(None) is None
+
+
+def test_miner_axon_hooks_match_their_forward_synapse_types():
+    """bt.Axon.attach asserts blacklist/priority/verify signatures against the forward's synapse annotation."""
+    import inspect
+    from functools import partial
+
+    from neurons import serving_miner as sm
+
+    for fwd, bl, pr, vf, syn in (
+        (sm.handle_inference, sm.blacklist_inference, sm.priority_inference, sm.verify_inference, 'InferenceSynapse'),
+        (sm.handle_attest, sm.blacklist_attest, sm.priority_attest, sm.verify_attest, 'AttestSynapse'),
+    ):
+        for fn in (fwd, bl, pr, vf):
+            (param,) = inspect.signature(partial(fn, None)).parameters.values()
+            assert param.name == 'synapse' and getattr(param.annotation, '__name__', param.annotation) == syn

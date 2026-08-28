@@ -11,6 +11,7 @@
       "max_tokens": 64,
       "request_timeout": 60,
       "runtime_pin": "gittensor-ai-lab/sparkinfer@7498736",
+      "runtime_image": "entrius/sparkinfer:7498736",
       "model_file": "unsloth/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
       "model_sha256": "ac0e2c1189e055faa36eff361580e79c5bd6f8e76bffb4ce547f167d53e31a61",
       "audit_bank": "serving_audit_bank.json",
@@ -26,6 +27,7 @@
         }
       },
       "attest": {
+        "image": "entrius/gt-attest:v1",
         "iters": 3,
         "vram_model_reserved_bytes": 24000000000
       }

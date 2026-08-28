@@ -38,6 +38,7 @@ jobs:
     outputs:
       ref: ${{ steps.ref.outputs.ref }}
       tag: ${{ steps.ref.outputs.tag }}
+      digest: ${{ steps.build.outputs.digest }}
     # push-triggered runs (Dockerfile/workflow changed) only BUILD, to catch Dockerfile breakage in CI;
     # the image is pushed to Docker Hub only from the Run workflow button (workflow_dispatch).
     name: ${{ github.event_name == 'workflow_dispatch' && 'build and push' || 'build only (dry run)' }}
@@ -73,6 +74,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -96,6 +98,7 @@ jobs:
       LIUM_API_KEY: ${{ secrets.LIUM_API_KEY }}
       REF: ${{ needs.image.outputs.ref }}
       TAG: ${{ needs.image.outputs.tag }}
+      DIGEST: ${{ needs.image.outputs.digest }}
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
@@ -123,11 +126,12 @@ jobs:
           path: conformance-${{ env.REF }}/
           if-no-files-found: warn
 
-      - name: Bump runtime_pin and the release's speed facts
+      - name: Bump runtime_pin, runtime_image and the release's speed facts
         run: |
-          jq --arg pin "gittensor-ai-lab/sparkinfer@$REF" --arg run "$GITHUB_RUN_ID" \
+          jq --arg pin "gittensor-ai-lab/sparkinfer@$REF" --arg image "entrius/sparkinfer:$TAG@$DIGEST" --arg run "$GITHUB_RUN_ID" \
             --slurpfile speed "conformance-$REF/speed.json" \
             '.releases[0].runtime_pin = $pin
+             | .releases[0].runtime_image = $image
              | .releases[0].speed = ((.releases[0].speed // {}) + {
                  single_stream_decode_tps: $speed[0].single_stream_decode_tps,
                  decode_per_request: $speed[0].decode_per_request,
@@ -153,7 +157,8 @@ jobs:
           body: |
             `entrius/sparkinfer:${{ env.REF }}` passed `scripts/check_serving_runtime.py` on a rented RTX 5090
             (run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} — report in the
-            `serving-conformance-${{ env.REF }}` artifact). This bumps `runtime_pin` and writes the release's
+            `serving-conformance-${{ env.REF }}` artifact). This bumps `runtime_pin`, pins `runtime_image` to the pushed
+            image's digest, and writes the release's
             blessing-time speed facts (`speed.decode_per_request`, the per-request decode curve served traffic is
             priced against) and attestation facts (`attest.*`). Update the sha named in the comments at
             `gittensor/constants.py` and `gittensor/serving/audit.py` if the blessing rules changed.

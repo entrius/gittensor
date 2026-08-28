@@ -40,6 +40,7 @@ class ServingRelease:
     max_tokens: int = 64
     base_url: Optional[str] = None  # miner side: the runtime this miner serves from
     runtime_pin: Optional[str] = None
+    runtime_image: Optional[str] = None  # the blessed image by digest (entrius/sparkinfer:<tag>@sha256:...)
     model_sha256: Optional[str] = None  # digest of the model file; runtime_pin + model_sha256 = the release
     model_file: Optional[str] = None  # HF path of the model file, informational (the digest is what is enforced)
     audit_bank: Optional[str] = None  # validator side: snapshot reference, filename under weights/
@@ -52,8 +53,10 @@ class ServingRelease:
     # --speed-json on the conformance GPU) and written by the pin-bump PR. The validator prices capacity and latency
     # against these, so the "one card" bar tracks the runtime as it gets faster. None -> the constants' defaults.
     decode_per_request: Optional[Dict[int, float]] = None  # concurrent requests -> per-request decode tok/s, one card
-    # Attestation (docker/attest). Miner side: attest_url = the runtime's sidecar (default: base_url host, port 8081).
-    # Validator side: attest_reference_url = the reference's sidecar (default: reference_url host, port 8081).
+    # Attestation (docker/attest, image entrius/gt-attest — one container per box, beside the runtime). Miner side:
+    # attest_url = that container (default: base_url host, port 8081). Validator side: attest_reference_url = the one
+    # beside the reference (default: reference_url host, port 8081).
+    attest_image: Optional[str] = None  # the attest container every box runs (entrius/gt-attest:<tag>)
     attest_url: Optional[str] = None
     attest_reference_url: Optional[str] = None
     attest_iters: Optional[int] = None
@@ -71,6 +74,7 @@ class ServingRelease:
             max_tokens=int(raw.get('max_tokens', 64)),
             base_url=raw.get('base_url'),
             runtime_pin=raw.get('runtime_pin'),
+            runtime_image=raw.get('runtime_image'),
             model_file=raw.get('model_file'),
             model_sha256=raw.get('model_sha256'),
             audit_bank=raw.get('audit_bank'),
@@ -78,6 +82,7 @@ class ServingRelease:
             reference_api_key=raw.get('reference_api_key'),
             request_timeout=float(raw.get('request_timeout', 60.0)),
             decode_per_request={int(k): float(v) for k, v in (speed.get('decode_per_request') or {}).items()} or None,
+            attest_image=attest.get('image'),
             attest_url=attest.get('url') or _sidecar_url(raw.get('base_url')),
             attest_reference_url=attest.get('reference_url') or _sidecar_url(raw.get('reference_url')),
             attest_iters=int(attest['iters']) if attest.get('iters') else None,

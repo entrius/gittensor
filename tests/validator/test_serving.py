@@ -1469,3 +1469,127 @@ def test_miner_axon_hooks_match_their_forward_synapse_types():
         for fn in (fwd, bl, pr, vf):
             (param,) = inspect.signature(partial(fn, None)).parameters.values()
             assert param.name == 'synapse' and getattr(param.annotation, '__name__', param.annotation) == syn
+
+
+def _card(uuid: str, digest: str = 'd', wall_ms: float = 1500.0, filled: int = 8_000_000_000, free_before=None):
+    dev = {'uuid': uuid, 'digest': digest, 'wall_ms': wall_ms, 'filled_bytes': filled, 'vram_total': 34e9}
+    if free_before is not None:
+        dev['vram_free_before'] = free_before
+    return dev
+
+
+def test_attest_judges_every_card_and_counts_capacity():
+    """One hotkey, N cards: each card is judged alone; capacity = passing cards; the reason names the first failure;
+    a card without the model resident earns nothing."""
+    from gittensor.synapses import AttestSynapse
+    from gittensor.validator.serving.attest import judge
+
+    release = _attest_release()
+    two = judge(AttestSynapse(seed=1, devices=[_card('GPU-a'), _card('GPU-b')]), 'd', 1400.0, release)
+    assert two.passed and two.capacity == 2 and two.uuids == ['GPU-a', 'GPU-b'] and two.reason == 'ok (2 cards)'
+    one_bad = judge(
+        AttestSynapse(seed=1, devices=[_card('GPU-a'), _card('GPU-b', wall_ms=9_000.0)]), 'd', 1400.0, release
+    )
+    assert one_bad.passed and one_bad.capacity == 1 and one_bad.uuids == ['GPU-a']
+    assert one_bad.reason.startswith('1/2 cards ok (too slow')
+    none = judge(
+        AttestSynapse(seed=1, devices=[_card('GPU-a', digest='x'), _card('GPU-b', digest='x')]), 'd', 1400.0, release
+    )
+    assert not none.passed and none.capacity == 0 and none.reason == 'digest mismatch'
+    loaded = judge(AttestSynapse(seed=1, devices=[_card('GPU-a', free_before=9e9)]), 'd', 1400.0, release)
+    assert loaded.passed
+    bare = judge(AttestSynapse(seed=1, devices=[_card('GPU-a', free_before=33e9)]), 'd', 1400.0, release)
+    assert not bare.passed and bare.reason.startswith('model not resident')
+    status = two.as_status(0.0, 1)
+    assert status['capacity'] == 2 and status['uuids'] == ['GPU-a', 'GPU-b'] and len(status['cards']) == 2
+
+
+def test_attest_round_pays_per_card_and_dedupes_across_cards(monkeypatch):
+    """A two-card hotkey scores credit x 2; a second hotkey reporting one of those cards fails both."""
+    import asyncio
+    import random
+    from types import SimpleNamespace
+
+    from gittensor.synapses import AttestSynapse
+    from gittensor.validator.serving import attest as att
+    from gittensor.validator.serving import forward as fwd
+
+    release = _attest_release()
+    monkeypatch.setattr(att, 'reference_challenge', lambda rel, seed, iters, timeout: ('d', 1400.0))
+    replies = {}
+
+    async def call(target_axon, synapse, timeout, deserialize):
+        return replies[id(target_axon)]
+
+    axons = {hk: SimpleNamespace(is_serving=True) for hk in ('hk1', 'hk2')}
+    replies[id(axons['hk1'])] = AttestSynapse(seed=1, devices=[_card('GPU-a'), _card('GPU-b')])
+    replies[id(axons['hk2'])] = AttestSynapse(seed=1, devices=[_card('GPU-c')])
+    dendrite = SimpleNamespace(call=call)
+    state = ServingState()
+    candidates = [(1, 'hk1', axons['hk1']), (2, 'hk2', axons['hk2'])]
+    out = asyncio.run(att.attest_round(state, dendrite, candidates, release, rng=random.Random(0)))  # type: ignore[arg-type]
+    assert out == {'hk1': 2, 'hk2': 1}
+    assert att.status_capacity(state.attest_status['hk1']) == 2
+    assert att.status_capacity({'passed': True, 'uuid': 'GPU-old'}) == 1  # status persisted before capacity existed
+
+    replies[id(axons['hk2'])] = AttestSynapse(seed=1, devices=[_card('GPU-b')])  # hk1's second card
+    state.attest_status = {}
+    out = asyncio.run(att.attest_round(state, dendrite, candidates, release, rng=random.Random(0)))  # type: ignore[arg-type]
+    assert out == {'hk1': 0, 'hk2': 0}
+    assert state.attest_status['hk1']['reason'] == 'duplicate GPU GPU-b'
+
+    # the audit round multiplies the speed credit by the attested cards
+    good = _echo_release()
+    good.attest_reference_url = 'http://ref:8081'
+    good.vram_model_reserved_bytes = 24e9
+    state = ServingState(settlement_rounds=1)
+    for _ in range(3):
+        state.enqueue_served(_served(1, good))
+        state.enqueue_served(_served(2, good))
+    replies[id(axons['hk1'])] = AttestSynapse(seed=1, devices=[_card('GPU-a'), _card('GPU-b')])
+    replies[id(axons['hk2'])] = AttestSynapse(seed=1, devices=[_card('GPU-c')])
+    echo_dendrite, _ = _dendrite_echoing(good)
+    echo_dendrite.call = call  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        fwd, 'reference_for', lambda rel: __import__('gittensor.serving.audit', fromlist=['x']).reference_for(rel)
+    )
+    scores = asyncio.run(
+        fwd.audit_round(
+            state,
+            echo_dendrite,  # type: ignore[arg-type]
+            [(1, 'hk1', axons['hk1']), (2, 'hk2', axons['hk2'])],  # type: ignore[arg-type]
+            loadout=SimpleNamespace(releases=[good]),
+            attest_rng=random.Random(0),
+        )
+    )
+    assert scores['hk1'] == pytest.approx(2.0) and scores['hk2'] == pytest.approx(1.0)
+    tele = state.snapshot()['last_round']['windows']
+    assert tele[1]['capacity'] == 2.0 and tele[1]['gpu_uuids'] == ['GPU-a', 'GPU-b'] and tele[2]['capacity'] == 1.0
+
+
+def test_sample_for_audit_keeps_baseline_and_failures_and_draws_the_rest():
+    """Per hotkey: baseline prompts and failed requests are always verified; completed gateway requests are drawn at
+    max(minimum, fraction x n); a low-traffic miner is verified in full."""
+    import random
+
+    from gittensor.validator.serving.forward import sample_for_audit
+
+    def req(hk, source='gateway', ok=True):
+        return ServedRequest(ts=0.0, uid=1, hotkey=hk, model_id='m', messages=[], ok=ok, latency_ms=1.0, source=source)
+
+    served = (
+        [req('busy') for _ in range(100)]
+        + [req('busy', source='baseline') for _ in range(2)]
+        + [req('busy', ok=False) for _ in range(3)]
+        + [req('quiet') for _ in range(7)]
+    )
+    keep, skipped = sample_for_audit(served, fraction=0.2, minimum=10, rng=random.Random(0))
+    busy = [r for r in keep if r.hotkey == 'busy']
+    assert sum(1 for r in busy if r.source == 'gateway' and r.ok) == 20
+    assert sum(1 for r in busy if r.source == 'baseline') == 2 and sum(1 for r in busy if not r.ok) == 3
+    assert sum(1 for r in keep if r.hotkey == 'quiet') == 7
+    assert len(skipped) == 80 and all(r.hotkey == 'busy' and r.ok and r.source == 'gateway' for r in skipped)
+    kept = {id(r) for r in keep}
+    assert [id(r) for r in keep] == [id(r) for r in served if id(r) in kept]  # input order kept
+    tiny = [req('busy') for _ in range(50)]
+    assert len(sample_for_audit(tiny, fraction=0.2, minimum=10, rng=random.Random(1))[0]) == 10

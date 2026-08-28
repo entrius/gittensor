@@ -85,7 +85,10 @@ class ServingMiner(BaseNeuron):
             priority_fn=partial(priority_attest, self),
             verify_fn=partial(verify_attest, self),
         )
-        self.backend_slots = asyncio.Semaphore(SERVING_BACKEND_CONCURRENCY)
+        # One card's worth by default; a multi-GPU box fronting N instances sets SERVING_BACKEND_CONCURRENCY=N x 16.
+        self.backend_slots = asyncio.Semaphore(
+            int(os.getenv('SERVING_BACKEND_CONCURRENCY', SERVING_BACKEND_CONCURRENCY))
+        )
         self.seen_nonces: 'OrderedDict[str, None]' = OrderedDict()
         self.audit_budget: Dict[str, Tuple[int, int]] = {}  # validator hotkey -> (tempo, completion tokens used)
         bt.logging.info(f'ServingMiner axon: {self.axon}')

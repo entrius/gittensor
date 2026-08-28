@@ -79,7 +79,7 @@ def test_round_rows_shape_and_pricing():
     assert 0 < summary[13] <= 0.035  # priced share inside the cap
     assert summary[14:16] == (100.0, 1.0)
     assert summary[16:18] == (0.70, 0.035)  # economics ride along so das never hard-codes them
-    assert summary[18:] == (None, None, None, None)
+    assert summary[18:] == (None,) * 6
     assert len(miners) == 2
     ready = next(m for m in miners if m[2] == 16)
     assert ready[5] == 'ready' and ready[12] == 48.3 and ready[13] == 190.0 and ready[16] == 0.5 and ready[17] is None
@@ -97,10 +97,19 @@ def test_round_rows_carry_the_enforced_release():
             'runtime_pin': 'org/sparkinfer@abc',
             'model_sha256': 'ff',
             'model_file': 'org/model.gguf',
+            'runtime_image': 'entrius/sparkinfer:abc@sha256:00',
+            'attest': {'image': 'entrius/gt-attest:v1'},
         }
     )
     summary, _ = persist.round_rows('vali', dt.datetime.now(dt.timezone.utc), ROUND, {}, None, release)
-    assert summary[18:] == ('qwen', 'org/sparkinfer@abc', 'ff', 'org/model.gguf')
+    assert summary[18:] == (
+        'qwen',
+        'org/sparkinfer@abc',
+        'ff',
+        'org/model.gguf',
+        'entrius/sparkinfer:abc@sha256:00',
+        'entrius/gt-attest:v1',
+    )
 
 
 def test_default_loadout_keeps_model_file():

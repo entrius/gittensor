@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS quarantine (hotkey TEXT, model_id TEXT, until REAL, P
 CREATE TABLE IF NOT EXISTS probe_history (hotkey TEXT, seq INTEGER, tps REAL, PRIMARY KEY (hotkey, seq));
 CREATE TABLE IF NOT EXISTS round_history (hotkey TEXT, seq INTEGER, score REAL, PRIMARY KEY (hotkey, seq));
 CREATE TABLE IF NOT EXISTS dormant (hotkey TEXT PRIMARY KEY, rounds INTEGER);
+CREATE TABLE IF NOT EXISTS attest (hotkey TEXT PRIMARY KEY, status TEXT);
 """
 
 
@@ -43,7 +44,7 @@ class ServingStore:
         """Snapshot the audit-thread state in one transaction (the tables are small: a few rows per hotkey)."""
         audits = state.audits.to_dict()
         with self._connect() as db:
-            for table in ('audit_values', 'quarantine', 'probe_history', 'round_history', 'dormant'):
+            for table in ('audit_values', 'quarantine', 'probe_history', 'round_history', 'dormant', 'attest'):
                 db.execute(f'DELETE FROM {table}')
             db.executemany(
                 'INSERT INTO audit_values VALUES (?, ?, ?, ?)',
@@ -59,6 +60,9 @@ class ServingStore:
                 [(hk, i, x) for hk, xs in state._history.items() for i, x in enumerate(xs)],
             )
             db.executemany('INSERT INTO dormant VALUES (?, ?)', list(state.dormant_rounds.items()))
+            db.executemany(
+                'INSERT INTO attest VALUES (?, ?)', [(hk, json.dumps(st)) for hk, st in state.attest_status.items()]
+            )
 
     def load(self, state: ServingState) -> ServingState:
         """Restore a snapshot into ``state``; an empty or unreadable store leaves it untouched."""
@@ -75,6 +79,8 @@ class ServingStore:
                     state._history.setdefault(hk, deque(maxlen=state.settlement_rounds)).append(float(x))
                 for hk, rounds in db.execute('SELECT hotkey, rounds FROM dormant'):
                     state.dormant_rounds[hk] = int(rounds)
+                for hk, st in db.execute('SELECT hotkey, status FROM attest'):
+                    state.attest_status[hk] = json.loads(st)
         except sqlite3.Error:
             pass
         return state

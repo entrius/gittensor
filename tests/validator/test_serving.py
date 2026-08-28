@@ -391,72 +391,6 @@ def test_audit_window_tolerates_one_miss_per_round():
     assert window_threshold(1, SERVING_AUDIT_WINDOW_THRESHOLDS) == window_threshold(SERVING_AUDIT_WINDOW)
 
 
-def test_probe_verdict_teacher_forces_the_response():
-    from gittensor.synapses import InferenceSynapse
-    from gittensor.validator.serving.forward import probe_verdict
-
-    release = _echo_release()
-    ref = EchoReference(release)
-    case = ref.sample()
-    miss = InferenceSynapse(messages=case.messages, model_id=release.model_id, max_tokens=case.max_tokens)
-    verdict, rec = probe_verdict(3, miss, release, ref)
-    assert not verdict.passed and not rec.ok
-    assert rec.latency_ms is None  # inf is not JSON; /v1/serving/status must serialize the record
-
-    honest = InferenceSynapse(
-        messages=case.messages,
-        model_id=release.model_id,
-        max_tokens=case.max_tokens,
-        completion=case.reference_completion,
-        served_model_id=release.model_id,
-        tokens=list(case.reference_tokens),
-        token_logprobs=list(case.reference_logprobs),
-    )
-    verdict, rec = probe_verdict(3, honest, release, ref)
-    assert verdict.passed and rec.ok
-
-    wrong = honest.model_copy(update={'served_model_id': 'other'})
-    verdict, rec = probe_verdict(3, wrong, release, ref)
-    assert not verdict.passed and rec.detail.startswith('wrong model')
-
-    tokens = list(case.reference_tokens)
-    tokens[len(tokens) // 2] = 'xxxxxxxx'
-    lie = honest.model_copy(update={'tokens': tokens, 'completion': ' '.join(tokens)})
-    verdict, rec = probe_verdict(3, lie, release, ref)
-    assert not verdict.passed and verdict.hard
-
-
-def test_probe_prompts_are_unique_per_hotkey_and_salted(monkeypatch):
-    """Two hotkeys probed in one round never see the same prompt, so one card cannot answer for both."""
-    from types import SimpleNamespace
-
-    from gittensor.serving.probe import make_prompts
-
-    good = _echo_release()
-    seen: Dict[int, list] = {}
-    dendrite, _ = _dendrite_echoing(good)
-    inner = dendrite.call_stream
-
-    async def call_stream(target_axon, synapse, timeout, deserialize):
-        seen.setdefault(id(target_axon), []).append(synapse.messages[-1]['content'])
-        async for chunk in inner(target_axon, synapse, timeout, deserialize):
-            yield chunk
-
-    dendrite.call_stream = call_stream
-    a, b = SimpleNamespace(is_serving=True), SimpleNamespace(is_serving=True)
-    state = ServingState(settlement_rounds=1)
-    for uid in (1, 2):
-        state.enqueue_served(_served(uid, good))
-    scores = _round(state, dendrite, [(1, 'hk1', a), (2, 'hk2', b)], good, monkeypatch, probes=3)
-    assert scores['hk1'] > 0 and scores['hk2'] > 0
-    probes_a = [c for c in seen[id(a)] if '(ref ' in c]
-    probes_b = [c for c in seen[id(b)] if '(ref ' in c]
-    assert len(probes_a) == 3 and len(probes_b) == 3
-    assert not set(probes_a) & set(probes_b) and len(set(probes_a)) == 3
-    plain = make_prompts(1, seed=1)[0][-1]['content']
-    assert make_prompts(1, seed=1, salt='abcd')[0][-1]['content'] == f'{plain} (ref abcd)'
-
-
 def test_release_speed_facts_price_capacity_and_latency(tmp_path):
     from gittensor.serving.loadout import load_serving_loadout
 
@@ -465,19 +399,19 @@ def test_release_speed_facts_price_capacity_and_latency(tmp_path):
             {
                 'model_id': 'm',
                 'backend': 'echo',
-                'speed': {'decode_tps_target': 900.0, 'ttft_full_ms': 300.0, 'ttft_zero_ms': 900.0},
+                'speed': {'ttft_full_ms': 300.0, 'ttft_zero_ms': 900.0},
             }
         ]
     }
     path = tmp_path / 'loadout.json'
     path.write_text(json.dumps(raw))
     release = load_serving_loadout(path).primary
-    assert (release.decode_tps_target, release.ttft_full_ms, release.ttft_zero_ms) == (900.0, 300.0, 900.0)
+    assert (release.ttft_full_ms, release.ttft_zero_ms) == (300.0, 900.0)
     assert latency_credit(300.0, release.ttft_full_ms, release.ttft_zero_ms) == 1.0
     assert latency_credit(600.0, release.ttft_full_ms, release.ttft_zero_ms) == pytest.approx(0.5)
     assert latency_credit(400.0) == 1.0 and latency_credit(600.0) == pytest.approx(0.9)  # constants' defaults
     bare = load_serving_loadout(ECHO_LOADOUT_PATH).primary
-    assert bare.decode_tps_target is None and bare.ttft_full_ms is None
+    assert bare.ttft_full_ms is None and bare.attest_reference_url is None
 
 
 def test_latency_credit_matches_measured_latencies():
@@ -733,7 +667,6 @@ def _round(state, dendrite, serving, release, monkeypatch, probes: int = 0):
 
     from gittensor.validator.serving import forward as fwd
 
-    monkeypatch.setattr(fwd, 'SERVING_PROBE_REQUESTS', probes)
     return asyncio.run(fwd.audit_round(state, dendrite, serving, ServingLoadout(releases=[release])))  # type: ignore[arg-type]
 
 
@@ -926,41 +859,6 @@ def test_baseline_prompts_vary_in_shape_and_length():
     assert baseline_max_tokens(rng, 100) <= 100
 
 
-def test_probe_retries_once_on_a_dip_and_keeps_the_better_reading(monkeypatch):
-    """A reading well under the miner's recent form is re-measured; a persistent dip sticks; no history, no retry."""
-    import asyncio
-    from collections import deque
-    from types import SimpleNamespace
-
-    from gittensor.validator.serving import forward as fwd
-
-    good = _echo_release()
-    readings: list = []
-    calls = {'n': 0}
-
-    async def fake_probe(state, dendrite, uid, hotkey, axon, release, reference, prompts):
-        calls['n'] += 1
-        return readings.pop(0)
-
-    monkeypatch.setattr(fwd, 'probe_axon', fake_probe)
-    ref = EchoReference(good)
-    args = (None, 1, 'hk1', SimpleNamespace(), good, ref, [ref.sample()] * 2)
-
-    state = ServingState()
-    readings[:] = [50.0]  # no history yet: accepted as is, no retry
-    assert asyncio.run(fwd.probe_with_retry(state, *args, retry_delay_s=0.0)) == 50.0 and calls['n'] == 1  # type: ignore[arg-type]
-
-    state.probe_history['hk1'] = deque([180.0, 178.0], maxlen=3)
-    readings[:] = [50.0, 181.0]  # collision on the first burst, clean on the second
-    assert asyncio.run(fwd.probe_with_retry(state, *args, retry_delay_s=0.0)) == 181.0 and calls['n'] == 3  # type: ignore[arg-type]
-    assert list(state.probe_history['hk1']) == [180.0, 178.0, 181.0]
-
-    readings[:] = [50.0, 48.0]  # a real slowdown dips twice
-    assert asyncio.run(fwd.probe_with_retry(state, *args, retry_delay_s=0.0)) == 50.0 and calls['n'] == 5  # type: ignore[arg-type]
-    readings[:] = [170.0]  # within form: single probe
-    assert asyncio.run(fwd.probe_with_retry(state, *args, retry_delay_s=0.0)) == 170.0 and calls['n'] == 6  # type: ignore[arg-type]
-
-
 def test_get_serving_axons_skips_active_validators_not_permit_holders():
     """On a small subnet nearly every UID holds a permit (testnet 422: 10 of 46, incl. the test miner); only UIDs
     with validator_trust > 0 are actually validating."""
@@ -1077,7 +975,6 @@ def test_audit_round_skips_release_without_reference(monkeypatch):
     axon = SimpleNamespace(is_serving=True)
     state = ServingState(settlement_rounds=1)
     state.enqueue_served(_served(1, good))
-    monkeypatch.setattr('gittensor.validator.serving.forward.SERVING_PROBE_REQUESTS', 0)
     import asyncio
 
     from gittensor.validator.serving import forward as fwd
@@ -1091,64 +988,6 @@ def test_audit_round_skips_release_without_reference(monkeypatch):
     assert state.scores_for(['v', 'other']) == {}  # UID 1's hotkey changed since the round: nothing carries over
 
 
-def test_capacity_probe_splits_a_shared_gpu(monkeypatch):
-    """Two hotkeys on one card each report about half the blessed burst aggregate (telemetry); a lone card ~1."""
-    from types import SimpleNamespace
-
-    from gittensor.validator.serving import forward as fwd
-
-    good = _echo_release()
-    lone, a, b = (SimpleNamespace(is_serving=True) for _ in range(3))
-    gpu_of = {id(lone): 'gpu-1', id(a): 'gpu-2', id(b): 'gpu-2'}
-    dendrite, _ = _dendrite_echoing(good, gpu_of=gpu_of, token_s=0.0005)
-    rates = []
-    real_probe = fwd.probe_axon
-
-    async def spy(*args, **kwargs):
-        rate = await real_probe(*args, **kwargs)
-        rates.append(rate)
-        return rate
-
-    monkeypatch.setattr(fwd, 'probe_axon', spy)
-    monkeypatch.setattr(fwd, 'SERVING_PROBE_TARGET_TPS', 1e-9)
-    state = ServingState(settlement_rounds=1)
-    state.enqueue_served(_served(1, good))
-    _round(state, dendrite, [(1, 'hk1', lone)], good, monkeypatch, probes=4)
-    probe = [r for r in state.recent(50) if r.kind == 'probe']
-    assert len(probe) == 4 and all(r.ok for r in probe)
-    lone_tps = rates[0]
-
-    monkeypatch.setattr(fwd, 'SERVING_PROBE_TARGET_TPS', lone_tps)
-    state = ServingState(settlement_rounds=1)
-    for uid in (1, 2, 3):
-        state.enqueue_served(_served(uid, good))
-    serving = [(1, 'hk1', lone), (2, 'hk2', a), (3, 'hk3', b)]
-    scores = _round(state, dendrite, serving, good, monkeypatch, probes=4)
-    assert scores == {'hk1': 1.0, 'hk2': 1.0, 'hk3': 1.0}  # the burst is telemetry: pay comes from served speed
-    tele = state.last_round['windows']
-    assert tele[1]['capacity'] == pytest.approx(1.0, abs=0.15)
-    assert tele[2]['capacity'] == pytest.approx(0.5, abs=0.15) and tele[3]['capacity'] == pytest.approx(0.5, abs=0.15)
-    assert all(r.ok for r in state.recent(50) if r.kind == 'probe')  # answered correctly, just slowly
-
-
-def test_probe_misses_are_telemetry_not_the_window(monkeypatch):
-    """A miner that serves traffic honestly but chokes on the burst keeps its window and pay; the burst is re-sent."""
-    from types import SimpleNamespace
-
-    good = _echo_release()
-    axon = SimpleNamespace(is_serving=True)
-    dendrite, calls = _dendrite_echoing(good, dead_axons=(axon,))  # every probe request dropped
-    state = ServingState(settlement_rounds=1)
-    for _ in range(2):
-        state.enqueue_served(_served(1, good))
-        scores = _round(state, dendrite, [(1, 'hk1', axon)], good, monkeypatch, probes=6)
-        assert scores == {'hk1': 1.0} and state.last_round['windows'][1]['capacity'] == 0.0
-    assert calls == {id(axon): 12}
-    window = state.audits.verdict('hk1', good.model_id)
-    assert window.passed and window.n_audits == 2 and window.mean == 1.0
-    assert sum(1 for r in state.recent(50) if r.kind == 'probe' and not r.ok) == 12
-
-
 def test_decode_speed_prices_served_requests_against_the_blessing_curve():
     from gittensor.validator.serving.scoring import decode_credit, expected_decode_tps, request_speed_credit
 
@@ -1158,7 +997,8 @@ def test_decode_speed_prices_served_requests_against_the_blessing_curve():
     assert expected_decode_tps(curve, 11) == pytest.approx(32.5)  # linear between 6 and 16
     assert expected_decode_tps(None, 6) == 46.0  # constants' fallback curve
     assert decode_credit(440.0, 440.0) == 1.0 and decode_credit(600.0, 440.0) == 1.0  # never more than one card
-    assert decode_credit(330.0, 440.0) == pytest.approx(0.75)
+    assert decode_credit(352.0, 440.0) == 1.0  # 0.8x: inside the tolerance for WAN-observed decode
+    assert decode_credit(264.0, 440.0) == pytest.approx(0.75)  # 0.6x -> 0.6 / 0.8
     assert decode_credit(200.0, 440.0) == 0.0  # under the floor: shared card / not the blessed runtime
 
     release = _echo_release()
@@ -1186,7 +1026,7 @@ def test_decode_speed_prices_served_requests_against_the_blessing_curve():
     assert request_speed_credit(busy, release) == pytest.approx(1.0)
     shared = req(64, 100.0, 100.0 + 64 / 19.0 * 1000.0, inflight=1)  # 19 tok/s while we sent it one request
     assert request_speed_credit(shared, release) == 0.0
-    slowish = req(64, 100.0, 100.0 + 64 / 330.0 * 1000.0)
+    slowish = req(64, 100.0, 100.0 + 64 / 264.0 * 1000.0)
     assert request_speed_credit(slowish, release) == pytest.approx(0.75)
     short = req(8, 100.0, 5_000.0)  # too few tokens to measure decode: TTFT band only
     assert request_speed_credit(short, release) == 1.0
@@ -1449,3 +1289,134 @@ def test_axon_that_answers_without_a_completion_gets_a_real_reason(monkeypatch):
     asyncio.run(fwd.baseline_round(state, dendrite, serving, good, window_s=0.01, per_miner=1, rng=random.Random(1)))
     (q,) = state.drain_served()
     assert not q.ok and q.detail.startswith('no completion: axon answered "Success"') and good.model_id in q.detail
+
+
+def _attest_release(reference: str = 'http://ref:8081') -> ServingRelease:
+    release = _echo_release()
+    release.attest_reference_url = reference
+    release.vram_model_reserved_bytes = 24e9
+    return release
+
+
+def _attest_reply(
+    digest: str = 'd', wall_ms: float = 1500.0, filled: int = 8_000_000_000, uuid: str = 'GPU-a', queued_ms=0.0
+):
+    from gittensor.synapses import AttestSynapse
+
+    return AttestSynapse(
+        seed=1,
+        devices=[{'uuid': uuid, 'digest': digest, 'wall_ms': wall_ms, 'filled_bytes': filled, 'vram_total': 34e9}],
+        wall_ms=wall_ms,
+        queued_ms=queued_ms,
+    )
+
+
+def test_attest_verdicts():
+    from gittensor.validator.serving.attest import judge
+
+    release = _attest_release()
+    assert judge(_attest_reply(), 'd', 1400.0, release).passed
+    assert judge(None, 'd', 1400.0, release).reason.startswith('no attestation')
+    assert judge(_attest_reply(digest='x'), 'd', 1400.0, release).reason == 'digest mismatch'
+    slow = judge(_attest_reply(wall_ms=1500.0, queued_ms=1500.0), 'd', 1400.0, release)  # queued behind another
+    assert not slow.passed and slow.reason.startswith('too slow')
+    assert judge(_attest_reply(filled=2_000_000_000), 'd', 1400.0, release).reason.startswith('under-filled')
+    from gittensor.synapses import AttestSynapse
+
+    assert judge(AttestSynapse(seed=1, error='sidecar down'), 'd', 1400.0, release).reason.startswith('no attestation')
+
+
+def test_attest_cohort_is_random_half_plus_unproven_and_failed():
+    import random
+
+    from gittensor.validator.serving.attest import choose_cohort
+
+    hotkeys = [f'hk{i}' for i in range(20)]
+    status = {hk: {'passed': True} for hk in hotkeys}
+    status['hk3'] = {'passed': False}
+    del status['hk7']  # never attested
+    rng = random.Random(1)
+    cohort = choose_cohort(hotkeys, status, rng=rng)
+    assert 'hk3' in cohort and 'hk7' in cohort and 10 <= len(cohort) <= 12
+    together = sum(1 for _ in range(400) if {'hk1', 'hk2'} <= set(choose_cohort(hotkeys, status, rng=rng)))
+    assert 60 <= together <= 140  # P = 0.25 per round for a sharing pair
+
+
+def test_attest_round_gates_pay_and_persists(monkeypatch, tmp_path):
+    import asyncio
+
+    """No verdict -> probation; a failing cohort member scores 0; a passing one keeps its speed credit; non-cohort
+    members keep their last verdict; duplicate GPU UUIDs fail both; status survives the store."""
+    import random
+    from types import SimpleNamespace
+
+    from gittensor.serving.store import ServingStore
+    from gittensor.validator.serving import attest as att
+
+    release = _attest_release()
+    monkeypatch.setattr(att, 'reference_challenge', lambda rel, seed, iters, timeout: ('d', 1400.0))
+    replies = {}
+
+    async def call(target_axon, synapse, timeout, deserialize):
+        return replies[id(target_axon)]
+
+    axons = {hk: SimpleNamespace(is_serving=True) for hk in ('hk1', 'hk2', 'hk3')}
+    replies[id(axons['hk1'])] = _attest_reply(uuid='GPU-1')
+    replies[id(axons['hk2'])] = _attest_reply(uuid='GPU-2', digest='wrong')
+    replies[id(axons['hk3'])] = _attest_reply(uuid='GPU-1')  # same card as hk1
+    dendrite = SimpleNamespace(call=call)
+    state = ServingState()
+    candidates = [(1, 'hk1', axons['hk1']), (2, 'hk2', axons['hk2']), (3, 'hk3', axons['hk3'])]
+    out = asyncio.run(att.attest_round(state, dendrite, candidates, release, rng=random.Random(0)))  # type: ignore[arg-type]
+    assert out == {'hk1': False, 'hk2': False, 'hk3': False}  # hk2 wrong digest; hk1/hk3 share GPU-1
+    assert state.attest_status['hk2']['reason'] == 'digest mismatch'
+    assert 'duplicate GPU' in state.attest_status['hk1']['reason']
+
+    replies[id(axons['hk3'])] = _attest_reply(uuid='GPU-3')
+    out = asyncio.run(att.attest_round(state, dendrite, candidates, release, rng=random.Random(0)))  # type: ignore[arg-type]
+    assert out['hk1'] and out['hk3'] and not out['hk2']  # all three were re-challenged (none had passed)
+    store = ServingStore(tmp_path / 'serving.db')
+    store.save(state)
+    again = store.load(ServingState())
+    assert again.attest_status['hk1']['uuid'] == 'GPU-1' and again.attest_status['hk2']['passed'] is False
+
+    monkeypatch.setattr(att, 'reference_challenge', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('ref down')))
+    neutral = asyncio.run(att.attest_round(state, dendrite, candidates, release))  # type: ignore[arg-type]
+    assert neutral == {'hk1': True, 'hk2': False, 'hk3': True}  # reference down: nothing changes
+
+
+def test_audit_round_requires_attestation_when_a_reference_is_configured(monkeypatch):
+    from types import SimpleNamespace
+
+    from gittensor.validator.serving import attest as att
+
+    release = _attest_release()
+    monkeypatch.setattr(att, 'reference_challenge', lambda rel, seed, iters, timeout: ('d', 1400.0))
+    good, bad = SimpleNamespace(is_serving=True), SimpleNamespace(is_serving=True)
+    replies = {id(good): _attest_reply(uuid='GPU-g'), id(bad): _attest_reply(uuid='GPU-b', wall_ms=9_000.0)}
+    dendrite, _ = _dendrite_echoing(release)
+
+    async def call(target_axon, synapse, timeout, deserialize):
+        return replies[id(target_axon)]
+
+    dendrite.call = call
+    state = ServingState(settlement_rounds=1)
+    for uid in (1, 2):
+        state.enqueue_served(_served(uid, release))
+    scores = _round(state, dendrite, [(1, 'hk1', good), (2, 'hk2', bad)], release, monkeypatch)
+    assert scores == {'hk1': 1.0, 'hk2': 0.0}
+    snap = state.snapshot()
+    assert snap['ready_uids'] == [1] and snap['probation_uids'] == [2]  # failed attest: not READY, not struck
+    w = state.audits.verdict('hk2', release.model_id)
+    assert w.passed and w.quarantined_until == 0.0
+    tele = state.last_round['windows']
+    assert tele[1]['attested'] and tele[1]['gpu_uuid'] == 'GPU-g' and not tele[2]['attested']
+    assert tele[2]['attest_reason'].startswith('too slow')
+
+
+def test_sidecar_url_derives_from_the_runtime_url():
+    from gittensor.serving.loadout import _sidecar_url
+
+    assert _sidecar_url('http://82.76.142.91:45565') == 'http://82.76.142.91:8081'
+    assert _sidecar_url('http://reference:8080/') == 'http://reference:8081'
+    assert _sidecar_url(None) is None

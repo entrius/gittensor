@@ -341,6 +341,54 @@ def speed_profile(base_url: str, model_id: str, max_tokens: int, timeout: float,
     }
 
 
+def check_attest(rep: Report, base_url: str, timeout: float) -> Dict:
+    """A1: the runtime image's attestation sidecar (:8081) answers a seeded challenge with a digest inside 3 s idle,
+    and two simultaneous challenges each take >= 1.6x a single one (the property the cohort check rests on)."""
+    from urllib.parse import urlsplit, urlunsplit
+
+    parts = urlsplit(base_url)
+    host = parts.hostname or ''
+    attest_url = urlunsplit((parts.scheme or 'http', f'{host}:8081', '', '', ''))
+    facts: Dict = {}
+    try:
+        single = requests.post(
+            f'{attest_url}/v1/attest', json={'seed': 12345, 'iters': 3, 'fill': True}, timeout=timeout
+        )
+        single.raise_for_status()
+        dev = (single.json().get('devices') or [single.json()])[0]
+    except Exception as e:
+        rep.add('A1 POST :8081/v1/attest', MUST, False, repr(e)[:120])
+        return facts
+    wall = float(dev.get('wall_ms') or 0.0)
+    rep.add('A1 POST :8081/v1/attest', MUST, bool(dev.get('digest')), f'{wall:.0f} ms, uuid {dev.get("uuid")}')
+    rep.add('A1 attest wall <= 3000 ms idle', MUST, 0 < wall <= 3000.0, f'{wall:.0f} ms')
+    again = requests.post(f'{attest_url}/v1/attest', json={'seed': 12345, 'iters': 3, 'fill': True}, timeout=timeout)
+    same = again.ok and (again.json().get('devices') or [again.json()])[0].get('digest') == dev.get('digest')
+    rep.add('A1 digest deterministic for a seed', MUST, bool(same))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        pair = list(
+            pool.map(
+                lambda _: requests.post(
+                    f'{attest_url}/v1/attest', json={'seed': 777, 'iters': 3, 'fill': True}, timeout=timeout
+                ).json(),
+                range(2),
+            )
+        )
+    walls = [float((r.get('devices') or [r])[0].get('wall_ms') or 0.0) + float(r.get('queued_ms') or 0.0) for r in pair]
+    rep.add(
+        'A1 two simultaneous challenges each >= 1.6x one',
+        MUST,
+        min(walls) >= 1.6 * wall,
+        f'{walls[0]:.0f} / {walls[1]:.0f} ms vs {wall:.0f}',
+    )
+    facts.update(
+        attest_ref_wall_ms=round(wall, 1),
+        attest_iters=3,
+        vram_model_reserved_bytes=int(dev.get('vram_total') or 0) - int(dev.get('vram_free_before') or 0),
+    )
+    return facts
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--base-url', default='http://127.0.0.1:8080')
@@ -380,8 +428,10 @@ def main() -> int:
     if args.parallel > 0:
         check_overload(rep, base_url, args.model_id, args.parallel, args.overload_max_tokens, args.timeout)
 
+    attest_facts = check_attest(rep, base_url, args.timeout)
     if args.speed_json:
         profile = speed_profile(base_url, args.model_id, args.max_tokens, args.timeout, args.speed_burst)
+        profile['attest'] = attest_facts
         with open(args.speed_json, 'w') as f:
             json.dump(profile, f, indent=2)
         print(f'\nSpeed profile ({args.speed_json}): {profile}')

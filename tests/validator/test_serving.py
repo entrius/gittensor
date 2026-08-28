@@ -576,6 +576,7 @@ def test_verify_served_forces_miner_token_ids():
         ).reason
     )
     # a multibyte character split across streamed tokens: the stream's text carries U+FFFD, the bytes are fine
+    assert good.completion is not None
     split_text = '\ufffd' + good.completion[1:]
     assert verify_served(ExactReference(), good.messages, split_text, tokens, logprobs, token_ids=ids).passed
 

@@ -32,7 +32,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from gittensor.constants import SERVING_MAX_TOKENS
+from gittensor.constants import SERVING_MAX_PROMPT_CHARS, SERVING_MAX_TOKENS
 from gittensor.serving.loadout import ServingLoadout, ServingRelease
 from gittensor.serving.state import ReadyMiner, RequestRecord, ServedRequest, ServingState, finite_or_none
 from gittensor.serving.stream import SSE_DONE, Event, consume_stream, sse_event
@@ -91,7 +91,8 @@ def build_app(
                     'id': release.release_id,
                     'object': 'model',
                     'owned_by': 'gittensor',
-                    # release identity (contract P2): what every READY miner behind this endpoint is verified against
+                    # release identity (contract P2), informational: READY miners are verified by greedy conformance
+                    # against a reference running this release and by the attestation digest, not by these strings
                     'model_id': release.model_id,
                     'runtime_pin': release.runtime_pin,
                     'model_sha256': release.model_sha256,
@@ -124,6 +125,8 @@ def build_app(
             )
         if body.get('n', 1) != 1:
             raise HTTPException(status_code=400, detail='n must be 1')
+        if sum(len(m['content']) + len(m['role']) for m in messages) > SERVING_MAX_PROMPT_CHARS:
+            raise HTTPException(status_code=413, detail=f'prompt exceeds {SERVING_MAX_PROMPT_CHARS} characters')
         wanted = body.get('model')
         try:  # `model` = a release_id (or a model_id: its first release); absent -> the primary release
             release = loadout.get(str(wanted)) if wanted else primary
@@ -141,6 +144,7 @@ def build_app(
         if miner is None:
             raise HTTPException(status_code=429, detail='no READY serving capacity')
         inflight = state.inflight().get(miner.uid, 1)
+        state.charge_sent(miner.hotkey, max_tokens)
 
         request_id = f'chatcmpl-{uuid.uuid4().hex[:24]}'
         created = int(time.time())
@@ -149,7 +153,11 @@ def build_app(
         def finish(result: Optional[InferenceSynapse]) -> bool:
             state.release(miner.uid)
             ok = result is not None and result.completion is not None
-            latency_ms = (time.monotonic() - start) * 1000.0
+            # The miner's stream end, not the moment the user finished reading it: a slow client must not read as a
+            # slow card.
+            latency_ms = finite_or_none(getattr(result, 'observed_latency_ms', None)) if result else None
+            if latency_ms is None:
+                latency_ms = (time.monotonic() - start) * 1000.0
             state.enqueue_served(
                 ServedRequest(
                     ts=time.time(),
@@ -171,6 +179,7 @@ def build_app(
                     source='gateway',
                     ttft_ms=finite_or_none(getattr(result, 'observed_ttft_ms', None)) if result else None,
                     inflight=inflight,
+                    max_tokens=max_tokens,
                 )
             )
             state.record(
@@ -216,9 +225,16 @@ def build_app(
                     await queue.put(_END)
 
             task = asyncio.create_task(run())
+
+            async def outcome() -> Optional[InferenceSynapse]:
+                try:  # a stream the assembler could not fold is a miss, never a leaked in-flight slot
+                    return await task
+                except Exception:
+                    return None
+
             first = await queue.get()
             if first is _END or first is None:  # nothing streamed before the miner gave up
-                finish(await task)
+                finish(await outcome())
                 return failed()
 
             async def body_iter():
@@ -228,7 +244,7 @@ def build_app(
                         yield SSE_DONE if event is None else sse_event(reshape(event))  # type: ignore[arg-type]
                         event = await queue.get()
                 finally:
-                    finish(await task)
+                    finish(await outcome())
 
             return StreamingResponse(body_iter(), media_type='text/event-stream')
 

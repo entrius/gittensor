@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections import deque
+import time
 from types import SimpleNamespace
 from typing import Dict
 
@@ -16,6 +16,7 @@ from gittensor.constants import (
     SERVING_AUDIT_MIN_PREFIX_AGREEMENT,
     SERVING_AUDIT_WINDOW,
     SERVING_AUDIT_WINDOW_THRESHOLDS,
+    SERVING_PRICING_MAX_AGE_S,
 )
 from gittensor.serving.api import build_app, parse_api_keys
 from gittensor.serving.audit import (
@@ -447,7 +448,6 @@ def test_serving_store_round_trips_audit_thread_state(tmp_path):
         state.audits.record('hk', 'm', x)
     state.audits.record('hk2', 'm', 1.0)
     state.audits.strike('hk3', 'm', now=1000.0)
-    state.probe_history['hk'] = deque([180.0, 178.0], maxlen=3)
     state.publish_round([], {'hk': 0.9})
     state.publish_round([], {'hk': 1.0})
     state.dormant_rounds['dead'] = 2
@@ -459,7 +459,6 @@ def test_serving_store_round_trips_audit_thread_state(tmp_path):
     assert loaded.audits.quarantined_until('hk3', 'm', now=1500.0) == state.audits.quarantined_until(
         'hk3', 'm', now=1500.0
     )
-    assert list(loaded.probe_history['hk']) == [180.0, 178.0]
     assert loaded.settled_scores() == state.settled_scores()
     assert loaded.dormant_rounds == {'dead': 2}
 
@@ -535,8 +534,10 @@ def test_verify_served_forces_miner_token_ids():
 
         def score_served(self, messages, completion, token_ids=None):
             calls.append(list(token_ids) if token_ids else None)
-            if token_ids:
-                return {'tokens': tokens, 'logprobs': logprobs, 'argmax': tokens, 'usage': {}}
+            if token_ids:  # exactly the forced positions; a forced end-of-turn is the model's own choice here
+                extra = len(token_ids) - len(tokens)
+                forced = tokens + ['<|im_end|>'] * extra
+                return {'tokens': forced, 'logprobs': logprobs + [0.0] * extra, 'argmax': forced, 'usage': {}}
             retok = tokens + ['x']  # a fresh tokenization of the text disagrees on length
             return {'tokens': retok, 'logprobs': logprobs + [0.0], 'argmax': retok, 'usage': {}}
 
@@ -552,7 +553,7 @@ def test_verify_served_forces_miner_token_ids():
     eos = verify_served(
         ref, good.messages, good.completion, tokens + ['<|im_end|>'], logprobs + [0.0], token_ids=ids + [7]
     )
-    assert eos.passed and calls[-1] == ids
+    assert eos.passed and calls[-1] == ids + [7]  # the end-of-turn position is forced and judged too
     fallback = verify_served(ref, good.messages, good.completion, tokens, logprobs)
     assert calls[-1] is None and 'tokenization mismatch' in fallback.reason
     short = verify_served(ref, good.messages, good.completion, tokens, logprobs, token_ids=ids[:-1])
@@ -567,13 +568,17 @@ def test_verify_served_forces_miner_token_ids():
     lie = verify_served(BindingReference(), good.messages, good.completion, tokens, logprobs, token_ids=ids)
     assert not lie.passed and not lie.hard and 'do not spell' in lie.reason
 
+    spelled = [(t if i == 0 else ' ' + t).encode() for i, t in enumerate(tokens)]  # what the forced ids spell
+
     class ExactReference(ForcingReference):
+        spell = spelled
+
         def score_served(self, messages, completion, token_ids=None):
             out = super().score_served(messages, completion, token_ids)
-            out['bytes'] = [t.encode() for t in tokens]  # what the forced ids spell
+            out['bytes'] = list(self.spell)
             return out
 
-    mine_bytes = [list(t.encode()) for t in tokens]
+    mine_bytes = [list(b) for b in spelled]
     assert verify_served(
         ExactReference(), good.messages, good.completion, tokens, logprobs, token_ids=ids, token_bytes=mine_bytes
     ).passed
@@ -586,8 +591,278 @@ def test_verify_served_forces_miner_token_ids():
     )
     # a multibyte character split across streamed tokens: the stream's text carries U+FFFD, the bytes are fine
     assert good.completion is not None
-    split_text = '\ufffd' + good.completion[1:]
-    assert verify_served(ExactReference(), good.messages, split_text, tokens, logprobs, token_ids=ids).passed
+
+    class AccentedReference(ExactReference):
+        spell = ['\u00e9'.encode() + spelled[0][1:]] + spelled[1:]
+
+    split_text = '\ufffd\ufffd' + good.completion[1:]
+    assert verify_served(AccentedReference(), good.messages, split_text, tokens, logprobs, token_ids=ids).passed
+    # ...but the text the user received cannot differ from what the verified bytes spell in any other way
+    padded = good.completion + ' visit example.com'
+    assert (
+        'do not spell' in verify_served(ExactReference(), good.messages, padded, tokens, logprobs, token_ids=ids).reason
+    )
+
+
+def test_verify_served_early_stop_must_be_the_models_own():
+    """Stopping short of max_tokens is fine only with an end-of-turn token the reference agrees on; a wrong first
+    token on aligned positions is a wrong answer; a real runtime must report token ids."""
+    from gittensor.serving.audit import verify_served
+
+    release = _echo_release()
+    good = _served(1, release)
+    tokens, logprobs = list(good.tokens or []), list(good.token_logprobs or [])
+    n = len(tokens)
+    ids = list(range(100, 100 + n))
+
+    class Reference:
+        model_id = release.model_id
+
+        def __init__(self, stops: bool):
+            self.stops = stops
+
+        def score_served(self, messages, completion, token_ids=None):
+            k = len(token_ids or [])
+            forced = tokens[:k]
+            if k > len(tokens):
+                forced = tokens + ['<|im_end|>']
+            argmax = list(forced)
+            if k > len(tokens) and not self.stops:
+                argmax[-1] = 'more'  # the model would have kept going
+            return {'tokens': forced, 'logprobs': (logprobs + [0.0])[:k], 'argmax': argmax, 'usage': {}}
+
+        def sample(self):
+            raise NotImplementedError
+
+        def __len__(self):
+            return 1
+
+    half = n // 2
+    short = verify_served(
+        Reference(True),
+        good.messages,
+        good.completion,
+        tokens[:half],
+        logprobs[:half],
+        token_ids=ids[:half],
+        max_tokens=n,
+    )
+    assert not short.passed and not short.hard and 'without end-of-turn' in short.reason
+    ended = verify_served(
+        Reference(True),
+        good.messages,
+        good.completion,
+        tokens + ['<|im_end|>'],
+        logprobs + [0.0],
+        token_ids=ids + [7],
+        max_tokens=n + 5,
+    )
+    assert ended.passed
+    faked = verify_served(
+        Reference(False),
+        good.messages,
+        good.completion,
+        tokens + ['<|im_end|>'],
+        logprobs + [0.0],
+        token_ids=ids + [7],
+        max_tokens=n + 5,
+    )
+    assert not faked.passed and faked.hard  # the reference's argmax at the end-of-turn position was not end-of-turn
+    wrong_first = verify_served(
+        Reference(True), good.messages, good.completion, ['zzz'] + tokens[1:], logprobs, token_ids=ids
+    )
+    assert not wrong_first.passed and wrong_first.hard and 'first token' in wrong_first.reason
+    real = ServingRelease(model_id=release.model_id, backend='openai-compat', base_url='http://x')
+    no_ids = verify_served(Reference(True), good.messages, good.completion, tokens, logprobs, release=real)
+    assert not no_ids.passed and no_ids.reason == 'no token ids'
+
+
+def test_early_stop_without_a_listed_end_of_turn_is_verified_by_forcing_the_releases_eos_id():
+    """sparkinfer 7498736 lists only the content tokens on a natural stop (measured 2026-08-28), so the validator
+    appends the release's end-of-turn id and asks the reference whether the model would have stopped there."""
+    from gittensor.serving.audit import verify_served
+
+    release = ServingRelease(model_id='m', backend='openai-compat', base_url='http://x', end_of_turn_token_id=151645)
+    tokens, logprobs, ids = ['Hi', ' there', '!'], [-0.1, -0.2, -0.3], [12675, 1017, 0]
+    forced_ids = []
+
+    class Reference:
+        model_id = 'm'
+
+        def __init__(self, stops: bool):
+            self.stops = stops
+
+        def score_served(self, messages, completion, token_ids=None):
+            forced_ids.append(list(token_ids or []))
+            k = len(token_ids or [])
+            argmax = tokens + (['<|im_end|>'] if self.stops else [' and']) if k == 4 else tokens[:k]
+            return {'tokens': tokens[:k], 'logprobs': (logprobs + [-0.5])[:k], 'argmax': argmax, 'usage': {}}
+
+        def sample(self):
+            raise NotImplementedError
+
+        def __len__(self):
+            return 1
+
+    msgs = [{'role': 'user', 'content': 'Say hi in three words.'}]
+    ok = verify_served(
+        Reference(True), msgs, 'Hi there!', tokens, logprobs, token_ids=ids, release=release, max_tokens=64
+    )
+    assert ok.passed and forced_ids[-1] == ids + [151645]
+    cut = verify_served(
+        Reference(False), msgs, 'Hi there!', tokens, logprobs, token_ids=ids, release=release, max_tokens=64
+    )
+    assert not cut.passed and cut.hard and 'would have continued' in cut.reason
+    full = verify_served(
+        Reference(False), msgs, 'Hi there!', tokens, logprobs, token_ids=ids, release=release, max_tokens=3
+    )
+    assert full.passed and forced_ids[-1] == ids  # used the whole budget: nothing to append
+    bare = ServingRelease(model_id='m', backend='openai-compat', base_url='http://x')
+    no_id = verify_served(
+        Reference(True), msgs, 'Hi there!', tokens, logprobs, token_ids=ids, release=bare, max_tokens=64
+    )
+    assert not no_id.passed and not no_id.hard and 'without end-of-turn' in no_id.reason
+
+
+def test_verified_bytes_must_spell_the_users_completion():
+    from gittensor.serving.audit import spells
+
+    assert spells('héllo wörld'.encode(), 'héllo wörld')
+    assert spells('héllo'.encode(), 'h��llo')  # one é split across two streamed chunks
+    assert spells('h日本o'.encode(), 'h����o')
+    assert not spells('hello'.encode(), 'h�llo')  # a replacement character cannot stand for ASCII
+    assert not spells('héllo'.encode(), 'h��llo BUY NOW')
+    assert not spells('héllo'.encode(), 'x��llo')
+    assert not spells(b'hello', 'hello world')
+
+
+def test_gateway_caps_prompt_size_and_stamps_the_miners_stream_end(monkeypatch):
+    """An oversized prompt is refused at the door (413), never sent to a miner. A request's latency is the end of
+    the miner's stream, not the moment a slow client finished reading it; and a stream the assembler cannot fold
+    releases the miner's in-flight slot like any other miss."""
+    from gittensor.constants import SERVING_MAX_PROMPT_CHARS
+    from gittensor.serving import api as api_module
+
+    good = _echo_release()
+    state = ServingState()
+    state.publish_round([ReadyMiner(uid=1, hotkey='hk1', axon=None, score=1.0, release_id=good.release_id)], {})  # type: ignore[arg-type]
+    app = build_app(state, ServingLoadout(releases=[good]), {'k'}, lambda: object(), 5.0)
+    client = TestClient(app)
+    headers = {'Authorization': 'Bearer k'}
+    big = client.post(
+        '/v1/chat/completions',
+        headers=headers,
+        json={'messages': [{'role': 'user', 'content': 'x' * (SERVING_MAX_PROMPT_CHARS + 1)}]},
+    )
+    assert big.status_code == 413 and state.inflight().get(1, 0) == 0 and not state.drain_served()
+
+    async def slow_reader_dispatch(dendrite, miner, messages, max_tokens, release, timeout, on_event=None):
+        syn = InferenceSynapse(messages=messages, model_id=release.model_id, max_tokens=max_tokens)
+        syn.completion, syn.served_model_id, syn.observed_latency_ms = 'hi', release.model_id, 12.0
+        if on_event is not None:
+            await on_event({'choices': [{'delta': {'content': 'hi'}}], 'model': release.model_id})
+            await on_event(None)
+        return syn
+
+    monkeypatch.setattr(api_module, '_dispatch', slow_reader_dispatch)
+    r = client.post('/v1/chat/completions', headers=headers, json={'messages': MSGS, 'stream': True})
+    assert r.status_code == 200
+    (served,) = state.drain_served()
+    assert served.ok and served.latency_ms == 12.0
+
+    async def broken_dispatch(dendrite, miner, messages, max_tokens, release, timeout, on_event=None):
+        if on_event is not None:
+            await on_event({'choices': [{'delta': {'content': 'hi'}}]})
+        raise AttributeError("'list' object has no attribute 'get'")
+
+    monkeypatch.setattr(api_module, '_dispatch', broken_dispatch)
+    r = client.post('/v1/chat/completions', headers=headers, json={'messages': MSGS, 'stream': True})
+    assert r.status_code == 200
+    (served,) = state.drain_served()
+    assert not served.ok and state.inflight().get(1, 0) == 0
+
+
+def test_runtime_rejected_prompt_is_checked_against_the_reference(monkeypatch):
+    """A gateway request the miner's runtime refused counts as a miss only if the validator's reference would have
+    answered it; when the reference refuses it too (over context) nobody is blamed. Baseline prompts are the
+    validator's own and never need the check."""
+    from types import SimpleNamespace
+
+    import requests
+
+    from gittensor.validator.serving.forward import verify_served_round
+
+    good = _echo_release()
+
+    class Reference(EchoReference):
+        def __init__(self, status):
+            super().__init__(good)
+            self.status = status
+
+        def case_for(self, messages, max_tokens=None):
+            if self.status:
+                err = requests.HTTPError('nope')
+                err.response = SimpleNamespace(status_code=self.status)
+                raise err
+
+    def run(reference, source='gateway'):
+        state = ServingState()
+        summary = {}
+        failed = _served(1, good, ok=False)
+        failed.source = source
+        verify_served_round(state, reference, good, [failed], summary)
+        return summary.get('neutral', 0), summary.get('miss', 0)
+
+    assert run(Reference(400)) == (1, 0)
+    assert run(Reference(500)) == (0, 1)
+    assert run(Reference(None)) == (0, 1)
+    assert run(Reference(400), source='baseline') == (0, 1)
+    assert run(EchoReference(good)) == (0, 1)
+
+
+def test_strikes_need_the_fleet_to_agree_with_the_reference():
+    """When most hotkeys judged this round fail the bands, the reference drifted: misses, not strikes."""
+    from gittensor.validator.serving.forward import verify_served_round
+
+    good = _echo_release()
+    ref = EchoReference(good)
+    state = ServingState()
+    summary = {}
+    served = [_served(1, good, wrong=True), _served(2, good, wrong=True), _served(3, good)]
+    verify_served_round(state, ref, good, served, summary)
+    assert summary.get('strike', 0) == 0 and summary.get('miss') == 2 and summary.get('reference_disagreement') == 1
+    assert state.audits.verdict('hk1', good.model_id).quarantined_until == 0.0
+    state = ServingState()
+    summary = {}
+    served = [_served(1, good, wrong=True), _served(2, good), _served(3, good)]
+    verify_served_round(state, ref, good, served, summary)
+    assert summary.get('strike') == 1 and state.audits.verdict('hk1', good.model_id).quarantined_until > 0.0
+    state = ServingState()
+    summary = {}
+    verify_served_round(state, ref, good, [_served(1, good, wrong=True)], summary)  # one hotkey: nothing to compare
+    assert summary.get('strike') == 1
+
+
+def test_quarantine_escalates_with_strikes():
+    w = AuditWindow(quarantine_s=100.0)
+    assert w.strike('hk', 'r', now=0.0) == 100.0
+    assert w.strike('hk', 'r', now=0.0) == 400.0
+    assert w.strike('hk', 'r', now=0.0) == 1600.0
+    assert w.strike('hk', 'r', now=0.0) == 6400.0
+    assert w.strike('hk', 'r', now=0.0) == 6400.0
+    assert w.strike('other', 'r', now=0.0) == 100.0
+
+
+def test_last_credit_survives_a_restart_and_tao_usd_is_the_repos(tmp_path, monkeypatch):
+    from gittensor.serving.store import ServingStore
+
+    state = ServingState()
+    state.last_credit['hk1'] = 0.75
+    store = ServingStore(tmp_path / 'serving.db')
+    store.save(state)
+    assert store.load(ServingState()).last_credit == {'hk1': 0.75}
+    monkeypatch.setenv('SERVING_TAO_USD', '1')
+    assert load_serving_loadout().tao_usd != 1.0
 
 
 def test_stream_assembler_collects_token_ids():
@@ -823,8 +1098,11 @@ def test_audit_round_verifies_served_traffic(monkeypatch):
     assert state.snapshot()['probation_uids'] == [3]  # the cheater is quarantined, not on probation
     assert sum(1 for r in state.recent(50) if r.kind == 'verify') == 7
 
-    scores = _round(state, dendrite, serving, good, monkeypatch)  # quiet round: READY on the window, credit 1.0
-    assert scores['hk1'] == 1.0 and [m.uid for m in state.ready_miners()] == [1]
+    # A round in which nothing of hk1's was verified freezes its credit at what was last measured (0.8) rather
+    # than crediting a perfect round the validator never observed.
+    scores = _round(state, dendrite, serving, good, monkeypatch)
+    assert scores['hk1'] == 0.8 and [m.uid for m in state.ready_miners()] == [1]
+    assert state.last_credit['hk1'] == 0.8
 
 
 def test_baseline_round_spreads_prompts_and_queues_them_for_verification(monkeypatch):
@@ -861,21 +1139,140 @@ def test_baseline_round_spreads_prompts_and_queues_them_for_verification(monkeyp
     )
 
 
-def test_budget_refusal_is_neutral_not_a_miss(monkeypatch):
+def test_budget_refusal_is_neutral_only_by_the_validators_own_ledger(monkeypatch):
+    """The refusal text is the miner's to write. It is neutral only when this validator's own count of max_tokens
+    sent in the trailing tempo is near the miner's allowance — and never for a staked caller, which has no budget."""
     from types import SimpleNamespace
+
+    from gittensor.constants import SERVING_VALIDATOR_TOKENS_PER_TEMPO
 
     good = _echo_release()
     axon = SimpleNamespace(is_serving=True)
     dendrite, _ = _dendrite_echoing(good)
+
+    def refused():
+        r = _served(1, good, ok=False)
+        r.detail = 'Validator audit budget spent (50000 tokens per tempo)'
+        return r
+
+    # An unstaked validator that sent almost nothing: the refusal is a lie -> a miss.
     state = ServingState(settlement_rounds=1)
     state.enqueue_served(_served(1, good))
-    refused = _served(1, good, ok=False)
-    refused.detail = 'Validator audit budget spent (50000 tokens per tempo)'
-    state.enqueue_served(refused)
-    state.enqueue_served(_served(1, good, ok=False))
+    state.enqueue_served(refused())
+    _round(state, dendrite, [(1, 'hk1', axon)], good, monkeypatch)
+    assert state.audits.verdict('hk1', good.model_id).mean == 0.5
+
+    # The same validator after sending the allowance: the refusal is plausible -> neutral.
+    state = ServingState(settlement_rounds=1)
+    state.charge_sent('hk1', SERVING_VALIDATOR_TOKENS_PER_TEMPO)
+    state.enqueue_served(_served(1, good))
+    state.enqueue_served(refused())
     _round(state, dendrite, [(1, 'hk1', axon)], good, monkeypatch)
     w = state.audits.verdict('hk1', good.model_id)
-    assert w.n_audits == 2 and w.mean == 0.5  # one pass, one real miss, the refusal ignored
+    assert w.n_audits == 1 and w.mean == 1.0
+
+    # A staked caller is never on a budget: the refusal is a miss however much it sent.
+    state = ServingState(settlement_rounds=1)
+    state.charge_sent('hk1', SERVING_VALIDATOR_TOKENS_PER_TEMPO)
+    state.enqueue_served(_served(1, good))
+    state.enqueue_served(refused())
+    asyncio.run(
+        fwd_module().audit_round(
+            state,
+            dendrite,  # type: ignore[arg-type]
+            [(1, 'hk1', axon)],  # type: ignore[list-item]
+            ServingLoadout(releases=[good]),
+            staked_caller=True,
+        )
+    )
+    assert state.audits.verdict('hk1', good.model_id).mean == 0.5
+
+
+def test_sent_token_ledger_is_kept_at_dispatch(monkeypatch):
+    """Gateway and baseline requests both charge the validator's own ledger with the max_tokens they asked for."""
+    from gittensor.validator.serving.forward import baseline_round
+
+    good = _echo_release()
+    state = ServingState()
+    state.publish_round([ReadyMiner(uid=1, hotkey='hk1', axon=None, score=1.0, release_id=good.release_id)], {})  # type: ignore[arg-type]
+    dendrite, _ = _dendrite_echoing(good)
+    app = build_app(state, ServingLoadout(releases=[good]), {'k'}, lambda: dendrite, 5.0)
+    client = TestClient(app)
+    r = client.post(
+        '/v1/chat/completions',
+        headers={'Authorization': 'Bearer k'},
+        json={'messages': [{'role': 'user', 'content': 'hi'}], 'max_tokens': 40},
+    )
+    assert r.status_code == 200
+    assert state.sent_tokens('hk1', 3600.0) == 40
+    axon = SimpleNamespace(is_serving=True)
+    asyncio.run(baseline_round(state, dendrite, [(1, 'hk1', axon)], good, 0.0, per_miner=1))  # type: ignore[arg-type]
+    assert state.sent_tokens('hk1', 3600.0) > 40
+    assert state.sent_tokens('hk1', 3600.0, now=time.time() + 7200) == 0
+
+
+def test_malformed_miner_data_is_a_miss_not_a_neutral():
+    """bytes out of range, ids out of range, more tokens than asked for: the miner's miss, judged before the
+    reference is ever asked. A reference that rejects the miner's ids (HTTP 4xx) is the same."""
+    from gittensor.serving.audit import verify_served
+
+    release = _echo_release()
+    ref = EchoReference(release)
+    good = _served(1, release)
+    tokens, logprobs = list(good.tokens or []), list(good.token_logprobs or [])
+    n = len(tokens)
+    bad_bytes = verify_served(ref, good.messages, good.completion, tokens, logprobs, token_bytes=[[256]] * n)
+    assert not bad_bytes.passed and not bad_bytes.hard and 'malformed token bytes' in bad_bytes.reason
+    bad_ids = verify_served(ref, good.messages, good.completion, tokens, logprobs, token_ids=[10**9] * n)
+    assert not bad_ids.passed and 'malformed token ids' in bad_ids.reason
+    neg_ids = verify_served(ref, good.messages, good.completion, tokens, logprobs, token_ids=[-1] * n)
+    assert not neg_ids.passed and 'malformed token ids' in neg_ids.reason
+    long = verify_served(ref, good.messages, good.completion, tokens, logprobs, max_tokens=n - 2)
+    assert not long.passed and 'tokens for a' in long.reason
+    assert verify_served(ref, good.messages, good.completion, tokens, logprobs, max_tokens=n).passed
+
+
+def test_reference_rejection_is_the_miners_miss_and_a_reference_fault_is_neutral(monkeypatch):
+    from types import SimpleNamespace
+
+    import requests
+
+    from gittensor.validator.serving.forward import verify_served_round
+
+    good = _echo_release()
+
+    class Rejecting:
+        model_id = good.model_id
+
+        def __init__(self, status):
+            self.status = status
+
+        def score_served(self, messages, completion, token_ids=None):
+            err = requests.HTTPError('nope')
+            err.response = SimpleNamespace(status_code=self.status)
+            raise err
+
+        def sample(self):
+            raise NotImplementedError
+
+        def __len__(self):
+            return 1
+
+    monkeypatch.setattr('gittensor.validator.serving.forward.time.sleep', lambda s: None)
+    state = ServingState()
+    summary = {}
+    verify_served_round(state, Rejecting(400), good, [_served(1, good)], summary)  # type: ignore[arg-type]
+    assert summary.get('miss') == 1 and state.audits.verdict('hk1', good.model_id).mean == 0.0
+    state = ServingState()
+    summary = {}
+    verify_served_round(state, Rejecting(503), good, [_served(1, good)], summary)  # type: ignore[arg-type]
+    assert summary.get('neutral') == 1 and state.audits.verdict('hk1', good.model_id).n_audits == 0
+
+
+def fwd_module():
+    from gittensor.validator.serving import forward as fwd
+
+    return fwd
 
 
 def test_baseline_prompts_vary_in_shape_and_length():
@@ -1099,8 +1496,14 @@ def test_serving_share_prices_gpu_hours_inside_the_cap(monkeypatch):
     assert ea.serving_share(1.0, pricing) == pytest.approx(0.70 / (123.0 * 0.847))
     assert ea.serving_share(25.0, pricing) == pytest.approx(0.168, abs=0.001)
     assert ea.serving_share(100.0, pricing) == 0.17  # capped: 100 cards dilute
-    assert ea.serving_share(1.0, None) == 0.17  # no pricing (testnet): pay the cap pro-rata
-    assert ea.serving_share(1.0, ServingPricing(0.0, 0.847)) == 0.17
+    # No usable pricing pays nothing: on a priced network a failed read must not hand one card the whole cap.
+    assert ea.serving_share(1.0, None) == 0.0
+    assert ea.serving_share(1.0, ServingPricing(0.0, 0.847)) == 0.0
+    assert ea.serving_share(100.0, None) == 0.0
+    # ... unless the network has no price to read at all (testnet), where the cap is split pro-rata.
+    assert ea.serving_share(1.0, None, allow_unpriced_cap=True) == 0.17
+    assert ea.serving_share(1.0, ServingPricing(0.0, 0.847), allow_unpriced_cap=True) == 0.17
+    assert ea.serving_share(0.0, None, allow_unpriced_cap=True) == 0.0  # nothing verified is still nothing
 
 
 def test_blend_pays_serving_by_price_and_recycles_the_rest(monkeypatch):
@@ -1127,12 +1530,21 @@ def test_serving_pricing_reads_chain_and_loadout(monkeypatch):
         metagraph=SimpleNamespace(E=[100.0, 200.0], netuid=74),
         subtensor=SimpleNamespace(subnet=lambda netuid: SimpleNamespace(price=0.004)),
     )
+    monkeypatch.setattr(pr, '_last_usable', None)
     monkeypatch.setattr(pr, 'load_serving_loadout', lambda: SimpleNamespace(tao_usd=250.0))
     p = pr.serving_pricing(vali)  # type: ignore[arg-type]
     assert p is not None and p.alpha_per_hour_to_miners == pytest.approx(150.0 * 60 / 72) and p.alpha_usd == 1.0
+
+    # A read that comes back unusable, or throws, reuses the last usable pricing rather than dropping pay.
     monkeypatch.setattr(pr, 'load_serving_loadout', lambda: SimpleNamespace(tao_usd=None))
-    assert pr.serving_pricing(vali) is None  # type: ignore[arg-type]
+    assert pr.serving_pricing(vali) == p  # type: ignore[arg-type]
     vali.subtensor = SimpleNamespace(subnet=lambda netuid: (_ for _ in ()).throw(RuntimeError('rpc')))
+    assert pr.serving_pricing(vali) == p  # type: ignore[arg-type]
+
+    # Once that last good reading is older than the max age it is not reused, and nothing is priced.
+    monkeypatch.setattr(pr, '_last_usable', (time.time() - SERVING_PRICING_MAX_AGE_S - 1.0, p))
+    assert pr.serving_pricing(vali) is None  # type: ignore[arg-type]
+    monkeypatch.setattr(pr, '_last_usable', None)  # a validator that has never priced pays nothing
     assert pr.serving_pricing(vali) is None  # type: ignore[arg-type]
 
 
@@ -1174,7 +1586,7 @@ def test_oss_round_blends_latest_serving_scores(monkeypatch):
 
     seen = {}
 
-    def blend(evals, repos, uids, maintainers, serving_scores, pricing=None):
+    def blend(evals, repos, uids, maintainers, serving_scores, pricing=None, allow_unpriced_cap=False):
         seen['serving'] = serving_scores
         seen['pricing'] = pricing
         return [0.0]
@@ -1480,6 +1892,61 @@ def test_miner_axon_hooks_match_their_forward_synapse_types():
             assert param.name == 'synapse' and getattr(param.annotation, '__name__', param.annotation) == syn
 
 
+def test_attest_is_for_validating_hotkeys_one_challenge_at_a_time(monkeypatch):
+    """A permit alone opened a free, unlimited, VRAM-filling call on every miner; now it takes validator_trust > 0
+    (or the stake floor), and one challenge per caller at a time. The miner sends its sidecar's bearer."""
+    import asyncio
+    from types import SimpleNamespace
+
+    import requests
+
+    from gittensor.synapses import AttestSynapse
+    from neurons.serving_miner import blacklist_attest, handle_attest
+
+    monkeypatch.setenv('SERVING_MIN_CALLER_STAKE', '100')
+    miner = SimpleNamespace(
+        metagraph=SimpleNamespace(
+            hotkeys=['vali', 'staked', 'permitted'],
+            S=[5.0, 100.0, 50.0],
+            validator_permit=[True, True, True],
+            validator_trust=[0.9, 0.0, 0.0],
+            block=720,
+        ),
+        audit_budget={},
+        attest_inflight=set(),
+        release=SimpleNamespace(attest_url='http://sidecar:8081', attest_api_key='sekrit'),
+    )
+
+    def gate(hotkey):
+        syn = AttestSynapse(seed=1)
+        assert syn.dendrite is not None
+        syn.dendrite.hotkey = hotkey
+        return asyncio.run(blacklist_attest(miner, syn))  # type: ignore[arg-type]
+
+    assert gate('vali') == (False, 'Permitted validator')
+    assert gate('staked') == (False, 'Staked caller')
+    assert gate('permitted') == (True, 'Attestation is for validating hotkeys')
+    assert gate('nobody') == (True, 'Unrecognized hotkey')
+    assert all(used == 0 for _, used in miner.audit_budget.values())  # nothing charged
+    miner.attest_inflight.add('vali')
+    assert gate('vali') == (True, 'Attestation already in flight for this caller')
+    miner.attest_inflight.clear()
+
+    seen = {}
+
+    def post(url, json, headers, timeout):
+        seen.update(url=url, headers=headers, inflight=set(miner.attest_inflight))
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {'devices': [{'uuid': 'g'}], 'queued_ms': 1})
+
+    monkeypatch.setattr(requests, 'post', post)
+    syn = AttestSynapse(seed=1)
+    assert syn.dendrite is not None
+    syn.dendrite.hotkey = 'vali'
+    out = asyncio.run(handle_attest(miner, syn))  # type: ignore[arg-type]
+    assert out.devices == [{'uuid': 'g'}] and seen['headers'] == {'Authorization': 'Bearer sekrit'}
+    assert seen['inflight'] == {'vali'} and miner.attest_inflight == set()
+
+
 def _card(uuid: str, digest: str = 'd', wall_ms: float = 1500.0, filled: int = 8_000_000_000, free_before=None):
     dev = {'uuid': uuid, 'digest': digest, 'wall_ms': wall_ms, 'filled_bytes': filled, 'vram_total': 34e9}
     if free_before is not None:
@@ -1541,11 +2008,18 @@ def test_attest_round_pays_per_card_and_dedupes_across_cards(monkeypatch):
     assert att.status_capacity(state.attest_status['hk1']) == 2
     assert att.status_capacity({'passed': True, 'uuid': 'GPU-old'}) == 1  # status persisted before capacity existed
 
+    # hk1 holds GPU-b from the round it passed with it: a newcomer naming that UUID loses the card, hk1 keeps it
     replies[id(axons['hk2'])] = AttestSynapse(seed=1, devices=[_card('GPU-b')])  # hk1's second card
     state.attest_status = {}
     out = asyncio.run(att.attest_round(state, dendrite, candidates, release, rng=random.Random(0)))  # type: ignore[arg-type]
-    assert out == {'hk1': 0, 'hk2': 0}
-    assert state.attest_status['hk1']['reason'] == 'duplicate GPU GPU-b'
+    assert out == {'hk1': 2, 'hk2': 0}
+    assert state.attest_status['hk2']['reason'] == 'duplicate GPU GPU-b (held by another hotkey)'
+    assert state.uuid_owner['GPU-b'][0] == 'hk1'
+    # the same collision with no holder on record (both new this round) is the sharing case: both lose it
+    fresh = ServingState()
+    out = asyncio.run(att.attest_round(fresh, dendrite, candidates, release, rng=random.Random(0)))  # type: ignore[arg-type]
+    assert out == {'hk1': 1, 'hk2': 0}  # hk1 keeps GPU-a, loses GPU-b; hk2 had only GPU-b
+    assert 'GPU-b' not in fresh.uuid_owner and fresh.uuid_owner['GPU-a'][0] == 'hk1'
 
     # the audit round multiplies the speed credit by the attested cards
     good = _echo_release()
@@ -1574,6 +2048,110 @@ def test_attest_round_pays_per_card_and_dedupes_across_cards(monkeypatch):
     assert scores['hk1'] == pytest.approx(2.0) and scores['hk2'] == pytest.approx(1.0)
     tele = state.snapshot()['last_round']['windows']
     assert tele[1]['capacity'] == 2.0 and tele[1]['gpu_uuids'] == ['GPU-a', 'GPU-b'] and tele[2]['capacity'] == 1.0
+
+
+def test_attest_cards_answer_their_own_index_and_the_round_trip_bounds_the_count():
+    """Device i answers seed + i, recomputed by the reference: one real digest repeated N times passes once. And the
+    whole reply must land within one card's budget plus the slack, however each card's own wall reads."""
+    from gittensor.synapses import AttestSynapse
+    from gittensor.validator.serving.attest import judge
+
+    release = _attest_release()
+    per_index = {0: 'd0', 1: 'd1', 2: 'd2'}.get
+    faked = judge(
+        AttestSynapse(seed=1, devices=[_card('GPU-a', digest='d0'), _card('GPU-b', digest='d0')]),
+        per_index,
+        1400.0,
+        release,
+    )
+    assert faked.capacity == 1 and faked.reason.startswith('1/2 cards ok (digest mismatch')
+    honest = judge(
+        AttestSynapse(seed=1, devices=[_card('GPU-a', digest='d0'), _card('GPU-b', digest='d1')]),
+        per_index,
+        1400.0,
+        release,
+        elapsed_ms=1500.0,
+    )
+    assert honest.capacity == 2
+    beyond = judge(
+        AttestSynapse(seed=1, devices=[_card(f'GPU-{i}', digest=f'd{i}') for i in range(4)]), per_index, 1400.0, release
+    )
+    assert beyond.capacity == 3 and 'no reference digest' in beyond.reason
+    slow = judge(
+        AttestSynapse(seed=1, devices=[_card('GPU-a', digest='d0')]), per_index, 1400.0, release, elapsed_ms=9_000.0
+    )
+    assert not slow.passed and slow.capacity == 0 and 'round trip' in slow.reason
+    capped = judge(
+        AttestSynapse(seed=1, devices=[_card(f'GPU-{i}', digest='d') for i in range(20)]),
+        'd',
+        1400.0,
+        release,
+        max_cards=3,
+    )
+    assert capped.capacity == 3
+
+
+def test_attest_malformed_report_is_a_failed_card_not_a_crash():
+    from gittensor.synapses import AttestSynapse
+    from gittensor.validator.serving.attest import judge, status_capacity
+
+    release = _attest_release()
+    bad = judge(
+        AttestSynapse(seed=1, devices=[{'uuid': 'GPU-a', 'digest': 'd', 'filled_bytes': 'x'}]), 'd', 1400.0, release
+    )
+    assert not bad.passed and bad.reason.startswith('malformed device report')
+    nested = judge(
+        AttestSynapse(seed=1, devices=[{'uuid': 'GPU-a', 'digest': 'd', 'vram_total': [1]}]), 'd', 1400.0, release
+    )
+    assert not nested.passed and nested.reason.startswith('malformed device report')
+    # a verdict the reference has not renewed for longer than the memory window pays nothing
+    stale = {'passed': True, 'capacity': 2, 'round': 1}
+    assert status_capacity(stale, round_no=13) == 2 and status_capacity(stale, round_no=14) == 0
+    assert status_capacity(stale) == 2
+
+
+def test_attest_fault_is_neutral_and_the_round_counter_persists(monkeypatch, tmp_path):
+    import asyncio
+    from types import SimpleNamespace
+
+    from gittensor.serving.store import ServingStore
+    from gittensor.validator.serving import attest as att
+
+    release = _attest_release()
+    monkeypatch.setattr(att, 'reference_challenge', lambda rel, seed, iters, timeout: ('d', 1400.0))
+    axon = SimpleNamespace(is_serving=True)
+
+    async def call(target_axon, synapse, timeout, deserialize):
+        return _attest_reply(uuid='GPU-1')
+
+    dendrite = SimpleNamespace(call=call)
+    state = ServingState()
+    assert asyncio.run(att.attest_round(state, dendrite, [(1, 'hk1', axon)], release)) == {'hk1': 1}  # type: ignore[arg-type]
+    monkeypatch.setattr(att, 'judge', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('boom')))
+    assert asyncio.run(att.attest_round(state, dendrite, [(1, 'hk1', axon)], release)) == {'hk1': 1}  # type: ignore[arg-type]
+    assert state.attest_round == 2 and state.uuid_owner['GPU-1'] == ('hk1', 1)
+    store = ServingStore(tmp_path / 'serving.db')
+    store.save(state)
+    again = store.load(ServingState())
+    assert again.attest_round == 2 and again.uuid_owner == {'GPU-1': ('hk1', 1)}
+
+
+def test_reference_challenge_sends_the_bearer(monkeypatch):
+    import requests
+
+    from gittensor.validator.serving import attest as att
+
+    seen = {}
+
+    def post(url, json, headers, timeout):
+        seen.update(url=url, json=json, headers=headers)
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {'digest': 'd', 'wall_ms': 800.0})
+
+    monkeypatch.setattr(requests, 'post', post)
+    release = _attest_release()
+    release.attest_reference_api_key = 'secret'
+    assert att.reference_challenge(release, 5, 3, 10.0) == ('d', 800.0)
+    assert seen['headers'] == {'Authorization': 'Bearer secret'} and seen['json']['seed'] == 5
 
 
 def test_sample_for_audit_keeps_baseline_and_failures_and_draws_the_rest():
@@ -1712,7 +2290,7 @@ def test_strikes_count_up_and_survive_a_restart(tmp_path):
     store.save(ServingState(audits=w))
     again = store.load(ServingState(audits=AuditWindow(quarantine_s=100.0))).audits
     assert again.strikes('hk', 'r1') == 2 and again.strikes('hk', 'r2') == 1
-    assert again.quarantined_until('hk', 'r1', now=2050.0) == 2100.0
+    assert again.quarantined_until('hk', 'r1', now=2050.0) == 2400.0  # the second strike: 4x the first
 
 
 def test_store_migrates_a_model_id_keyed_database(tmp_path):

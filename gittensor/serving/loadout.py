@@ -45,6 +45,7 @@ class ServingRelease:
     backend: str
     release_id: str = ''  # what the validator keys audits, quarantine and READY sets by; defaults to model_id
     max_tokens: int = 64
+    end_of_turn_token_id: Optional[int] = None  # the model's end-of-turn id; forced to verify an early stop
     base_url: Optional[str] = None  # miner side: the runtime this miner serves from
     runtime_pin: Optional[str] = None
     runtime_image: Optional[str] = None  # the blessed image by digest (entrius/sparkinfer:<tag>@sha256:...)
@@ -65,7 +66,9 @@ class ServingRelease:
     # beside the reference (default: reference_url host, port 8081).
     attest_image: Optional[str] = None  # the attest container every box runs (entrius/gt-attest:<tag>)
     attest_url: Optional[str] = None
+    attest_api_key: Optional[str] = None  # miner side: bearer for its own sidecar (ATTEST_API_KEY there)
     attest_reference_url: Optional[str] = None
+    attest_reference_api_key: Optional[str] = None  # bearer for a keyed reference sidecar (ATTEST_API_KEY there)
     attest_iters: Optional[int] = None
     vram_model_reserved_bytes: Optional[float] = None
     ttft_full_ms: Optional[float] = None  # validator-observed TTFT up to which latency credit is 1.0
@@ -108,6 +111,9 @@ class ServingRelease:
             backend=raw['backend'],
             release_id=str(raw.get('release_id') or raw['model_id']),
             max_tokens=int(raw.get('max_tokens', 64)),
+            end_of_turn_token_id=int(raw['end_of_turn_token_id'])
+            if raw.get('end_of_turn_token_id') is not None
+            else None,
             base_url=raw.get('base_url'),
             runtime_pin=raw.get('runtime_pin'),
             runtime_image=raw.get('runtime_image'),
@@ -120,7 +126,9 @@ class ServingRelease:
             decode_per_request={int(k): float(v) for k, v in (speed.get('decode_per_request') or {}).items()} or None,
             attest_image=attest.get('image'),
             attest_url=attest.get('url') or _sidecar_url(raw.get('base_url')),
+            attest_api_key=attest.get('api_key') or os.getenv('SERVING_ATTEST_API_KEY') or None,
             attest_reference_url=attest.get('reference_url') or _sidecar_url(raw.get('reference_url')),
+            attest_reference_api_key=attest.get('reference_api_key'),
             attest_iters=int(attest['iters']) if attest.get('iters') else None,
             vram_model_reserved_bytes=_optional_float(attest.get('vram_model_reserved_bytes')),
             ttft_full_ms=_optional_float(speed.get('ttft_full_ms')),
@@ -189,8 +197,8 @@ def load_serving_loadout(path: Optional[Path] = None) -> ServingLoadout:
         raw = json.load(f)
     entries = raw['releases'] if isinstance(raw, dict) and 'releases' in raw else [raw]
     pricing = raw.get('pricing') or {} if isinstance(raw, dict) else {}
-    tao_usd_env = os.getenv('SERVING_TAO_USD')
-    tao_usd = float(tao_usd_env) if tao_usd_env else (float(pricing['tao_usd']) if pricing.get('tao_usd') else None)
+    # The rate is the repo's, not the operator's: validators must price the same card the same way.
+    tao_usd = float(pricing['tao_usd']) if pricing.get('tao_usd') else None
     loadout = ServingLoadout(releases=[ServingRelease.from_dict(entry) for entry in entries], tao_usd=tao_usd)
 
     reference_override = os.getenv('SERVING_REFERENCE_URL')
@@ -202,6 +210,9 @@ def load_serving_loadout(path: Optional[Path] = None) -> ServingLoadout:
     key_override = os.getenv('SERVING_REFERENCE_API_KEY')
     if key_override:
         loadout.primary.reference_api_key = key_override
+    attest_key_override = os.getenv('SERVING_ATTEST_REFERENCE_API_KEY')
+    if attest_key_override:
+        loadout.primary.attest_reference_api_key = attest_key_override
 
     lines = [
         f'Serving release {release.release_id}: model={release.model_id} backend={release.backend} pin={release.runtime_pin} '

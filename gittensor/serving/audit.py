@@ -40,8 +40,8 @@ publishes the miner while their mean clears ``SERVING_AUDIT_WINDOW_THRESHOLDS``
 — it absorbs transient misses; it is not there to average out model noise (that
 was the 1b8b962 design, 2026-08-22 notes).
 Missed or malformed responses enter the window as 0. The validator persists the
-window (``serving_audits.json`` next to ``state.npz``) so a restart is not a
-reset.
+window (``serving.db`` next to ``state.npz``, ``gittensor/serving/store.py``) so a
+restart is not a reset.
 
 There are no synthetic audit prompts: every request served through the gateway
 *is* the audit. ``verify_served`` teacher-forces the miner's completion under
@@ -54,6 +54,7 @@ outside the bands with aligned lengths) is a wrong answer, not a miss:
 """
 
 import json
+import re
 import secrets
 import time
 from collections import deque
@@ -67,11 +68,15 @@ from gittensor.constants import (
     SERVING_AUDIT_MIN_PREFIX_AGREEMENT,
     SERVING_AUDIT_WINDOW,
     SERVING_AUDIT_WINDOW_THRESHOLDS,
+    SERVING_QUARANTINE_ESCALATION,
+    SERVING_QUARANTINE_MAX_STEPS,
     SERVING_QUARANTINE_S,
 )
 from gittensor.serving.backends import Message, expected_completion
 from gittensor.serving.loadout import WEIGHTS_DIR, ServingRelease
 from gittensor.serving.probe import compare, greedy, make_prompts, score
+
+MAX_TOKEN_ID = 1 << 21  # no released vocabulary is this large; anything past it is not a token id
 
 
 @dataclass
@@ -166,11 +171,14 @@ class AuditWindow:
         self._values[key].append(max(0.0, min(1.0, float(value))))
 
     def strike(self, hotkey: str, release_id: str, now: Optional[float] = None) -> float:
-        """A wrong answer: wipe the window and quarantine the (hotkey, release) until the returned timestamp."""
+        """A wrong answer: wipe the window and quarantine the (hotkey, release) until the returned timestamp. Each
+        strike on the same (hotkey, release) quarantines ``SERVING_QUARANTINE_ESCALATION`` times longer than the last,
+        up to ``SERVING_QUARANTINE_MAX_STEPS`` steps: a strike costs a fresh hotkey an hour, a repeat offender days."""
         key = (hotkey, release_id)
         self._values.pop(key, None)
         self._strikes[key] = self._strikes.get(key, 0) + 1
-        until = (now if now is not None else time.time()) + self.quarantine_s
+        step = min(self._strikes[key] - 1, SERVING_QUARANTINE_MAX_STEPS)
+        until = (now if now is not None else time.time()) + self.quarantine_s * SERVING_QUARANTINE_ESCALATION**step
         self._quarantine[key] = until
         return until
 
@@ -279,13 +287,16 @@ class EchoReference:
         )
 
     def score_served(self, messages: List[Message], completion: str, token_ids: Optional[Sequence[int]] = None) -> dict:
-        """Teacher-forced scoring for the echo backend: the argmax is the expected token at every position."""
+        """Teacher-forced scoring for the echo backend: the argmax is the expected token at every position. The echo
+        model never stops early, so a forced position past the text (an end-of-turn token) scores as a wrong token."""
         tokens = completion.split(' ') if completion else []
-        ref = expected_completion(messages, max(1, len(tokens)), self.model_id)
-        argmax = list(ref.tokens or [])[: len(tokens)]
+        n = max(len(tokens), len(token_ids) if token_ids else 0)
+        ref = expected_completion(messages, max(1, n), self.model_id)
+        argmax = list(ref.tokens or [])[:n]
         ref_lp = list(ref.token_logprobs or [])
-        logprobs = [ref_lp[i] if i < len(ref_lp) and tokens[i] == argmax[i] else -20.0 for i in range(len(tokens))]
-        return {'tokens': tokens, 'logprobs': logprobs, 'argmax': argmax, 'usage': {}}
+        mine = tokens + ['<|im_end|>'] * (n - len(tokens))
+        logprobs = [ref_lp[i] if i < len(ref_lp) and mine[i] == argmax[i] else -20.0 for i in range(n)]
+        return {'tokens': mine, 'logprobs': logprobs, 'argmax': argmax, 'usage': {}}
 
     def __len__(self) -> int:
         return 1
@@ -359,8 +370,11 @@ def verify_response(
     min_prefix_agreement: float = SERVING_AUDIT_MIN_PREFIX_AGREEMENT,
     max_mean_abs_logprob_diff: float = SERVING_AUDIT_MAX_MEAN_ABS_LOGPROB_DIFF,
     max_abs_logprob_diff: float = SERVING_AUDIT_MAX_ABS_LOGPROB_DIFF,
+    aligned: bool = False,
 ) -> AuditVerdict:
-    """Measure one audit against the reference; ``passed`` requires every band to hold."""
+    """Measure one audit against the reference; ``passed`` requires every band to hold. With ``aligned`` (the
+    reference scored exactly the miner's positions) a divergence at the first token is a wrong answer like any
+    other, not a miss a miner can choose over a strike."""
     if not tokens or token_logprobs is None or len(tokens) != len(token_logprobs):
         return AuditVerdict(False, 0.0, float('inf'), 'missing or malformed logprobs')
     if not case.reference_tokens or len(case.reference_logprobs) != len(case.reference_tokens):
@@ -368,7 +382,7 @@ def verify_response(
 
     prefix, agreement, overlap, diffs = compare(tokens, token_logprobs, case.reference_tokens, case.reference_logprobs)
     if prefix == 0:
-        return AuditVerdict(False, 0.0, float('inf'), 'diverged at first token', overlap)
+        return AuditVerdict(False, 0.0, float('inf'), 'diverged at first token', overlap, hard=aligned)
 
     mean_diff = sum(diffs) / len(diffs)
     max_diff = max(diffs)
@@ -395,6 +409,7 @@ def verify_served(
     end_of_turn: Sequence[str] = ('<|im_end|>', '<|endoftext|>', '</s>'),
     token_bytes: Optional[Sequence[Sequence[int]]] = None,
     release: Optional[ServingRelease] = None,
+    max_tokens: Optional[int] = None,
 ) -> AuditVerdict:
     """Verify a served (greedy) completion by teacher forcing it under the reference.
 
@@ -409,33 +424,63 @@ def verify_served(
     if completion is None or not tokens or token_logprobs is None or len(tokens) != len(token_logprobs):
         return AuditVerdict(False, 0.0, float('inf'), 'missing or malformed logprobs')
     mine, mine_lp = list(tokens), list(token_logprobs)
+    if max_tokens is not None and len(mine) > max_tokens + 1:  # + the end-of-turn token a runtime lists
+        return AuditVerdict(False, 0.0, float('inf'), f'{len(mine)} tokens for a {max_tokens}-token request')
+    # Everything below is the miner's data; a value the reference could not even be asked about is the miner's
+    # miss, never a reference fault (an exception here must not become a neutral verdict).
     mine_ids = list(token_ids) if token_ids and len(token_ids) == len(mine) else None
-    mine_bytes = [bytes(b) for b in token_bytes] if token_bytes and len(token_bytes) == len(mine) else None
-    if mine and mine[-1] in end_of_turn:
-        mine, mine_lp = mine[:-1], mine_lp[:-1]
-        mine_ids = mine_ids[:-1] if mine_ids else None
-        mine_bytes = mine_bytes[:-1] if mine_bytes else None
-    if not mine:
+    if mine_ids is not None and not all(isinstance(i, int) and 0 <= i < MAX_TOKEN_ID for i in mine_ids):
+        return AuditVerdict(False, 0.0, float('inf'), 'malformed token ids')
+    mine_bytes: Optional[List[bytes]] = None
+    if token_bytes and len(token_bytes) == len(mine):
+        try:
+            mine_bytes = [bytes(b) for b in token_bytes]
+        except (TypeError, ValueError):
+            return AuditVerdict(False, 0.0, float('inf'), 'malformed token bytes')
+    if release is not None and release.backend != 'echo' and mine_ids is None:
+        # A real runtime reports ids (contract R8); without them the text would be re-tokenized, and a miner
+        # could pick a text whose fresh tokenization never aligns \u2014 a miss it can repeat forever, never a strike.
+        return AuditVerdict(False, 0.0, float('inf'), 'no token ids')
+    ended = bool(mine) and mine[-1] in end_of_turn
+    if ended and mine_ids is None:  # the text path cannot force a position past the text; drop the end-of-turn
+        mine, mine_lp, mine_bytes, ended = mine[:-1], mine_lp[:-1], mine_bytes[:-1] if mine_bytes else None, False
+    content_n = len(mine) - 1 if ended else len(mine)
+    if content_n <= 0:
         return AuditVerdict(False, 0.0, float('inf'), 'empty completion')
+    appended = False
+    if max_tokens is not None and content_n < max_tokens and not ended:
+        # Stopped short of the budget with no end-of-turn token in the transcript (sparkinfer 7498736 lists only
+        # the content tokens on a natural stop). The validator appends the release's end-of-turn id itself and
+        # judges that position on the reference's argmax alone: the model must have chosen to stop here.
+        eos_id = release.end_of_turn_token_id if release is not None else None
+        if mine_ids is None or eos_id is None:
+            return AuditVerdict(
+                False, 0.0, float('inf'), f'stopped at {content_n} of {max_tokens} tokens without end-of-turn'
+            )
+        mine_ids, appended = mine_ids + [eos_id], True
+    # An end-of-turn position — the miner's or the appended one — is forced like any other: the reference's argmax
+    # there must be the end-of-turn, which is what makes an early stop the model's own decision and not the miner's.
     ref = reference.score_served(messages, completion, mine_ids)
-    argmax, ref_lp = ref.get('argmax') or [], ref.get('logprobs') or []
+    argmax, ref_lp = list(ref.get('argmax') or []), list(ref.get('logprobs') or [])
+    if appended:
+        if len(argmax) == len(mine) + 1 and argmax[-1] not in end_of_turn:
+            return AuditVerdict(False, 0.0, float('inf'), 'stopped early: the model would have continued', hard=True)
+        argmax, ref_lp = argmax[: len(mine)], ref_lp[: len(mine)]
     if len(argmax) != len(mine) or len(ref_lp) != len(mine):
         return AuditVerdict(False, 0.0, float('inf'), f'tokenization mismatch ({len(mine)} vs {len(argmax)})')
     if mine_ids and ref.get('bytes'):
-        # Bind the forced ids to what the user received. Exact on bytes when the miner reported them; the decoded
-        # text is only compared when it decodes cleanly (a multibyte character split across streamed tokens shows
-        # up as replacement characters in the stream's text and is not the miner's doing).
-        ref_bytes = b''.join(ref['bytes'])
-        if mine_bytes is not None:
-            if b''.join(mine_bytes) != ref_bytes:
-                return AuditVerdict(False, 0.0, float('inf'), 'token ids do not spell the streamed bytes')
-        else:
-            text = ref_bytes.decode('utf-8', 'replace')
-            if '\ufffd' not in text and '\ufffd' not in completion and text != completion:
-                return AuditVerdict(False, 0.0, float('inf'), 'token ids do not spell the completion')
+        # Bind the forced ids to what the user received: exact on bytes when the miner reported them, and the
+        # decoded text must be the completion \u2014 a multibyte character split across streamed tokens shows up as
+        # replacement characters in the stream's text, so each run of them stands for one or more non-ASCII
+        # characters and nothing else.
+        ref_bytes = b''.join(ref['bytes'][:content_n])
+        if mine_bytes is not None and b''.join(mine_bytes[:content_n]) != ref_bytes:
+            return AuditVerdict(False, 0.0, float('inf'), 'token ids do not spell the streamed bytes')
+        if not spells(ref_bytes, completion):
+            return AuditVerdict(False, 0.0, float('inf'), 'token ids do not spell the completion')
     case = AuditCase(messages=list(messages), max_tokens=len(mine), reference_tokens=argmax, reference_logprobs=ref_lp)
     if release is None:
-        return verify_response(case, mine, mine_lp)
+        return verify_response(case, mine, mine_lp, aligned=True)
     return verify_response(
         case,
         mine,
@@ -443,4 +488,19 @@ def verify_served(
         release.min_prefix_agreement,
         release.max_mean_abs_logprob_diff,
         release.max_abs_logprob_diff,
+        aligned=True,
     )
+
+
+def spells(ref_bytes: bytes, completion: str) -> bool:
+    """Does the decoded reference text read as ``completion``? Every maximal run of replacement characters in the
+    completion stands for one or more non-ASCII characters (a multibyte character split across streamed chunks);
+    nothing else may differ, so ASCII cannot be added, dropped or changed behind a valid transcript."""
+    text = ref_bytes.decode('utf-8', 'replace')
+    if '\ufffd' not in completion:
+        return text == completion
+    pattern = ''.join(
+        f'[^\\x00-\\x7f]{{1,{len(run)}}}' if run.startswith('\ufffd') else re.escape(run)
+        for run in re.findall('\ufffd+|[^\ufffd]+', completion)
+    )
+    return re.fullmatch(pattern, text, re.DOTALL) is not None

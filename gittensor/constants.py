@@ -168,6 +168,11 @@ MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software,
 # price data (testnet) the cap is paid pro-rata. Move OSS_EMISSION_SHARE in the same commit so the pools sum to 1.0.
 SERVING_GPU_HOUR_USD = 0.70
 SERVING_EMISSION_SHARE_CAP = 0.035
+# Pricing the cap needs the chain's alpha/TAO price and the published TAO/USD rate. A round that cannot read them
+# reuses the last usable pricing for up to SERVING_PRICING_MAX_AGE_S, so a chain hiccup does not move pay. With no
+# usable pricing at all the fleet is paid nothing: the alternative (the whole cap, split pro-rata) hands one verified
+# card 3.5% of emissions. A network with no price data to read - testnet - sets SERVING_PAY_CAP_WITHOUT_PRICING.
+SERVING_PRICING_MAX_AGE_S = 3600.0
 assert abs(OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE_CAP - 1.0) < EMISSION_SHARE_TOLERANCE, (
     'emission pools must sum to 1.0'
 )
@@ -187,7 +192,14 @@ SERVING_ATTEST_ITERS = 3
 SERVING_ATTEST_BUDGET_RATIO = 1.6
 SERVING_ATTEST_MIN_FILL_RATIO = 0.6
 SERVING_ATTEST_TIMEOUT = 45.0  # seconds: fill + chain on a 5090 is ~1.5 s; queued challenges show up as slow
-SERVING_ATTEST_UUID_MEMORY_ROUNDS = 12
+SERVING_ATTEST_UUID_MEMORY_ROUNDS = 12  # a verdict (and a UUID claim) older than this pays nothing until renewed
+# Every field of a card's report except the digest is the miner's own number, so the count of cards is held to two
+# things the validator measures itself: each device index answers its own seed (seed + index), which the reference
+# recomputes, and the whole reply must arrive within one card's budget plus this network slack — gt_attest runs the
+# cards in parallel, so N real cards take one card's wall and one card faking N takes N of them. At most
+# SERVING_ATTEST_MAX_CARDS are judged (and priced) per hotkey.
+SERVING_ATTEST_RTT_SLACK_MS = 2_000.0
+SERVING_ATTEST_MAX_CARDS = 8
 # A card counts only with the model resident: free VRAM before the fill must be at most total minus this fraction of
 # the reservation (a bare 5090 shows ~32 GB free, one holding the model ~8 GB). Every passing card is a card-hour, so
 # a multi-GPU hotkey earns per card it actually serves from — a second card with nothing loaded earns nothing.
@@ -200,7 +212,7 @@ SERVING_VERIFY_WORKERS = 8  # concurrent /v1/score calls to the reference per ro
 # falls linearly to 0 at ZERO, so a miner proxying to a GPU in another region or queueing requests loses credit
 # in proportion. Generation length does not enter (mini-soak 2026-08-27: total latency of 64-512-token answers
 # scored a perfect miner at 0.24). Same-region proxying is NOT visible here; that is the one-GPU-many-hotkeys
-# case, caught by the concurrent capacity probe.
+# case, caught by the attestation overlap and the decode floor under load.
 SERVING_LATENCY_FULL_CREDIT_MS = 500.0
 SERVING_LATENCY_ZERO_CREDIT_MS = 1_500.0
 # Decode speed on served traffic. Each served request with at least SERVING_DECODE_MIN_TOKENS completion tokens
@@ -242,6 +254,16 @@ SERVING_AUDIT_WINDOW_THRESHOLDS = ((1, 0.8),)
 SERVING_AUDIT_SAMPLE_FRACTION = 0.2
 SERVING_AUDIT_SAMPLE_MIN = 10
 SERVING_QUARANTINE_S = 3600.0
+# Each further strike on the same (hotkey, release) quarantines ESCALATION times longer, up to MAX_STEPS steps
+# (1 h, 4 h, 16 h, 64 h): one wrong answer costs an hour, a pattern of them costs days, and rotating to a fresh
+# hotkey to reset it costs a registration plus a settlement window from zero.
+SERVING_QUARANTINE_ESCALATION = 4.0
+SERVING_QUARANTINE_MAX_STEPS = 3
+# A wrong answer is a strike only while the reference agrees with most of the fleet this round. When fewer than
+# this fraction of the hotkeys judged this round passed anything, the reference is the odd one out (a driver or
+# image drift on this validator's box) and the round's band failures are misses, not strikes — otherwise one
+# drifted reference quarantines every honest miner each time its quarantine lifts. Needs two judged hotkeys to say.
+SERVING_STRIKE_MIN_FLEET_PASS = 0.5
 # Baseline traffic: every round the validator sends each serving axon this many baseline prompts of its own, at
 # random moments spread over the round (so they do not mark the round boundary), over the same path as user
 # traffic. Real traffic does not displace them — 2 x ~256 tokens per miner per round is noise for a card and well
@@ -266,10 +288,21 @@ SERVING_MIN_CALLER_STAKE = 1_000_000.0
 # miners several times over, worthless as free inference (~$0.05 of tokens). No shape limit, so a smaller
 # validator's audits look like any other request.
 SERVING_VALIDATOR_TOKENS_PER_TEMPO = 50_000
+# Validator: a miner's "budget spent" refusal is judged neutral (not a miss) only when this validator's own ledger
+# of max_tokens sent to that miner in the trailing tempo has reached this fraction of the allowance. The refusal
+# text is the miner's to write; the ledger is not. A staked caller has no budget and is never refused on one.
+SERVING_BUDGET_REFUSAL_RATIO = 0.8
 BLOCKS_PER_TEMPO = 360
 SERVING_BACKEND_CONCURRENCY = 16  # miner: concurrent backend generations (sparkinfer >= 12954e6 handles 24)
 SERVING_SEEN_NONCES = 10_000  # miner: replay guard size; covers many minutes of validator traffic
 SERVING_MAX_TOKENS = 1024  # hard cap per request (API and miner both enforce)
+# Gateway: total characters across a request's messages (~4 per token). A prompt past the release's context makes
+# the runtime answer 400 — not the miner's fault, but every such request used to land in its window as a miss, so
+# one key holder could take any miner off READY with a few oversized prompts. Sized from the blessed release on a
+# 5090 (2026-08-28: ctx 36864; TTFT 403 ms at 8.9k prompt tokens, 500 ms at ~11.5k, 1453 ms at 35.6k): ~10k tokens
+# keeps an honest prefill inside the full-credit TTFT band. A request the runtime still rejects is checked against
+# the reference before it counts.
+SERVING_MAX_PROMPT_CHARS = 40_000
 SERVING_DB_RETENTION_DAYS = 7  # validator: per-round serving rows older than this are pruned on each write
 SERVING_REQUEST_LOG_SIZE = 5_000  # in-memory ring of recent API/audit requests (telemetry)
 

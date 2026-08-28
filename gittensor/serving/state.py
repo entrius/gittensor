@@ -19,7 +19,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Deque, Dict, List, Optional, Sequence
+from typing import Deque, Dict, List, Optional, Sequence, Tuple
 
 import bittensor as bt
 
@@ -57,6 +57,7 @@ class ServedRequest:
     ttft_ms: Optional[float] = None  # validator-observed time to first streamed event
     inflight: int = 1  # this validator's requests in flight to the miner when this one was dispatched (incl. itself)
     release_id: str = ''  # the release this request was routed for; audited against that release's reference
+    max_tokens: int = 0  # what was asked for; a completion longer than this is not the runtime's
 
     def __post_init__(self) -> None:
         if not self.release_id:
@@ -66,7 +67,7 @@ class ServedRequest:
 @dataclass
 class RequestRecord:
     ts: float
-    kind: str  # 'probe' | 'gateway'
+    kind: str  # 'verify' | 'gateway'
     uid: Optional[int]
     ok: bool
     latency_ms: Optional[float]  # None when the request produced no response
@@ -95,9 +96,11 @@ class ServingState:
     _served: Deque[ServedRequest] = field(default_factory=lambda: deque(maxlen=SERVING_REQUEST_LOG_SIZE))
     audits: AuditWindow = field(default_factory=AuditWindow)  # audit-loop thread only; persisted by the validator
     _history: Dict[str, Deque[float]] = field(default_factory=dict)  # hotkey -> last N round scores
-    probe_history: Dict[str, Deque[float]] = field(default_factory=dict)  # audit thread only: hotkey -> last tps
     dormant_rounds: Dict[str, int] = field(default_factory=dict)  # audit thread only: hotkey -> rounds w/o completion
     attest_status: Dict[str, dict] = field(default_factory=dict)  # audit thread only: hotkey -> last attest verdict
+    uuid_owner: Dict[str, Tuple[str, int]] = field(default_factory=dict)  # GPU UUID -> (hotkey, round last seen)
+    last_credit: Dict[str, float] = field(default_factory=dict)  # audit thread only: hotkey -> last measured credit
+    _sent_tokens: Dict[str, Deque[Tuple[float, int]]] = field(default_factory=dict)  # hotkey -> (ts, max_tokens)
     attest_round: int = 0
     last_round: dict = field(default_factory=dict)  # audit thread's summary of the last round, for /v1/serving/status
     settlement_rounds: int = SERVING_SETTLEMENT_ROUNDS
@@ -148,6 +151,20 @@ class ServingState:
     def enqueue_served(self, served: ServedRequest) -> None:
         with self._lock:
             self._served.append(served)
+
+    def charge_sent(self, hotkey: str, max_tokens: int, now: Optional[float] = None) -> None:
+        """This validator's own ledger of what it asked each miner for: the miner charges a permitted validator's
+        per-tempo budget on ``max_tokens`` up front, so the validator keeps the same count to judge a refusal."""
+        with self._lock:
+            self._sent_tokens.setdefault(hotkey, deque(maxlen=SERVING_REQUEST_LOG_SIZE)).append(
+                (now if now is not None else time.time(), int(max_tokens))
+            )
+
+    def sent_tokens(self, hotkey: str, window_s: float, now: Optional[float] = None) -> int:
+        """``max_tokens`` this validator sent ``hotkey`` in the trailing ``window_s`` seconds."""
+        since = (now if now is not None else time.time()) - window_s
+        with self._lock:
+            return sum(n for ts, n in self._sent_tokens.get(hotkey, ()) if ts >= since)
 
     def drain_served(self) -> List[ServedRequest]:
         """Audit thread: take every request served since the last round."""

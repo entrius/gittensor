@@ -6,6 +6,11 @@
 // TF32, no fast-math), so a validator's reference 5090 recomputes the same digest. One pass (--iters 3) is sized to
 // ~1.5 s on an idle 5090; two hotkeys sharing a card cannot both fill the free VRAM, and their chains run ~2x slower.
 //
+// Every device answers its own seed — the challenge seed plus the device index — and all devices run at the same
+// time, each on its own thread. A box with N cards therefore finishes in one card's wall time with N distinct
+// digests, while one card impersonating N has to run the chain N times in a row: the validator recomputes each
+// index's digest on its reference and holds the whole reply to one card's round trip.
+//
 //   gt_attest --seed <u64> [--iters 3] [--fill] [--device <i>|all] [--dim 1024] [--matrices 512]
 // prints one JSON object (or {"devices":[...]} for all) and exits 0; exit 2 = bad args, 3 = allocation failure.
 #include <cuda_runtime.h>
@@ -16,6 +21,7 @@
 #include <cstring>
 #include <chrono>
 #include <string>
+#include <thread>
 #include <vector>
 
 #define CHECK(x) do { cudaError_t e_ = (x); if (e_ != cudaSuccess) { std::fprintf(stderr, "{\"error\":\"%s at %s:%d\"}\n", cudaGetErrorString(e_), __FILE__, __LINE__); std::exit(3); } } while (0)
@@ -75,8 +81,9 @@ static std::string device_uuid(int dev) {
     return out;
 }
 
-static void run_device(int dev, uint64_t seed, int iters, bool fill, int d, int matrices, bool last) {
+static std::string run_device(int dev, uint64_t challenge_seed, int iters, bool fill, int d, int matrices) {
     auto t0 = std::chrono::steady_clock::now();
+    uint64_t seed = challenge_seed + (uint64_t)dev;  // per-device seed: index i answers seed + i
     CHECK(cudaSetDevice(dev));
     cudaDeviceProp prop; CHECK(cudaGetDeviceProperties(&prop, dev));
     size_t free_b = 0, total_b = 0; CHECK(cudaMemGetInfo(&free_b, &total_b));
@@ -106,8 +113,10 @@ static void run_device(int dev, uint64_t seed, int iters, bool fill, int d, int 
     }
     for (void* p : chunks) cudaFree(p);
     double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-    std::printf("{\"device\":%d,\"uuid\":\"%s\",\"name\":\"%s\",\"sm_count\":%d,\"vram_total\":%zu,\"vram_free_before\":%zu,\"filled_bytes\":%zu,\"dim\":%d,\"matrices\":%d,\"iters\":%d,\"digest\":\"%s\",\"wall_ms\":%.1f}%s\n",
-        dev, device_uuid(dev).c_str(), prop.name, prop.multiProcessorCount, total_b, free_b, filled, d, matrices, iters, sha.hex().c_str(), ms, last ? "" : ",");
+    char out[1024];
+    std::snprintf(out, sizeof out, "{\"device\":%d,\"uuid\":\"%s\",\"name\":\"%s\",\"sm_count\":%d,\"vram_total\":%zu,\"vram_free_before\":%zu,\"filled_bytes\":%zu,\"dim\":%d,\"matrices\":%d,\"iters\":%d,\"digest\":\"%s\",\"wall_ms\":%.1f}",
+        dev, device_uuid(dev).c_str(), prop.name, prop.multiProcessorCount, total_b, free_b, filled, d, matrices, iters, sha.hex().c_str(), ms);
+    return std::string(out);
 }
 
 int main(int argc, char** argv) {
@@ -125,8 +134,16 @@ int main(int argc, char** argv) {
     if (!have_seed || iters < 1 || d % TILE != 0 || d < TILE || matrices < 2) { std::fprintf(stderr, "usage: gt_attest --seed <u64> [--iters n] [--fill] [--device i|all] [--dim d] [--matrices m]\n"); return 2; }
     nvmlInit_v2();
     int count = 0; CHECK(cudaGetDeviceCount(&count));
-    if (device == "all") { std::printf("{\"devices\":["); for (int i = 0; i < count; i++) run_device(i, seed, iters, fill, d, matrices, i == count - 1); std::printf("]}\n"); }
-    else { int dev = std::atoi(device.c_str()); if (dev < 0 || dev >= count) { std::fprintf(stderr, "no device %d\n", dev); return 2; } run_device(dev, seed, iters, fill, d, matrices, true); }
+    if (device == "all") {
+        // every card at once, each on its own thread: N cards take one card's wall, one card faking N takes N
+        std::vector<std::string> out(count); std::vector<std::thread> threads;
+        for (int i = 0; i < count; i++) threads.emplace_back([&, i]() { out[i] = run_device(i, seed, iters, fill, d, matrices); });
+        for (auto& t : threads) t.join();
+        std::printf("{\"devices\":[");
+        for (int i = 0; i < count; i++) std::printf("%s%s", out[i].c_str(), i == count - 1 ? "" : ",");
+        std::printf("]}\n");
+    }
+    else { int dev = std::atoi(device.c_str()); if (dev < 0 || dev >= count) { std::fprintf(stderr, "no device %d\n", dev); return 2; } std::printf("%s\n", run_device(dev, seed, iters, fill, d, matrices).c_str()); }
     nvmlShutdown();
     return 0;
 }

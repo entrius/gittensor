@@ -72,7 +72,7 @@ def blend_emission_pools(
         recycle_share += serving_unallocated + (SERVING_EMISSION_SHARE_CAP - share)
         bt.logging.info(
             f'Serving pool: {card_equiv:.2f} card-equivalents x ${SERVING_GPU_HOUR_USD:.2f}/h = '
-            f'{share * 100:.2f}% of emissions (cap {SERVING_EMISSION_SHARE_CAP * 100:.0f}%) across '
+            f'{share * 100:.2f}% of emissions (cap {SERVING_EMISSION_SHARE_CAP * 100:g}%) across '
             f'{sum(1 for r in serving_rewards.values() if r > 0)} serving miners'
         )
 

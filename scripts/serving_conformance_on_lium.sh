@@ -25,7 +25,8 @@ trap cleanup EXIT
 
 echo "renting 1x$GPU for entrius/sparkinfer:$REF (waiting up to ${RENT_WAIT_MIN} min for a free card)"
 for ((i = 0; i < RENT_WAIT_MIN; i++)); do
-  NODE=$(lium ls --gpu "$GPU" --format json 2>/dev/null | jq -r '[.[] | select(.gpu_count == 1 and .download_mbps >= 150)] | sort_by(.price_per_hour) | .[0].id // empty')
+  # `lium ls --gpu X --format json` returns [] even when cards are listed; filter the full listing instead.
+  NODE=$(lium ls --format json 2>/dev/null | jq -r --arg gpu "RTX$GPU" '[.[] | select(.gpu_type == $gpu and .gpu_count == 1 and .vram_gb >= 30 and .download_mbps >= 150)] | sort_by(.price_per_hour) | .[0].id // empty')
   [ -n "$NODE" ] && break
   sleep 60
 done

@@ -28,10 +28,16 @@ cleanup() { lium rm "$POD" -y >/dev/null 2>&1 || true; lium rm "$ATTEST_POD" -y 
 trap cleanup EXIT
 
 # `lium ls --gpu X --format json` returns [] even when cards are listed; filter the full listing instead.
+# The element is bound to $n before the `taken` test: inside jq's contains(), `.` is the string being searched, so
+# a bare .id there indexes a string and kills the run — and only ever when a matching card IS listed.
 # Prints the cheapest free 1x$GPU executor id not in $1 (space-separated ids already taken).
 free_node() {
   lium ls --format json 2>/dev/null | jq -r --arg gpu "RTX$GPU" --arg taken " $1 " \
-    '[.[] | select(.gpu_type == $gpu and .gpu_count == 1 and .vram_gb >= 30 and .download_mbps >= 150 and ($taken | contains(" " + .id + " ") | not))] | sort_by(.price_per_hour) | .[0].id // empty'
+    '[.[] | select(type == "object") | . as $n
+       | select(($n.id | type) == "string" and $n.gpu_type == $gpu and $n.gpu_count == 1
+                and ($n.vram_gb // 0) >= 30 and ($n.download_mbps // 0) >= 150
+                and ($taken | contains(" " + $n.id + " ") | not))]
+     | sort_by(.price_per_hour // 1e9) | .[0].id // empty'
 }
 
 echo "renting 2x 1x$GPU: entrius/sparkinfer:$REF + $ATTEST_IMAGE (waiting up to ${RENT_WAIT_MIN} min for free cards)"

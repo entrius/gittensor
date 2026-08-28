@@ -29,6 +29,7 @@ rounds by ``ServingState``.
 import asyncio
 import hashlib
 import math
+import os
 import random
 import secrets
 import threading
@@ -38,15 +39,20 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
 
 import aiohttp
 import bittensor as bt
+import requests
 
 from gittensor.classes import RequestSpeed
 from gittensor.constants import (
+    BLOCKS_PER_TEMPO,
     SERVING_AUDIT_SAMPLE_FRACTION,
     SERVING_AUDIT_SAMPLE_MIN,
     SERVING_BASELINE_PER_ROUND,
+    SERVING_BUDGET_REFUSAL_RATIO,
     SERVING_DORMANT_AFTER_ROUNDS,
     SERVING_DORMANT_RETRY_ROUNDS,
     SERVING_MAX_TOKENS,
+    SERVING_MIN_CALLER_STAKE,
+    SERVING_VALIDATOR_TOKENS_PER_TEMPO,
     SERVING_VERIFY_WORKERS,
 )
 from gittensor.serving.audit import AuditVerdict, Reference, reference_for, verify_served
@@ -87,6 +93,18 @@ def sample_for_audit(
     return [r for i, r in enumerate(served) if i in keep], [r for i, r in enumerate(served) if i not in keep]
 
 
+def budget_refusal_plausible(
+    state: ServingState, hotkey: str, staked_caller: bool, now: Optional[float] = None
+) -> bool:
+    """Could ``hotkey`` honestly have refused this validator for budget? Only a permitted, unstaked caller has a
+    budget at all, and only once this validator's own ledger of ``max_tokens`` sent in the trailing tempo is near
+    the miner's per-tempo allowance. The refusal text is the miner's; the ledger is ours."""
+    if staked_caller:
+        return False
+    sent = state.sent_tokens(hotkey, BLOCKS_PER_TEMPO * 12.0, now)
+    return sent >= SERVING_BUDGET_REFUSAL_RATIO * SERVING_VALIDATOR_TOKENS_PER_TEMPO
+
+
 def verify_served_round(
     state: ServingState,
     reference: Reference,
@@ -95,12 +113,14 @@ def verify_served_round(
     summary: Optional[Dict[str, int]] = None,
     last_miss: Optional[Dict[str, str]] = None,
     rng=None,
+    staked_caller: bool = False,
 ) -> Dict[str, List[RequestSpeed]]:
     """Verify this round's audit sample of the requests served for ``release`` into the window; return per-request
     speed per hotkey.
 
     Reference calls run on a small thread pool; window updates stay on this thread. ``last_miss`` (hotkey ->
     reason) is filled with the most recent miss or strike reason so the round report can show a miner why.
+    ``staked_caller``: this validator clears the miner's stake floor, so no miner has a budget to refuse it on.
     """
     summary = summary if summary is not None else {}
     last_miss = last_miss if last_miss is not None else {}
@@ -111,8 +131,8 @@ def verify_served_round(
         summary['unsampled'] = summary.get('unsampled', 0) + 1
 
     def judge(req: ServedRequest) -> Optional[AuditVerdict]:
-        if not req.ok and 'budget' in req.detail.lower():  # this validator over-sent; not the miner's fault
-            return None
+        if not req.ok and 'budget' in req.detail.lower() and budget_refusal_plausible(state, req.hotkey, staked_caller):
+            return None  # this validator over-sent by its own ledger; not the miner's fault
         if not req.ok:
             return AuditVerdict(False, 0.0, float('inf'), req.detail or 'no completion')
         for attempt in range(2):  # a connection blip to the reference is retried once before going neutral
@@ -126,7 +146,17 @@ def verify_served_round(
                     token_ids=req.token_ids,
                     token_bytes=req.token_bytes,
                     release=release,
+                    max_tokens=req.max_tokens or None,
                 )
+            except requests.HTTPError as e:
+                status = getattr(getattr(e, 'response', None), 'status_code', 0) or 0
+                if 400 <= status < 500:  # the reference refused what the miner sent: the miner's answer, not a blip
+                    return AuditVerdict(False, 0.0, float('inf'), f'reference rejected the completion (HTTP {status})')
+                if attempt == 0:
+                    time.sleep(1.0)
+                    continue
+                bt.logging.warning(f'Serving: could not verify a request served by UID {req.uid}: {e!r}')
+                return None
             except Exception as e:  # reference hiccup: neither credit nor blame
                 if attempt == 0 and isinstance(e, (ConnectionError, OSError)) or 'Connect' in type(e).__name__:
                     time.sleep(1.0)
@@ -222,6 +252,7 @@ async def baseline_round(
             logprobs=True,
         )
         inflight = state.inflight().get(uid, 0) + 1
+        state.charge_sent(hotkey, max_tokens)
         started = time.monotonic()
         try:
             response = await consume_stream(dendrite, axon, synapse, release.request_timeout)
@@ -257,6 +288,7 @@ async def baseline_round(
                 source='baseline',
                 ttft_ms=getattr(response, 'observed_ttft_ms', None) if ok else None,
                 inflight=inflight,
+                max_tokens=max_tokens,
             )
         )
 
@@ -275,6 +307,7 @@ async def audit_round(
     serving: Sequence[Tuple[int, str, bt.AxonInfo]],
     loadout=None,
     attest_rng=None,
+    staked_caller: bool = False,
 ) -> Dict[str, float]:
     """Verify served traffic, settle windows, attest READY miners; publish READY/probation; return hotkey -> score."""
     loadout = loadout or load_serving_loadout()
@@ -304,7 +337,7 @@ async def audit_round(
                 'set SERVING_REFERENCE_URL to a conformant runtime'
             )
             continue
-        speeds = verify_served_round(state, reference, release, served, summary, last_miss)
+        speeds = verify_served_round(state, reference, release, served, summary, last_miss, staked_caller=staked_caller)
         passing: List[Tuple[int, str, bt.AxonInfo, float]] = []
         for uid, hotkey, axon in active:
             window = state.audits.verdict(hotkey, release.release_id)
@@ -473,7 +506,9 @@ class ServingAuditThread:
             serving: List[Tuple[int, str, bt.AxonInfo]] = []
             try:
                 serving = get_serving_axons(self.validator)
-                loop.run_until_complete(audit_round(self.state, dendrite, serving))
+                loop.run_until_complete(
+                    audit_round(self.state, dendrite, serving, staked_caller=is_staked_caller(self.validator))
+                )
             except Exception as e:  # a serving fault must never take the validator down
                 bt.logging.error(f'Serving round failed, no serving scores this round: {e!r}')
                 self.state.publish_round([], {})
@@ -513,6 +548,16 @@ class ServingAuditThread:
 def probe_phase_offset(hotkey: str, interval_s: float) -> float:
     """Deterministic start offset in [0, interval) for this validator's audit clock."""
     return (int(hashlib.sha256(hotkey.encode()).hexdigest()[:8], 16) % 1_000_000) / 1_000_000 * interval_s
+
+
+def is_staked_caller(self: 'Validator') -> bool:
+    """Does this validator's hotkey clear the miners' stake floor (unlimited calls, no budget to be refused on)?"""
+    try:
+        return float(self.metagraph.S[self.uid]) >= float(
+            os.getenv('SERVING_MIN_CALLER_STAKE', SERVING_MIN_CALLER_STAKE)
+        )
+    except (IndexError, TypeError, ValueError, AttributeError):
+        return False
 
 
 def get_serving_axons(self: 'Validator') -> List[Tuple[int, str, bt.AxonInfo]]:

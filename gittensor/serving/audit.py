@@ -73,6 +73,8 @@ from gittensor.serving.backends import Message, expected_completion
 from gittensor.serving.loadout import WEIGHTS_DIR, ServingRelease
 from gittensor.serving.probe import compare, greedy, make_prompts, score
 
+MAX_TOKEN_ID = 1 << 21  # no released vocabulary is this large; anything past it is not a token id
+
 
 @dataclass
 class AuditCase:
@@ -395,6 +397,7 @@ def verify_served(
     end_of_turn: Sequence[str] = ('<|im_end|>', '<|endoftext|>', '</s>'),
     token_bytes: Optional[Sequence[Sequence[int]]] = None,
     release: Optional[ServingRelease] = None,
+    max_tokens: Optional[int] = None,
 ) -> AuditVerdict:
     """Verify a served (greedy) completion by teacher forcing it under the reference.
 
@@ -409,8 +412,19 @@ def verify_served(
     if completion is None or not tokens or token_logprobs is None or len(tokens) != len(token_logprobs):
         return AuditVerdict(False, 0.0, float('inf'), 'missing or malformed logprobs')
     mine, mine_lp = list(tokens), list(token_logprobs)
+    if max_tokens is not None and len(mine) > max_tokens + 1:  # + the end-of-turn token a runtime lists
+        return AuditVerdict(False, 0.0, float('inf'), f'{len(mine)} tokens for a {max_tokens}-token request')
+    # Everything below is the miner's data; a value the reference could not even be asked about is the miner's
+    # miss, never a reference fault (an exception here must not become a neutral verdict).
     mine_ids = list(token_ids) if token_ids and len(token_ids) == len(mine) else None
-    mine_bytes = [bytes(b) for b in token_bytes] if token_bytes and len(token_bytes) == len(mine) else None
+    if mine_ids is not None and not all(isinstance(i, int) and 0 <= i < MAX_TOKEN_ID for i in mine_ids):
+        return AuditVerdict(False, 0.0, float('inf'), 'malformed token ids')
+    mine_bytes: Optional[List[bytes]] = None
+    if token_bytes and len(token_bytes) == len(mine):
+        try:
+            mine_bytes = [bytes(b) for b in token_bytes]
+        except (TypeError, ValueError):
+            return AuditVerdict(False, 0.0, float('inf'), 'malformed token bytes')
     if mine and mine[-1] in end_of_turn:
         mine, mine_lp = mine[:-1], mine_lp[:-1]
         mine_ids = mine_ids[:-1] if mine_ids else None

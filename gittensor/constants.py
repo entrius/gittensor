@@ -271,6 +271,10 @@ SERVING_MIN_CALLER_STAKE = 1_000_000.0
 # miners several times over, worthless as free inference (~$0.05 of tokens). No shape limit, so a smaller
 # validator's audits look like any other request.
 SERVING_VALIDATOR_TOKENS_PER_TEMPO = 50_000
+# Validator: a miner's "budget spent" refusal is judged neutral (not a miss) only when this validator's own ledger
+# of max_tokens sent to that miner in the trailing tempo has reached this fraction of the allowance. The refusal
+# text is the miner's to write; the ledger is not. A staked caller has no budget and is never refused on one.
+SERVING_BUDGET_REFUSAL_RATIO = 0.8
 BLOCKS_PER_TEMPO = 360
 SERVING_BACKEND_CONCURRENCY = 16  # miner: concurrent backend generations (sparkinfer >= 12954e6 handles 24)
 SERVING_SEEN_NONCES = 10_000  # miner: replay guard size; covers many minutes of validator traffic

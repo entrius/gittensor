@@ -866,21 +866,136 @@ def test_baseline_round_spreads_prompts_and_queues_them_for_verification(monkeyp
     )
 
 
-def test_budget_refusal_is_neutral_not_a_miss(monkeypatch):
+def test_budget_refusal_is_neutral_only_by_the_validators_own_ledger(monkeypatch):
+    """The refusal text is the miner's to write. It is neutral only when this validator's own count of max_tokens
+    sent in the trailing tempo is near the miner's allowance — and never for a staked caller, which has no budget."""
     from types import SimpleNamespace
+
+    from gittensor.constants import SERVING_VALIDATOR_TOKENS_PER_TEMPO
 
     good = _echo_release()
     axon = SimpleNamespace(is_serving=True)
     dendrite, _ = _dendrite_echoing(good)
+
+    def refused():
+        r = _served(1, good, ok=False)
+        r.detail = 'Validator audit budget spent (50000 tokens per tempo)'
+        return r
+
+    # An unstaked validator that sent almost nothing: the refusal is a lie -> a miss.
     state = ServingState(settlement_rounds=1)
     state.enqueue_served(_served(1, good))
-    refused = _served(1, good, ok=False)
-    refused.detail = 'Validator audit budget spent (50000 tokens per tempo)'
-    state.enqueue_served(refused)
-    state.enqueue_served(_served(1, good, ok=False))
+    state.enqueue_served(refused())
+    _round(state, dendrite, [(1, 'hk1', axon)], good, monkeypatch)
+    assert state.audits.verdict('hk1', good.model_id).mean == 0.5
+
+    # The same validator after sending the allowance: the refusal is plausible -> neutral.
+    state = ServingState(settlement_rounds=1)
+    state.charge_sent('hk1', SERVING_VALIDATOR_TOKENS_PER_TEMPO)
+    state.enqueue_served(_served(1, good))
+    state.enqueue_served(refused())
     _round(state, dendrite, [(1, 'hk1', axon)], good, monkeypatch)
     w = state.audits.verdict('hk1', good.model_id)
-    assert w.n_audits == 2 and w.mean == 0.5  # one pass, one real miss, the refusal ignored
+    assert w.n_audits == 1 and w.mean == 1.0
+
+    # A staked caller is never on a budget: the refusal is a miss however much it sent.
+    state = ServingState(settlement_rounds=1)
+    state.charge_sent('hk1', SERVING_VALIDATOR_TOKENS_PER_TEMPO)
+    state.enqueue_served(_served(1, good))
+    state.enqueue_served(refused())
+    asyncio.run(
+        fwd_module().audit_round(
+            state, dendrite, [(1, 'hk1', axon)], ServingLoadout(releases=[good]), staked_caller=True
+        )
+    )
+    assert state.audits.verdict('hk1', good.model_id).mean == 0.5
+
+
+def test_sent_token_ledger_is_kept_at_dispatch(monkeypatch):
+    """Gateway and baseline requests both charge the validator's own ledger with the max_tokens they asked for."""
+    from gittensor.validator.serving.forward import baseline_round
+
+    good = _echo_release()
+    state = ServingState()
+    state.publish_round([ReadyMiner(uid=1, hotkey='hk1', axon=None, score=1.0, release_id=good.release_id)], {})  # type: ignore[arg-type]
+    dendrite, _ = _dendrite_echoing(good)
+    app = build_app(state, ServingLoadout(releases=[good]), {'k'}, lambda: dendrite, 5.0)
+    client = TestClient(app)
+    r = client.post(
+        '/v1/chat/completions',
+        headers={'Authorization': 'Bearer k'},
+        json={'messages': [{'role': 'user', 'content': 'hi'}], 'max_tokens': 40},
+    )
+    assert r.status_code == 200
+    assert state.sent_tokens('hk1', 3600.0) == 40
+    axon = SimpleNamespace(is_serving=True)
+    asyncio.run(baseline_round(state, dendrite, [(1, 'hk1', axon)], good, 0.0, per_miner=1))  # type: ignore[arg-type]
+    assert state.sent_tokens('hk1', 3600.0) > 40
+    assert state.sent_tokens('hk1', 3600.0, now=time.time() + 7200) == 0
+
+
+def test_malformed_miner_data_is_a_miss_not_a_neutral():
+    """bytes out of range, ids out of range, more tokens than asked for: the miner's miss, judged before the
+    reference is ever asked. A reference that rejects the miner's ids (HTTP 4xx) is the same."""
+    from gittensor.serving.audit import verify_served
+
+    release = _echo_release()
+    ref = EchoReference(release)
+    good = _served(1, release)
+    tokens, logprobs = list(good.tokens or []), list(good.token_logprobs or [])
+    n = len(tokens)
+    bad_bytes = verify_served(ref, good.messages, good.completion, tokens, logprobs, token_bytes=[[256]] * n)
+    assert not bad_bytes.passed and not bad_bytes.hard and 'malformed token bytes' in bad_bytes.reason
+    bad_ids = verify_served(ref, good.messages, good.completion, tokens, logprobs, token_ids=[10**9] * n)
+    assert not bad_ids.passed and 'malformed token ids' in bad_ids.reason
+    neg_ids = verify_served(ref, good.messages, good.completion, tokens, logprobs, token_ids=[-1] * n)
+    assert not neg_ids.passed and 'malformed token ids' in neg_ids.reason
+    long = verify_served(ref, good.messages, good.completion, tokens, logprobs, max_tokens=n - 2)
+    assert not long.passed and 'tokens for a' in long.reason
+    assert verify_served(ref, good.messages, good.completion, tokens, logprobs, max_tokens=n).passed
+
+
+def test_reference_rejection_is_the_miners_miss_and_a_reference_fault_is_neutral(monkeypatch):
+    from types import SimpleNamespace
+
+    import requests
+
+    from gittensor.validator.serving.forward import verify_served_round
+
+    good = _echo_release()
+
+    class Rejecting:
+        model_id = good.model_id
+
+        def __init__(self, status):
+            self.status = status
+
+        def score_served(self, messages, completion, token_ids=None):
+            err = requests.HTTPError('nope')
+            err.response = SimpleNamespace(status_code=self.status)
+            raise err
+
+        def sample(self):
+            raise NotImplementedError
+
+        def __len__(self):
+            return 1
+
+    monkeypatch.setattr('gittensor.validator.serving.forward.time.sleep', lambda s: None)
+    state = ServingState()
+    summary = {}
+    verify_served_round(state, Rejecting(400), good, [_served(1, good)], summary)  # type: ignore[arg-type]
+    assert summary.get('miss') == 1 and state.audits.verdict('hk1', good.model_id).mean == 0.0
+    state = ServingState()
+    summary = {}
+    verify_served_round(state, Rejecting(503), good, [_served(1, good)], summary)  # type: ignore[arg-type]
+    assert summary.get('neutral') == 1 and state.audits.verdict('hk1', good.model_id).n_audits == 0
+
+
+def fwd_module():
+    from gittensor.validator.serving import forward as fwd
+
+    return fwd
 
 
 def test_baseline_prompts_vary_in_shape_and_length():

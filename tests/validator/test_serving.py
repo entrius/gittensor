@@ -1363,8 +1363,16 @@ def test_attest_cohort_is_random_half_plus_unproven_and_failed():
     rng = random.Random(1)
     cohort = choose_cohort(hotkeys, status, rng=rng)
     assert 'hk3' in cohort and 'hk7' in cohort and 10 <= len(cohort) <= 12
-    together = sum(1 for _ in range(400) if {'hk1', 'hk2'} <= set(choose_cohort(hotkeys, status, rng=rng)))
-    assert 60 <= together <= 140  # P = 0.25 per round for a sharing pair
+    # least recently challenged first: simulate rounds, every hotkey is challenged at least every 2 rounds
+    last = {hk: 0 for hk in hotkeys}
+    for rnd in range(1, 21):
+        for hk in choose_cohort(hotkeys, {hk: {'passed': True, 'round': last[hk]} for hk in hotkeys}, rng=rng):
+            last[hk] = rnd
+        assert all(rnd - r <= 2 for r in last.values())
+    # a hotkey that was just challenged is not drawn again while others wait (ties broken at random)
+    fresh = {hk: {'passed': True, 'round': 5} for hk in hotkeys}
+    fresh['hk0']['round'] = 9
+    assert 'hk0' not in choose_cohort(hotkeys, fresh, rng=rng)
 
 
 def test_attest_round_gates_pay_and_persists(monkeypatch, tmp_path):

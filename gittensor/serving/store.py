@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS probe_history (hotkey TEXT, seq INTEGER, tps REAL, PR
 CREATE TABLE IF NOT EXISTS round_history (hotkey TEXT, seq INTEGER, score REAL, PRIMARY KEY (hotkey, seq));
 CREATE TABLE IF NOT EXISTS dormant (hotkey TEXT PRIMARY KEY, rounds INTEGER);
 CREATE TABLE IF NOT EXISTS attest (hotkey TEXT PRIMARY KEY, status TEXT);
+CREATE TABLE IF NOT EXISTS uuid_owner (uuid TEXT PRIMARY KEY, hotkey TEXT, round INTEGER);
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
 
 
@@ -56,8 +58,22 @@ class ServingStore:
         """Snapshot the audit-thread state in one transaction (the tables are small: a few rows per hotkey)."""
         audits = state.audits.to_dict()
         with self._connect() as db:
-            for table in ('audit_values', 'quarantine', 'probe_history', 'round_history', 'dormant', 'attest'):
+            for table in (
+                'audit_values',
+                'quarantine',
+                'probe_history',
+                'round_history',
+                'dormant',
+                'attest',
+                'uuid_owner',
+                'meta',
+            ):
                 db.execute(f'DELETE FROM {table}')
+            db.executemany(
+                'INSERT INTO uuid_owner VALUES (?, ?, ?)',
+                [(uuid, hk, rnd) for uuid, (hk, rnd) in state.uuid_owner.items()],
+            )
+            db.execute('INSERT INTO meta VALUES (?, ?)', ('attest_round', str(int(state.attest_round))))
             db.executemany(
                 'INSERT INTO audit_values VALUES (?, ?, ?, ?)',
                 [(hk, rid, i, x) for hk, rid, xs in audits['values'] for i, x in enumerate(xs)],
@@ -104,6 +120,11 @@ class ServingStore:
                     state.dormant_rounds[hk] = int(rounds)
                 for hk, st in db.execute('SELECT hotkey, status FROM attest'):
                     state.attest_status[hk] = json.loads(st)
+                for uuid, hk, rnd in db.execute('SELECT uuid, hotkey, round FROM uuid_owner'):
+                    state.uuid_owner[str(uuid)] = (str(hk), int(rnd))
+                for key, value in db.execute('SELECT key, value FROM meta'):
+                    if key == 'attest_round':
+                        state.attest_round = int(value)
         except sqlite3.Error:
             pass
         return state

@@ -3,29 +3,36 @@
 
 """Hardware attestation of serving miners (sub-subnet B beta).
 
-Each round a random half of the READY miners (plus every miner that has never passed and every miner that failed
-last round) is sent one fresh ``AttestSynapse`` — same seed, same instant. The miner's attest sidecar (docker/attest,
-image ``entrius/gt-attest``) answers with ``gt_attest`` on every GPU it can see: it fills the card's free VRAM with a
-seeded stream and runs a deterministic fp32 GEMM chain, returning the GPU's UUID, bytes filled, a SHA-256 digest and
-wall time. The validator asks its own reference sidecar (same image) for the same seed first, so the expected digest
-and reference wall time come from an honest 5090 — no GPU code runs in the validator process.
+Each round the least recently challenged half of the READY miners (plus every miner that has never passed and every
+miner that failed last round) is sent one fresh ``AttestSynapse`` — same seed, same instant. The miner's attest
+sidecar (docker/attest, image ``entrius/gt-attest``) answers with ``gt_attest`` on every GPU it can see, all at once:
+device ``i`` fills its free VRAM with a seeded stream and runs a deterministic fp32 GEMM chain on ``seed + i``,
+returning the GPU's UUID, bytes filled, a SHA-256 digest and wall time. The validator asks its own reference sidecar
+(same image) for index 0 first, and for each further index a miner claims, so every expected digest comes from an
+honest 5090 — no GPU code runs in the validator process.
 
-A card PASSES when its digest matches, its wall is within ``SERVING_ATTEST_BUDGET_RATIO`` x the reference's, most of
-its free VRAM was filled, and the model was resident before the fill (free VRAM at most total minus
-``SERVING_ATTEST_MODEL_RESIDENT_RATIO`` x the reservation). A hotkey's ``capacity`` is its number of passing cards —
-one hotkey, N cards, N card-hours — and it is attested while at least one passes. Overlap is the mechanism: two
-hotkeys fronting one card cannot both fill its free VRAM at the same instant and their chains run ~2x slower, so a
-sharing pair is caught within a few rounds (P = fraction^2 per round). Two hotkeys reporting the same GPU UUID within
-``SERVING_ATTEST_UUID_MEMORY_ROUNDS`` rounds both fail. A failure is never a strike: capacity 0 for the round,
-re-challenged next round. Miners not in the cohort keep their last verdict; a miner with no verdict yet is not READY
-(admission).
+What the validator can measure itself is the digest and the round trip; every other field of a card's report is the
+miner's own number. So a card PASSES when its digest matches its index's, its wall is within
+``SERVING_ATTEST_BUDGET_RATIO`` x the reference's, most of its free VRAM was filled and the model was resident before
+the fill — and the whole reply arrived within that budget plus ``SERVING_ATTEST_RTT_SLACK_MS``. Cards run in parallel
+on an honest box, so N cards take one card's wall; one card faking N runs the chain N times and misses the round trip.
+A hotkey's ``capacity`` is its passing cards (at most ``SERVING_ATTEST_MAX_CARDS``).
+
+Overlap is the mechanism against sharing: two hotkeys fronting one card cannot both fill its free VRAM at the same
+instant and their chains run ~2x slower, so a sharing pair is caught within a few rounds (P = fraction^2 per round).
+A GPU UUID belongs to the first hotkey that passed with it; another hotkey reporting the same UUID loses that card
+while the holder keeps it (a claim lapses after ``SERVING_ATTEST_UUID_MEMORY_ROUNDS`` unrenewed rounds). Two hotkeys
+claiming an unowned UUID in the same round both fail it. A failure is never a strike: capacity 0 for the round,
+re-challenged next round. Miners not in the cohort keep their last verdict until it is older than the memory window;
+a miner with no verdict yet is not READY (admission). A fault in this module is neutral for the cohort, never fatal
+for the round.
 """
 
 import asyncio
 import secrets
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple, cast
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union, cast
 
 import bittensor as bt
 import requests
@@ -34,8 +41,10 @@ from gittensor.constants import (
     SERVING_ATTEST_BUDGET_RATIO,
     SERVING_ATTEST_COHORT_FRACTION,
     SERVING_ATTEST_ITERS,
+    SERVING_ATTEST_MAX_CARDS,
     SERVING_ATTEST_MIN_FILL_RATIO,
     SERVING_ATTEST_MODEL_RESIDENT_RATIO,
+    SERVING_ATTEST_RTT_SLACK_MS,
     SERVING_ATTEST_TIMEOUT,
     SERVING_ATTEST_UUID_MEMORY_ROUNDS,
     SERVING_VRAM_MODEL_RESERVED_BYTES,
@@ -43,6 +52,8 @@ from gittensor.constants import (
 from gittensor.serving.loadout import ServingRelease
 from gittensor.serving.state import ServingState
 from gittensor.synapses import AttestSynapse
+
+ExpectedDigest = Union[str, Callable[[int], Optional[str]]]  # one digest for every index, or a digest per index
 
 
 @dataclass
@@ -95,9 +106,15 @@ class AttestVerdict:
         }
 
 
-def status_capacity(status: Optional[dict]) -> int:
-    """Cards a stored attest status pays for (statuses persisted before ``capacity`` existed count one card)."""
+def status_capacity(
+    status: Optional[dict], round_no: Optional[int] = None, memory_rounds: int = SERVING_ATTEST_UUID_MEMORY_ROUNDS
+) -> int:
+    """Cards a stored attest status pays for (statuses persisted before ``capacity`` existed count one card). A
+    verdict older than ``memory_rounds`` — a miner the reference could not re-challenge for that long — pays nothing
+    until it is renewed."""
     if not status or not status.get('passed'):
+        return 0
+    if round_no is not None and round_no - int(status.get('round', round_no)) > memory_rounds:
         return 0
     return int(status.get('capacity', 1))
 
@@ -128,9 +145,13 @@ def reference_challenge(release: ServingRelease, seed: int, iters: int, timeout:
     """(expected digest, reference wall ms) from the validator's own reference sidecar for ``seed``."""
     if not release.attest_reference_url:
         raise RuntimeError('no attest_reference_url on the release')
+    headers = (
+        {'Authorization': f'Bearer {release.attest_reference_api_key}'} if release.attest_reference_api_key else {}
+    )
     r = requests.post(
         f'{release.attest_reference_url.rstrip("/")}/v1/attest',
         json={'seed': seed, 'iters': iters, 'fill': False},
+        headers=headers,
         timeout=timeout,
     )
     r.raise_for_status()
@@ -145,7 +166,25 @@ def reference_challenge(release: ServingRelease, seed: int, iters: int, timeout:
 def judge_card(
     dev: dict,
     queued_ms: float,
-    expected_digest: str,
+    expected_digest: Optional[str],
+    ref_wall_ms: float,
+    release: ServingRelease,
+    budget_ratio: float,
+    min_fill_ratio: float,
+    resident_ratio: float,
+) -> CardVerdict:
+    try:
+        return _judge_card(
+            dev, queued_ms, expected_digest, ref_wall_ms, release, budget_ratio, min_fill_ratio, resident_ratio
+        )
+    except (TypeError, ValueError, AttributeError) as e:  # a field the miner typed that is not a number
+        return CardVerdict(False, f'malformed device report: {e!r}'[:200])
+
+
+def _judge_card(
+    dev: dict,
+    queued_ms: float,
+    expected_digest: Optional[str],
     ref_wall_ms: float,
     release: ServingRelease,
     budget_ratio: float,
@@ -153,10 +192,12 @@ def judge_card(
     resident_ratio: float,
 ) -> CardVerdict:
     if dev.get('error'):
-        return CardVerdict(False, f'challenge error: {dev["error"]}')
+        return CardVerdict(False, f'challenge error: {dev["error"]}'[:200])
     uuid = str(dev.get('uuid') or '')
     wall = float(dev.get('wall_ms') or 0.0) + queued_ms
     filled = int(dev.get('filled_bytes') or 0)
+    if expected_digest is None:
+        return CardVerdict(False, 'no reference digest for this device index', uuid, wall, filled)
     if str(dev.get('digest')) != expected_digest:
         return CardVerdict(False, 'digest mismatch', uuid, wall, filled)
     budget = budget_ratio * ref_wall_ms if ref_wall_ms > 0 else float('inf')
@@ -183,15 +224,20 @@ def judge_card(
 
 def judge(
     response: Optional[AttestSynapse],
-    expected_digest: str,
+    expected: ExpectedDigest,
     ref_wall_ms: float,
     release: ServingRelease,
     budget_ratio: float = SERVING_ATTEST_BUDGET_RATIO,
     min_fill_ratio: float = SERVING_ATTEST_MIN_FILL_RATIO,
     resident_ratio: float = SERVING_ATTEST_MODEL_RESIDENT_RATIO,
+    elapsed_ms: Optional[float] = None,
+    rtt_slack_ms: float = SERVING_ATTEST_RTT_SLACK_MS,
+    max_cards: int = SERVING_ATTEST_MAX_CARDS,
 ) -> AttestVerdict:
-    """Every card the sidecar reported is judged on its own; the hotkey passes with any passing card and its
-    capacity is the count. The reason names the first failing card when one fails."""
+    """Every card the sidecar reported is judged on its own against its index's expected digest; the hotkey passes
+    with any passing card and its capacity is the count. ``elapsed_ms`` is the validator's own round trip for the
+    whole reply: past one card's budget plus the slack, no card passes, however each card's own wall reads. The
+    reason names the first failing card when one fails."""
     if response is None or response.devices is None:
         detail = getattr(response, 'error', None) or getattr(
             getattr(response, 'dendrite', None), 'status_message', None
@@ -199,10 +245,28 @@ def judge(
         return AttestVerdict(False, f'no attestation ({detail or "timeout"})')
     if not response.devices:
         return AttestVerdict(False, 'no devices')
-    queued = float(response.queued_ms or 0.0)
+    budget = budget_ratio * ref_wall_ms if ref_wall_ms > 0 else float('inf')
+    if elapsed_ms is not None and elapsed_ms > budget + rtt_slack_ms:
+        return AttestVerdict(False, f'too slow: {elapsed_ms:.0f} ms round trip > {budget + rtt_slack_ms:.0f} ms')
+    try:
+        queued = float(response.queued_ms or 0.0)
+    except (TypeError, ValueError):
+        queued = 0.0
+    devices = [dev for dev in response.devices if isinstance(dev, dict)][:max_cards]
+    if not devices:
+        return AttestVerdict(False, 'malformed device report')
     cards = [
-        judge_card(dev, queued, expected_digest, ref_wall_ms, release, budget_ratio, min_fill_ratio, resident_ratio)
-        for dev in response.devices
+        judge_card(
+            dev,
+            queued,
+            expected if isinstance(expected, str) else expected(i),
+            ref_wall_ms,
+            release,
+            budget_ratio,
+            min_fill_ratio,
+            resident_ratio,
+        )
+        for i, dev in enumerate(devices)
     ]
     passing = [c for c in cards if c.passed]
     failing = [c for c in cards if not c.passed]
@@ -222,10 +286,12 @@ async def send_challenges(
     seed: int,
     iters: int,
     timeout: float = SERVING_ATTEST_TIMEOUT,
-) -> Dict[str, Optional[AttestSynapse]]:
-    """Fire the same challenge at every target at once; None where the call failed."""
+) -> Dict[str, Tuple[Optional[AttestSynapse], float]]:
+    """Fire the same challenge at every target at once; (response, round trip ms) per hotkey, None where the call
+    failed. The round trip is the validator's own clock on the whole reply."""
 
-    async def one(axon: bt.AxonInfo) -> Optional[AttestSynapse]:
+    async def one(axon: bt.AxonInfo) -> Tuple[Optional[AttestSynapse], float]:
+        started = time.monotonic()
         try:
             result = await dendrite.call(
                 target_axon=axon,
@@ -233,38 +299,68 @@ async def send_challenges(
                 timeout=timeout,
                 deserialize=False,
             )
-            return cast(AttestSynapse, result)
+            return cast(AttestSynapse, result), (time.monotonic() - started) * 1000.0
         except Exception as e:  # network / axon fault: judged as no attestation
             bt.logging.debug(f'Serving: attest call failed: {e!r}')
-            return None
+            return None, (time.monotonic() - started) * 1000.0
 
     results = await asyncio.gather(*(one(axon) for _, _, axon in targets))
     return {hotkey: resp for (_, hotkey, _), resp in zip(targets, results)}
 
 
-def _status_uuids(st: dict) -> List[str]:
-    uuids = st.get('uuids')
-    if uuids is None:
-        uuids = [st['uuid']] if st.get('uuid') else []
-    return [u for u in uuids if u]
+def claim_uuids(
+    state: ServingState,
+    judged: Dict[str, AttestVerdict],
+    round_no: int,
+    memory_rounds: int = SERVING_ATTEST_UUID_MEMORY_ROUNDS,
+) -> Dict[str, List[str]]:
+    """Settle GPU ownership for this round's passing cards; hotkey -> UUIDs it loses.
+
+    A UUID belongs to the first hotkey that passed with it and stays its own while the claim is renewed within
+    ``memory_rounds``. Another hotkey reporting the holder's UUID loses that card; the holder keeps it — so a card
+    cannot be taken from a miner by naming its UUID. Two hotkeys naming an unowned UUID in the same round are the
+    sharing case the overlap is there to catch: both lose it.
+    """
+    for uuid, (owner, seen) in list(state.uuid_owner.items()):
+        if round_no - seen > memory_rounds:
+            del state.uuid_owner[uuid]
+    claims: Dict[str, List[str]] = {}
+    for hk in sorted(judged):
+        for uuid in judged[hk].uuids:
+            claims.setdefault(uuid, []).append(hk)
+    lost: Dict[str, List[str]] = {}
+    for uuid, hks in sorted(claims.items()):
+        owner = state.uuid_owner.get(uuid)
+        if owner is not None and owner[0] in hks:
+            keep: Optional[str] = owner[0]
+        elif len(hks) == 1 and owner is None:
+            keep = hks[0]
+        else:
+            keep = None  # unowned and contested this round (sharing), or owned by someone not answering now
+        if keep is not None:
+            state.uuid_owner[uuid] = (keep, round_no)
+        for hk in hks:
+            if hk != keep:
+                lost.setdefault(hk, []).append(uuid)
+    return lost
 
 
-def dedupe_uuids(
-    state: ServingState, round_no: int, memory_rounds: int = SERVING_ATTEST_UUID_MEMORY_ROUNDS
-) -> Dict[str, str]:
-    """hotkey -> shared GPU UUID, for every passing hotkey whose card another hotkey also reported within
-    ``memory_rounds``."""
-    by_uuid: Dict[str, List[str]] = {}
-    for hk, st in state.attest_status.items():
-        if st.get('passed') and round_no - int(st.get('round', 0)) <= memory_rounds:
-            for uuid in _status_uuids(st):
-                by_uuid.setdefault(uuid, []).append(hk)
-    shared: Dict[str, str] = {}
-    for uuid, hks in sorted(by_uuid.items()):
-        if len(hks) > 1:
-            for hk in hks:
-                shared.setdefault(hk, uuid)
-    return shared
+def _apply_lost_cards(state: ServingState, hk: str, uuids: List[str]) -> None:
+    st = dict(state.attest_status.get(hk, {}))
+    cards = []
+    for card in st.get('cards', []):
+        if card.get('passed') and card.get('uuid') in uuids:
+            card = {**card, 'passed': False, 'reason': f'duplicate GPU {card.get("uuid")} (held by another hotkey)'}
+        cards.append(card)
+    passing = [c for c in cards if c.get('passed')]
+    st.update(
+        cards=cards,
+        uuids=[c['uuid'] for c in passing if c.get('uuid')],
+        capacity=len(passing),
+        passed=bool(passing),
+        reason=f'duplicate GPU {uuids[0]} (held by another hotkey)' if not passing else st.get('reason', 'ok'),
+    )
+    state.attest_status[hk] = st
 
 
 async def attest_round(
@@ -279,35 +375,67 @@ async def attest_round(
     attested) for every candidate.
 
     Without an ``attest_reference_url`` (localnet / echo) attestation is off and every candidate counts as one card.
-    If the reference itself fails, nothing changes this round (neutral).
+    If the reference itself fails, or anything in here does, nothing changes this round (neutral).
     """
     round_no = state.attest_round = getattr(state, 'attest_round', 0) + 1
     if not release.attest_reference_url:
         return {hk: 1 for _, hk, _ in candidates}
     hotkeys = [hk for _, hk, _ in candidates]
+
+    def carried() -> Dict[str, int]:
+        return {hk: status_capacity(state.attest_status.get(hk), round_no) for hk in hotkeys}
+
+    try:
+        return await _attest_round(state, dendrite, candidates, release, round_no, rng, timeout)
+    except Exception as e:  # a fault in judging must not take the round down; the cohort keeps its last verdict
+        bt.logging.error(f'Serving: attestation failed this round, attest neutral: {e!r}')
+        return carried()
+
+
+async def _attest_round(
+    state: ServingState,
+    dendrite: bt.Dendrite,
+    candidates: Sequence[Tuple[int, str, bt.AxonInfo]],
+    release: ServingRelease,
+    round_no: int,
+    rng,
+    timeout: float,
+) -> Dict[str, int]:
+    hotkeys = [hk for _, hk, _ in candidates]
     cohort = set(choose_cohort(hotkeys, state.attest_status, rng=rng))
-    seed = secrets.randbits(63)
+    seed = secrets.randbits(62)
     iters = release.attest_iters or SERVING_ATTEST_ITERS
     try:
-        expected, ref_wall = await asyncio.to_thread(reference_challenge, release, seed, iters, timeout)
+        expected0, ref_wall = await asyncio.to_thread(reference_challenge, release, seed, iters, timeout)
     except Exception as e:
         bt.logging.error(f'Serving: reference attestation failed, attest neutral this round: {e!r}')
-        return {hk: status_capacity(state.attest_status.get(hk)) for hk in hotkeys}
+        return {hk: status_capacity(state.attest_status.get(hk), round_no) for hk in hotkeys}
     targets = [(uid, hk, axon) for uid, hk, axon in candidates if hk in cohort]
     responses = await send_challenges(dendrite, targets, seed, iters, timeout)
+    # One reference digest per device index any miner claimed (index i answers seed + i), at most MAX_CARDS.
+    claimed = max((len(resp.devices) for resp, _ in responses.values() if resp is not None and resp.devices), default=1)
+    digests: Dict[int, Optional[str]] = {0: expected0}
+    for i in range(1, min(claimed, SERVING_ATTEST_MAX_CARDS)):
+        try:
+            digests[i] = (await asyncio.to_thread(reference_challenge, release, seed + i, iters, timeout))[0]
+        except Exception as e:
+            bt.logging.warning(f'Serving: reference attestation for device index {i} failed: {e!r}')
+            digests[i] = None
     now = time.time()
+    judged: Dict[str, AttestVerdict] = {}
     for uid, hk, _ in targets:
-        verdict = judge(responses.get(hk), expected, ref_wall, release)
+        resp, elapsed = responses.get(hk, (None, 0.0))
+        verdict = judge(resp, lambda i: digests.get(i), ref_wall, release, elapsed_ms=elapsed)
+        judged[hk] = verdict
         state.attest_status[hk] = verdict.as_status(now, round_no)
         bt.logging.info(
             f'Serving: UID {uid} attest {"PASS" if verdict.passed else "FAIL"} '
-            f'{verdict.wall_ms or 0:.0f} ms (ref {ref_wall:.0f}) fill {verdict.filled_bytes / 1e9:.1f} GB '
-            f'cards {verdict.capacity}/{len(verdict.cards)} uuid {verdict.uuid or "-"}'
-            f'{"" if verdict.reason.startswith("ok") else " — " + verdict.reason}'
+            f'{verdict.wall_ms or 0:.0f} ms (ref {ref_wall:.0f}, rtt {elapsed:.0f}) fill '
+            f'{verdict.filled_bytes / 1e9:.1f} GB cards {verdict.capacity}/{len(verdict.cards)} '
+            f'uuid {verdict.uuid or "-"}{"" if verdict.reason.startswith("ok") else " — " + verdict.reason}'
         )
-    for hk, uuid in dedupe_uuids(state, round_no).items():
-        st = state.attest_status.get(hk, {})
+    for hk, uuids in claim_uuids(state, judged, round_no).items():
         uid = next((u for u, h, _ in candidates if h == hk), '?')
-        bt.logging.warning(f'Serving: UID {uid} attest FAIL — duplicate GPU {uuid} across hotkeys')
-        state.attest_status[hk] = {**st, 'passed': False, 'capacity': 0, 'reason': f'duplicate GPU {uuid}'}
-    return {hk: status_capacity(state.attest_status.get(hk)) for hk in hotkeys}
+        bt.logging.warning(f'Serving: UID {uid} attest FAIL — duplicate GPU {uuids[0]} across hotkeys')
+        _apply_lost_cards(state, hk, uuids)
+    return {hk: status_capacity(state.attest_status.get(hk), round_no) for hk in hotkeys}

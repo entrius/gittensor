@@ -192,7 +192,14 @@ SERVING_ATTEST_ITERS = 3
 SERVING_ATTEST_BUDGET_RATIO = 1.6
 SERVING_ATTEST_MIN_FILL_RATIO = 0.6
 SERVING_ATTEST_TIMEOUT = 45.0  # seconds: fill + chain on a 5090 is ~1.5 s; queued challenges show up as slow
-SERVING_ATTEST_UUID_MEMORY_ROUNDS = 12
+SERVING_ATTEST_UUID_MEMORY_ROUNDS = 12  # a verdict (and a UUID claim) older than this pays nothing until renewed
+# Every field of a card's report except the digest is the miner's own number, so the count of cards is held to two
+# things the validator measures itself: each device index answers its own seed (seed + index), which the reference
+# recomputes, and the whole reply must arrive within one card's budget plus this network slack — gt_attest runs the
+# cards in parallel, so N real cards take one card's wall and one card faking N takes N of them. At most
+# SERVING_ATTEST_MAX_CARDS are judged (and priced) per hotkey.
+SERVING_ATTEST_RTT_SLACK_MS = 2_000.0
+SERVING_ATTEST_MAX_CARDS = 8
 # A card counts only with the model resident: free VRAM before the fill must be at most total minus this fraction of
 # the reservation (a bare 5090 shows ~32 GB free, one holding the model ~8 GB). Every passing card is a card-hour, so
 # a multi-GPU hotkey earns per card it actually serves from — a second card with nothing loaded earns nothing.

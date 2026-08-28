@@ -17,7 +17,7 @@ ARG CUDA_ARCHS=120
 COPY docker/attest/gt_attest.cu /src/gt_attest.cu
 # -fmad=false: the summation is bit-identical on every card of the architecture (the validator's reference recomputes
 # the digest).
-RUN nvcc -O3 -fmad=false -gencode arch=compute_${CUDA_ARCHS},code=sm_${CUDA_ARCHS} \
+RUN nvcc -O3 -fmad=false -gencode arch=compute_${CUDA_ARCHS},code=sm_${CUDA_ARCHS} -Xcompiler -pthread \
         -o /src/gt_attest /src/gt_attest.cu -lnvidia-ml
 
 FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION}

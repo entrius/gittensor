@@ -99,6 +99,7 @@ class ServingState:
     probe_history: Dict[str, Deque[float]] = field(default_factory=dict)  # audit thread only: hotkey -> last tps
     dormant_rounds: Dict[str, int] = field(default_factory=dict)  # audit thread only: hotkey -> rounds w/o completion
     attest_status: Dict[str, dict] = field(default_factory=dict)  # audit thread only: hotkey -> last attest verdict
+    uuid_owner: Dict[str, Tuple[str, int]] = field(default_factory=dict)  # GPU UUID -> (hotkey, round last seen)
     last_credit: Dict[str, float] = field(default_factory=dict)  # audit thread only: hotkey -> last measured credit
     _sent_tokens: Dict[str, Deque[Tuple[float, int]]] = field(default_factory=dict)  # hotkey -> (ts, max_tokens)
     attest_round: int = 0

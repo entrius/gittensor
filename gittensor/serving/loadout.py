@@ -66,6 +66,7 @@ class ServingRelease:
     attest_image: Optional[str] = None  # the attest container every box runs (entrius/gt-attest:<tag>)
     attest_url: Optional[str] = None
     attest_reference_url: Optional[str] = None
+    attest_reference_api_key: Optional[str] = None  # bearer for a keyed reference sidecar (ATTEST_API_KEY there)
     attest_iters: Optional[int] = None
     vram_model_reserved_bytes: Optional[float] = None
     ttft_full_ms: Optional[float] = None  # validator-observed TTFT up to which latency credit is 1.0
@@ -121,6 +122,7 @@ class ServingRelease:
             attest_image=attest.get('image'),
             attest_url=attest.get('url') or _sidecar_url(raw.get('base_url')),
             attest_reference_url=attest.get('reference_url') or _sidecar_url(raw.get('reference_url')),
+            attest_reference_api_key=attest.get('reference_api_key'),
             attest_iters=int(attest['iters']) if attest.get('iters') else None,
             vram_model_reserved_bytes=_optional_float(attest.get('vram_model_reserved_bytes')),
             ttft_full_ms=_optional_float(speed.get('ttft_full_ms')),
@@ -202,6 +204,9 @@ def load_serving_loadout(path: Optional[Path] = None) -> ServingLoadout:
     key_override = os.getenv('SERVING_REFERENCE_API_KEY')
     if key_override:
         loadout.primary.reference_api_key = key_override
+    attest_key_override = os.getenv('SERVING_ATTEST_REFERENCE_API_KEY')
+    if attest_key_override:
+        loadout.primary.attest_reference_api_key = attest_key_override
 
     lines = [
         f'Serving release {release.release_id}: model={release.model_id} backend={release.backend} pin={release.runtime_pin} '

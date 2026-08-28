@@ -1676,11 +1676,18 @@ def test_attest_round_pays_per_card_and_dedupes_across_cards(monkeypatch):
     assert att.status_capacity(state.attest_status['hk1']) == 2
     assert att.status_capacity({'passed': True, 'uuid': 'GPU-old'}) == 1  # status persisted before capacity existed
 
+    # hk1 holds GPU-b from the round it passed with it: a newcomer naming that UUID loses the card, hk1 keeps it
     replies[id(axons['hk2'])] = AttestSynapse(seed=1, devices=[_card('GPU-b')])  # hk1's second card
     state.attest_status = {}
     out = asyncio.run(att.attest_round(state, dendrite, candidates, release, rng=random.Random(0)))  # type: ignore[arg-type]
-    assert out == {'hk1': 0, 'hk2': 0}
-    assert state.attest_status['hk1']['reason'] == 'duplicate GPU GPU-b'
+    assert out == {'hk1': 2, 'hk2': 0}
+    assert state.attest_status['hk2']['reason'] == 'duplicate GPU GPU-b (held by another hotkey)'
+    assert state.uuid_owner['GPU-b'][0] == 'hk1'
+    # the same collision with no holder on record (both new this round) is the sharing case: both lose it
+    fresh = ServingState()
+    out = asyncio.run(att.attest_round(fresh, dendrite, candidates, release, rng=random.Random(0)))  # type: ignore[arg-type]
+    assert out == {'hk1': 1, 'hk2': 0}  # hk1 keeps GPU-a, loses GPU-b; hk2 had only GPU-b
+    assert 'GPU-b' not in fresh.uuid_owner and fresh.uuid_owner['GPU-a'][0] == 'hk1'
 
     # the audit round multiplies the speed credit by the attested cards
     good = _echo_release()
@@ -1709,6 +1716,110 @@ def test_attest_round_pays_per_card_and_dedupes_across_cards(monkeypatch):
     assert scores['hk1'] == pytest.approx(2.0) and scores['hk2'] == pytest.approx(1.0)
     tele = state.snapshot()['last_round']['windows']
     assert tele[1]['capacity'] == 2.0 and tele[1]['gpu_uuids'] == ['GPU-a', 'GPU-b'] and tele[2]['capacity'] == 1.0
+
+
+def test_attest_cards_answer_their_own_index_and_the_round_trip_bounds_the_count():
+    """Device i answers seed + i, recomputed by the reference: one real digest repeated N times passes once. And the
+    whole reply must land within one card's budget plus the slack, however each card's own wall reads."""
+    from gittensor.synapses import AttestSynapse
+    from gittensor.validator.serving.attest import judge
+
+    release = _attest_release()
+    per_index = {0: 'd0', 1: 'd1', 2: 'd2'}.get
+    faked = judge(
+        AttestSynapse(seed=1, devices=[_card('GPU-a', digest='d0'), _card('GPU-b', digest='d0')]),
+        per_index,
+        1400.0,
+        release,
+    )
+    assert faked.capacity == 1 and faked.reason.startswith('1/2 cards ok (digest mismatch')
+    honest = judge(
+        AttestSynapse(seed=1, devices=[_card('GPU-a', digest='d0'), _card('GPU-b', digest='d1')]),
+        per_index,
+        1400.0,
+        release,
+        elapsed_ms=1500.0,
+    )
+    assert honest.capacity == 2
+    beyond = judge(
+        AttestSynapse(seed=1, devices=[_card(f'GPU-{i}', digest=f'd{i}') for i in range(4)]), per_index, 1400.0, release
+    )
+    assert beyond.capacity == 3 and 'no reference digest' in beyond.reason
+    slow = judge(
+        AttestSynapse(seed=1, devices=[_card('GPU-a', digest='d0')]), per_index, 1400.0, release, elapsed_ms=9_000.0
+    )
+    assert not slow.passed and slow.capacity == 0 and 'round trip' in slow.reason
+    capped = judge(
+        AttestSynapse(seed=1, devices=[_card(f'GPU-{i}', digest='d') for i in range(20)]),
+        'd',
+        1400.0,
+        release,
+        max_cards=3,
+    )
+    assert capped.capacity == 3
+
+
+def test_attest_malformed_report_is_a_failed_card_not_a_crash():
+    from gittensor.synapses import AttestSynapse
+    from gittensor.validator.serving.attest import judge, status_capacity
+
+    release = _attest_release()
+    bad = judge(
+        AttestSynapse(seed=1, devices=[{'uuid': 'GPU-a', 'digest': 'd', 'filled_bytes': 'x'}]), 'd', 1400.0, release
+    )
+    assert not bad.passed and bad.reason.startswith('malformed device report')
+    nested = judge(
+        AttestSynapse(seed=1, devices=[{'uuid': 'GPU-a', 'digest': 'd', 'vram_total': [1]}]), 'd', 1400.0, release
+    )
+    assert not nested.passed and nested.reason.startswith('malformed device report')
+    # a verdict the reference has not renewed for longer than the memory window pays nothing
+    stale = {'passed': True, 'capacity': 2, 'round': 1}
+    assert status_capacity(stale, round_no=13) == 2 and status_capacity(stale, round_no=14) == 0
+    assert status_capacity(stale) == 2
+
+
+def test_attest_fault_is_neutral_and_the_round_counter_persists(monkeypatch, tmp_path):
+    import asyncio
+    from types import SimpleNamespace
+
+    from gittensor.serving.store import ServingStore
+    from gittensor.validator.serving import attest as att
+
+    release = _attest_release()
+    monkeypatch.setattr(att, 'reference_challenge', lambda rel, seed, iters, timeout: ('d', 1400.0))
+    axon = SimpleNamespace(is_serving=True)
+
+    async def call(target_axon, synapse, timeout, deserialize):
+        return _attest_reply(uuid='GPU-1')
+
+    dendrite = SimpleNamespace(call=call)
+    state = ServingState()
+    assert asyncio.run(att.attest_round(state, dendrite, [(1, 'hk1', axon)], release)) == {'hk1': 1}  # type: ignore[arg-type]
+    monkeypatch.setattr(att, 'judge', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('boom')))
+    assert asyncio.run(att.attest_round(state, dendrite, [(1, 'hk1', axon)], release)) == {'hk1': 1}  # type: ignore[arg-type]
+    assert state.attest_round == 2 and state.uuid_owner['GPU-1'] == ('hk1', 1)
+    store = ServingStore(tmp_path / 'serving.db')
+    store.save(state)
+    again = store.load(ServingState())
+    assert again.attest_round == 2 and again.uuid_owner == {'GPU-1': ('hk1', 1)}
+
+
+def test_reference_challenge_sends_the_bearer(monkeypatch):
+    import requests
+
+    from gittensor.validator.serving import attest as att
+
+    seen = {}
+
+    def post(url, json, headers, timeout):
+        seen.update(url=url, json=json, headers=headers)
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {'digest': 'd', 'wall_ms': 800.0})
+
+    monkeypatch.setattr(requests, 'post', post)
+    release = _attest_release()
+    release.attest_reference_api_key = 'secret'
+    assert att.reference_challenge(release, 5, 3, 10.0) == ('d', 800.0)
+    assert seen['headers'] == {'Authorization': 'Bearer secret'} and seen['json']['seed'] == 5
 
 
 def test_sample_for_audit_keeps_baseline_and_failures_and_draws_the_rest():

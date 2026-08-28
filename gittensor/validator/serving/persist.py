@@ -37,6 +37,7 @@ def round_rows(
     settled: Dict[str, float],
     pricing: Optional[ServingPricing],
     release: Optional[ServingRelease] = None,
+    allow_unpriced_cap: bool = False,
 ) -> tuple[tuple, list[tuple]]:
     """(serving_rounds row, serving_miner_rounds rows) for one audit round.
 
@@ -46,7 +47,7 @@ def round_rows(
     """
     windows: Dict[int, dict] = last_round.get('windows', {})
     card_equiv = sum(settled.values())
-    share = serving_share(card_equiv, pricing)
+    share = serving_share(card_equiv, pricing, allow_unpriced_cap)
     summary = (
         validator_hotkey,
         round_ts,
@@ -122,12 +123,15 @@ class ServingRoundStorage:
         pricing: Optional[ServingPricing],
         release: Optional[ServingRelease] = None,
         now: Optional[dt.datetime] = None,
+        allow_unpriced_cap: bool = False,
     ) -> bool:
         last_round = dict(state.last_round)
         if not last_round or not state.last_round_ts:
             return False
         round_ts = now or dt.datetime.fromtimestamp(state.last_round_ts, dt.timezone.utc)
-        summary, miners = round_rows(validator_hotkey, round_ts, last_round, state.settled_scores(), pricing, release)
+        summary, miners = round_rows(
+            validator_hotkey, round_ts, last_round, state.settled_scores(), pricing, release, allow_unpriced_cap
+        )
         conn = self._connection()
         if conn is None:
             return False

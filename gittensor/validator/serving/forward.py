@@ -59,7 +59,7 @@ from gittensor.synapses import InferenceSynapse
 from gittensor.validator.serving.attest import attest_round
 from gittensor.validator.serving.persist import ServingRoundStorage
 from gittensor.validator.serving.scoring import request_speed
-from gittensor.validator.utils.config import STORE_DB_RESULTS
+from gittensor.validator.utils.config import SERVING_PAY_CAP_WITHOUT_PRICING, STORE_DB_RESULTS
 
 if TYPE_CHECKING:
     from neurons.validator import Validator
@@ -309,7 +309,11 @@ async def audit_round(
         for uid, hotkey, axon in active:
             window = state.audits.verdict(hotkey, release.release_id)
             round_speeds = speeds.get(hotkey) or []
-            credit = sum(sp.credit for sp in round_speeds) / len(round_speeds) if round_speeds else 1.0
+            if round_speeds:
+                credit = sum(sp.credit for sp in round_speeds) / len(round_speeds)
+                state.last_credit[hotkey] = credit
+            else:  # nothing verified this round: freeze at the last measured credit, do not assume a perfect one
+                credit = state.last_credit.get(hotkey, 1.0)
             windows[uid] = {
                 **window.as_dict(),
                 'hotkey': hotkey,
@@ -488,6 +492,7 @@ class ServingAuditThread:
                     state=self.state,
                     pricing=getattr(self.validator, 'last_serving_pricing', None),
                     release=release,
+                    allow_unpriced_cap=SERVING_PAY_CAP_WITHOUT_PRICING,
                 )
             # The rest of the interval carries this validator's own baseline prompts, spread at random so nothing
             # marks the round boundary; they are verified next round alongside any user traffic.

@@ -26,6 +26,7 @@ def blend_emission_pools(
     maintainer_uids_by_repo: Optional[Dict[str, list[int]]] = None,
     serving_scores: Optional[Dict[int, float]] = None,
     serving_pricing: Optional[ServingPricing] = None,
+    allow_unpriced_cap: bool = False,
 ) -> np.ndarray:
     """Allocate the combined scoring pool by bounded repository emission_share.
 
@@ -65,7 +66,7 @@ def blend_emission_pools(
     # Serving pool: priced per verified GPU-hour inside the cap; unclaimed recycles.
     if SERVING_EMISSION_SHARE_CAP > 0:
         card_equiv = sum(serving_scores.values()) if serving_scores else 0.0
-        share = serving_share(card_equiv, serving_pricing)
+        share = serving_share(card_equiv, serving_pricing, allow_unpriced_cap)
         serving_rewards, serving_unallocated = _calculate_score_rewards(serving_scores or {}, share, miner_uids)
         for uid, reward in serving_rewards.items():
             rewards[uid_index[uid]] += reward
@@ -201,14 +202,19 @@ def _repo_has_scorers(
     return False
 
 
-def serving_share(card_equiv: float, pricing: Optional[ServingPricing]) -> float:
+def serving_share(card_equiv: float, pricing: Optional[ServingPricing], allow_unpriced_cap: bool = False) -> float:
     """Emission share that pays ``card_equiv`` verified cards ``SERVING_GPU_HOUR_USD`` each, capped.
 
-    Without usable pricing (no chain price, no published TAO/USD — testnet) the whole cap is paid pro-rata.
+    Without usable pricing the pool pays nothing and recycles, unless ``allow_unpriced_cap`` — a network with no
+    price to read (testnet) — where the whole cap is paid pro-rata. Paying the cap on a priced network would hand
+    one verified card 3.5% of emissions the moment a price read failed.
     """
     if card_equiv <= 0:
         return 0.0
     if pricing is None or not pricing.usable:
+        if not allow_unpriced_cap:
+            bt.logging.warning('Serving: no usable pricing this round; the serving pool pays nothing and recycles')
+            return 0.0
         return SERVING_EMISSION_SHARE_CAP
     want = card_equiv * SERVING_GPU_HOUR_USD / (pricing.alpha_per_hour_to_miners * pricing.alpha_usd)
     return min(SERVING_EMISSION_SHARE_CAP, want)

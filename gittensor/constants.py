@@ -168,6 +168,11 @@ MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software,
 # price data (testnet) the cap is paid pro-rata. Move OSS_EMISSION_SHARE in the same commit so the pools sum to 1.0.
 SERVING_GPU_HOUR_USD = 0.70
 SERVING_EMISSION_SHARE_CAP = 0.035
+# Pricing the cap needs the chain's alpha/TAO price and the published TAO/USD rate. A round that cannot read them
+# reuses the last usable pricing for up to SERVING_PRICING_MAX_AGE_S, so a chain hiccup does not move pay. With no
+# usable pricing at all the fleet is paid nothing: the alternative (the whole cap, split pro-rata) hands one verified
+# card 3.5% of emissions. A network with no price data to read - testnet - sets SERVING_PAY_CAP_WITHOUT_PRICING.
+SERVING_PRICING_MAX_AGE_S = 3600.0
 assert abs(OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE_CAP - 1.0) < EMISSION_SHARE_TOLERANCE, (
     'emission pools must sum to 1.0'
 )

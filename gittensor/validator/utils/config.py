@@ -17,6 +17,9 @@ WANDB_VALIDATOR_NAME = os.getenv('WANDB_VALIDATOR_NAME', 'vali')
 # optional env vars
 STORE_DB_RESULTS = os.getenv('STORE_DB_RESULTS', 'false').lower() == 'true'
 SERVING_ENABLED = os.getenv('SERVING_ENABLED', 'false').lower() == 'true'
+# Testnet only: pay the whole serving cap pro-rata when there is no usable pricing to read. On a network that has a
+# price, leaving this false is what keeps a single verified card from earning the entire cap.
+SERVING_PAY_CAP_WITHOUT_PRICING = os.getenv('SERVING_PAY_CAP_WITHOUT_PRICING', 'false').lower() == 'true'
 SERVING_AUDIT_INTERVAL_S = float(
     os.getenv('SERVING_AUDIT_INTERVAL_S', '300')
 )  # wall-clock seconds between audit rounds

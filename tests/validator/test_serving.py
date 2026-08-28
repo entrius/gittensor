@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from collections import deque
 from types import SimpleNamespace
 from typing import Dict
@@ -16,6 +17,7 @@ from gittensor.constants import (
     SERVING_AUDIT_MIN_PREFIX_AGREEMENT,
     SERVING_AUDIT_WINDOW,
     SERVING_AUDIT_WINDOW_THRESHOLDS,
+    SERVING_PRICING_MAX_AGE_S,
 )
 from gittensor.serving.api import build_app, parse_api_keys
 from gittensor.serving.audit import (
@@ -823,8 +825,11 @@ def test_audit_round_verifies_served_traffic(monkeypatch):
     assert state.snapshot()['probation_uids'] == [3]  # the cheater is quarantined, not on probation
     assert sum(1 for r in state.recent(50) if r.kind == 'verify') == 7
 
-    scores = _round(state, dendrite, serving, good, monkeypatch)  # quiet round: READY on the window, credit 1.0
-    assert scores['hk1'] == 1.0 and [m.uid for m in state.ready_miners()] == [1]
+    # A round in which nothing of hk1's was verified freezes its credit at what was last measured (0.8) rather
+    # than crediting a perfect round the validator never observed.
+    scores = _round(state, dendrite, serving, good, monkeypatch)
+    assert scores['hk1'] == 0.8 and [m.uid for m in state.ready_miners()] == [1]
+    assert state.last_credit['hk1'] == 0.8
 
 
 def test_baseline_round_spreads_prompts_and_queues_them_for_verification(monkeypatch):
@@ -1099,8 +1104,14 @@ def test_serving_share_prices_gpu_hours_inside_the_cap(monkeypatch):
     assert ea.serving_share(1.0, pricing) == pytest.approx(0.70 / (123.0 * 0.847))
     assert ea.serving_share(25.0, pricing) == pytest.approx(0.168, abs=0.001)
     assert ea.serving_share(100.0, pricing) == 0.17  # capped: 100 cards dilute
-    assert ea.serving_share(1.0, None) == 0.17  # no pricing (testnet): pay the cap pro-rata
-    assert ea.serving_share(1.0, ServingPricing(0.0, 0.847)) == 0.17
+    # No usable pricing pays nothing: on a priced network a failed read must not hand one card the whole cap.
+    assert ea.serving_share(1.0, None) == 0.0
+    assert ea.serving_share(1.0, ServingPricing(0.0, 0.847)) == 0.0
+    assert ea.serving_share(100.0, None) == 0.0
+    # ... unless the network has no price to read at all (testnet), where the cap is split pro-rata.
+    assert ea.serving_share(1.0, None, allow_unpriced_cap=True) == 0.17
+    assert ea.serving_share(1.0, ServingPricing(0.0, 0.847), allow_unpriced_cap=True) == 0.17
+    assert ea.serving_share(0.0, None, allow_unpriced_cap=True) == 0.0  # nothing verified is still nothing
 
 
 def test_blend_pays_serving_by_price_and_recycles_the_rest(monkeypatch):
@@ -1127,12 +1138,21 @@ def test_serving_pricing_reads_chain_and_loadout(monkeypatch):
         metagraph=SimpleNamespace(E=[100.0, 200.0], netuid=74),
         subtensor=SimpleNamespace(subnet=lambda netuid: SimpleNamespace(price=0.004)),
     )
+    monkeypatch.setattr(pr, '_last_usable', None)
     monkeypatch.setattr(pr, 'load_serving_loadout', lambda: SimpleNamespace(tao_usd=250.0))
     p = pr.serving_pricing(vali)  # type: ignore[arg-type]
     assert p is not None and p.alpha_per_hour_to_miners == pytest.approx(150.0 * 60 / 72) and p.alpha_usd == 1.0
+
+    # A read that comes back unusable, or throws, reuses the last usable pricing rather than dropping pay.
     monkeypatch.setattr(pr, 'load_serving_loadout', lambda: SimpleNamespace(tao_usd=None))
-    assert pr.serving_pricing(vali) is None  # type: ignore[arg-type]
+    assert pr.serving_pricing(vali) == p  # type: ignore[arg-type]
     vali.subtensor = SimpleNamespace(subnet=lambda netuid: (_ for _ in ()).throw(RuntimeError('rpc')))
+    assert pr.serving_pricing(vali) == p  # type: ignore[arg-type]
+
+    # Once that last good reading is older than the max age it is not reused, and nothing is priced.
+    monkeypatch.setattr(pr, '_last_usable', (time.time() - SERVING_PRICING_MAX_AGE_S - 1.0, p))
+    assert pr.serving_pricing(vali) is None  # type: ignore[arg-type]
+    monkeypatch.setattr(pr, '_last_usable', None)  # a validator that has never priced pays nothing
     assert pr.serving_pricing(vali) is None  # type: ignore[arg-type]
 
 
@@ -1174,7 +1194,7 @@ def test_oss_round_blends_latest_serving_scores(monkeypatch):
 
     seen = {}
 
-    def blend(evals, repos, uids, maintainers, serving_scores, pricing=None):
+    def blend(evals, repos, uids, maintainers, serving_scores, pricing=None, allow_unpriced_cap=False):
         seen['serving'] = serving_scores
         seen['pricing'] = pricing
         return [0.0]

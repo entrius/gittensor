@@ -118,9 +118,12 @@ def test_default_loadout_keeps_model_file():
     assert loadout.load_serving_loadout().primary.model_file.endswith('.gguf')
 
 
-def test_round_rows_without_pricing_pays_cap_pro_rata():
-    summary, _ = persist.round_rows('vali', dt.datetime.now(dt.timezone.utc), ROUND, {'hk16': 1.0}, None)
-    assert summary[13] == 0.035 and summary[14] is None and summary[15] is None
+def test_round_rows_report_the_share_that_will_actually_be_paid():
+    ts = dt.datetime.now(dt.timezone.utc)
+    summary, _ = persist.round_rows('vali', ts, ROUND, {'hk16': 1.0}, None)
+    assert summary[13] == 0.0 and summary[14] is None and summary[15] is None  # unpriced: nothing is paid
+    summary, _ = persist.round_rows('vali', ts, ROUND, {'hk16': 1.0}, None, None, True)
+    assert summary[13] == 0.035  # testnet: the cap, matching what blend_emission_pools pays
 
 
 def test_store_round_writes_and_prunes():

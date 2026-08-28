@@ -15,6 +15,7 @@ from gittensor.validator.oss_contributions.reward import get_rewards
 from gittensor.validator.serving.pricing import serving_pricing
 from gittensor.validator.utils.config import (
     SERVING_ENABLED,
+    SERVING_PAY_CAP_WITHOUT_PRICING,
     VALIDATOR_STEPS_INTERVAL,
     VALIDATOR_WAIT,
 )
@@ -81,7 +82,13 @@ async def forward(self: 'Validator') -> None:
         pricing = serving_pricing(self) if SERVING_ENABLED and serving_scores else None
         self.last_serving_pricing = pricing  # the serving audit thread stamps it on the rounds it persists
         rewards = blend_emission_pools(
-            miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo, serving_scores, pricing
+            miner_evaluations,
+            master_repositories,
+            miner_uids,
+            maintainer_uids_by_repo,
+            serving_scores,
+            pricing,
+            SERVING_PAY_CAP_WITHOUT_PRICING,
         )
 
         self.update_scores(rewards, miner_uids, blacklisted_uids=sorted(penalized_uids))

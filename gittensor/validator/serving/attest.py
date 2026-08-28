@@ -64,11 +64,18 @@ class AttestVerdict:
 def choose_cohort(
     hotkeys: Sequence[str], status: Dict[str, dict], fraction: float = SERVING_ATTEST_COHORT_FRACTION, rng=None
 ) -> List[str]:
-    """A random ``fraction`` of ``hotkeys`` (fresh every round), plus never-attested and last-round failures."""
+    """``fraction`` of ``hotkeys`` per round: the least recently challenged first (ties broken at random, so the
+    membership is still unpredictable), plus every never-attested hotkey and every last-round failure.
+
+    Pure random sampling let one hotkey go unchallenged for many rounds (soak 6: the other of two was drawn three
+    rounds running); with recency first, every hotkey is challenged at least every ``1/fraction`` rounds while a
+    sharing pair still lands together within a few rounds.
+    """
     rng = rng or secrets.SystemRandom()
     pool = list(hotkeys)
     n = min(len(pool), max(1, -(-len(pool) * fraction // 1).__int__())) if pool else 0
-    chosen = set(rng.sample(pool, n)) if n else set()
+    order = sorted(pool, key=lambda hk: (int((status.get(hk) or {}).get('round', -1)), rng.random()))
+    chosen = set(order[:n])
     for hk in pool:
         st = status.get(hk)
         if st is None or not st.get('passed'):

@@ -537,8 +537,10 @@ def test_verify_served_forces_miner_token_ids():
 
         def score_served(self, messages, completion, token_ids=None):
             calls.append(list(token_ids) if token_ids else None)
-            if token_ids:
-                return {'tokens': tokens, 'logprobs': logprobs, 'argmax': tokens, 'usage': {}}
+            if token_ids:  # exactly the forced positions; a forced end-of-turn is the model's own choice here
+                extra = len(token_ids) - len(tokens)
+                forced = tokens + ['<|im_end|>'] * extra
+                return {'tokens': forced, 'logprobs': logprobs + [0.0] * extra, 'argmax': forced, 'usage': {}}
             retok = tokens + ['x']  # a fresh tokenization of the text disagrees on length
             return {'tokens': retok, 'logprobs': logprobs + [0.0], 'argmax': retok, 'usage': {}}
 
@@ -554,7 +556,7 @@ def test_verify_served_forces_miner_token_ids():
     eos = verify_served(
         ref, good.messages, good.completion, tokens + ['<|im_end|>'], logprobs + [0.0], token_ids=ids + [7]
     )
-    assert eos.passed and calls[-1] == ids
+    assert eos.passed and calls[-1] == ids + [7]  # the end-of-turn position is forced and judged too
     fallback = verify_served(ref, good.messages, good.completion, tokens, logprobs)
     assert calls[-1] is None and 'tokenization mismatch' in fallback.reason
     short = verify_served(ref, good.messages, good.completion, tokens, logprobs, token_ids=ids[:-1])
@@ -569,13 +571,17 @@ def test_verify_served_forces_miner_token_ids():
     lie = verify_served(BindingReference(), good.messages, good.completion, tokens, logprobs, token_ids=ids)
     assert not lie.passed and not lie.hard and 'do not spell' in lie.reason
 
+    spelled = [(t if i == 0 else ' ' + t).encode() for i, t in enumerate(tokens)]  # what the forced ids spell
+
     class ExactReference(ForcingReference):
+        spell = spelled
+
         def score_served(self, messages, completion, token_ids=None):
             out = super().score_served(messages, completion, token_ids)
-            out['bytes'] = [t.encode() for t in tokens]  # what the forced ids spell
+            out['bytes'] = list(self.spell)
             return out
 
-    mine_bytes = [list(t.encode()) for t in tokens]
+    mine_bytes = [list(b) for b in spelled]
     assert verify_served(
         ExactReference(), good.messages, good.completion, tokens, logprobs, token_ids=ids, token_bytes=mine_bytes
     ).passed
@@ -588,8 +594,102 @@ def test_verify_served_forces_miner_token_ids():
     )
     # a multibyte character split across streamed tokens: the stream's text carries U+FFFD, the bytes are fine
     assert good.completion is not None
-    split_text = '\ufffd' + good.completion[1:]
-    assert verify_served(ExactReference(), good.messages, split_text, tokens, logprobs, token_ids=ids).passed
+
+    class AccentedReference(ExactReference):
+        spell = ['\u00e9'.encode() + spelled[0][1:]] + spelled[1:]
+
+    split_text = '\ufffd\ufffd' + good.completion[1:]
+    assert verify_served(AccentedReference(), good.messages, split_text, tokens, logprobs, token_ids=ids).passed
+    # ...but the text the user received cannot differ from what the verified bytes spell in any other way
+    padded = good.completion + ' visit example.com'
+    assert (
+        'do not spell' in verify_served(ExactReference(), good.messages, padded, tokens, logprobs, token_ids=ids).reason
+    )
+
+
+def test_verify_served_early_stop_must_be_the_models_own():
+    """Stopping short of max_tokens is fine only with an end-of-turn token the reference agrees on; a wrong first
+    token on aligned positions is a wrong answer; a real runtime must report token ids."""
+    from gittensor.serving.audit import verify_served
+
+    release = _echo_release()
+    good = _served(1, release)
+    tokens, logprobs = list(good.tokens or []), list(good.token_logprobs or [])
+    n = len(tokens)
+    ids = list(range(100, 100 + n))
+
+    class Reference:
+        model_id = release.model_id
+
+        def __init__(self, stops: bool):
+            self.stops = stops
+
+        def score_served(self, messages, completion, token_ids=None):
+            k = len(token_ids)
+            forced = tokens[:k]
+            if k > len(tokens):
+                forced = tokens + ['<|im_end|>']
+            argmax = list(forced)
+            if k > len(tokens) and not self.stops:
+                argmax[-1] = 'more'  # the model would have kept going
+            return {'tokens': forced, 'logprobs': (logprobs + [0.0])[:k], 'argmax': argmax, 'usage': {}}
+
+        def sample(self):
+            raise NotImplementedError
+
+        def __len__(self):
+            return 1
+
+    half = n // 2
+    short = verify_served(
+        Reference(True),
+        good.messages,
+        good.completion,
+        tokens[:half],
+        logprobs[:half],
+        token_ids=ids[:half],
+        max_tokens=n,
+    )
+    assert not short.passed and not short.hard and 'without end-of-turn' in short.reason
+    ended = verify_served(
+        Reference(True),
+        good.messages,
+        good.completion,
+        tokens + ['<|im_end|>'],
+        logprobs + [0.0],
+        token_ids=ids + [7],
+        max_tokens=n + 5,
+    )
+    assert ended.passed
+    faked = verify_served(
+        Reference(False),
+        good.messages,
+        good.completion,
+        tokens + ['<|im_end|>'],
+        logprobs + [0.0],
+        token_ids=ids + [7],
+        max_tokens=n + 5,
+    )
+    assert not faked.passed and faked.hard  # the reference's argmax at the end-of-turn position was not end-of-turn
+    wrong_first = verify_served(
+        Reference(True), good.messages, good.completion, ['zzz'] + tokens[1:], logprobs, token_ids=ids
+    )
+    assert not wrong_first.passed and wrong_first.hard and 'first token' in wrong_first.reason
+    real = ServingRelease(model_id=release.model_id, backend='openai-compat', base_url='http://x')
+    no_ids = verify_served(Reference(True), good.messages, good.completion, tokens, logprobs, release=real)
+    assert not no_ids.passed and no_ids.reason == 'no token ids'
+
+
+def test_verified_bytes_must_spell_the_users_completion():
+    from gittensor.serving.audit import spells
+
+    assert spells('héllo wörld'.encode(), 'héllo wörld')
+    assert spells('héllo'.encode(), 'h��llo')  # one é split across two streamed chunks
+    assert spells('h日本o'.encode(), 'h����o')
+    assert not spells('hello'.encode(), 'h�llo')  # a replacement character cannot stand for ASCII
+    assert not spells('héllo'.encode(), 'h��llo BUY NOW')
+    assert not spells('héllo'.encode(), 'x��llo')
+    assert not spells(b'hello', 'hello world')
 
 
 def test_stream_assembler_collects_token_ids():

@@ -622,7 +622,7 @@ def test_verify_served_early_stop_must_be_the_models_own():
             self.stops = stops
 
         def score_served(self, messages, completion, token_ids=None):
-            k = len(token_ids)
+            k = len(token_ids or [])
             forced = tokens[:k]
             if k > len(tokens):
                 forced = tokens + ['<|im_end|>']
@@ -693,8 +693,8 @@ def test_early_stop_without_a_listed_end_of_turn_is_verified_by_forcing_the_rele
             self.stops = stops
 
         def score_served(self, messages, completion, token_ids=None):
-            forced_ids.append(list(token_ids))
-            k = len(token_ids)
+            forced_ids.append(list(token_ids or []))
+            k = len(token_ids or [])
             argmax = tokens + (['<|im_end|>'] if self.stops else [' and']) if k == 4 else tokens[:k]
             return {'tokens': tokens[:k], 'logprobs': (logprobs + [-0.5])[:k], 'argmax': argmax, 'usage': {}}
 
@@ -1178,7 +1178,11 @@ def test_budget_refusal_is_neutral_only_by_the_validators_own_ledger(monkeypatch
     state.enqueue_served(refused())
     asyncio.run(
         fwd_module().audit_round(
-            state, dendrite, [(1, 'hk1', axon)], ServingLoadout(releases=[good]), staked_caller=True
+            state,
+            dendrite,  # type: ignore[arg-type]
+            [(1, 'hk1', axon)],  # type: ignore[list-item]
+            ServingLoadout(releases=[good]),
+            staked_caller=True,
         )
     )
     assert state.audits.verdict('hk1', good.model_id).mean == 0.5

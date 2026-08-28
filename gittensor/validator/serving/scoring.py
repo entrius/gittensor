@@ -21,6 +21,7 @@ from gittensor.constants import (
     SERVING_DECODE_FLOOR_RATIO,
     SERVING_DECODE_MIN_TOKENS,
     SERVING_DECODE_PER_REQUEST_FALLBACK,
+    SERVING_DECODE_TOLERANCE_RATIO,
     SERVING_LATENCY_FULL_CREDIT_MS,
     SERVING_LATENCY_ZERO_CREDIT_MS,
 )
@@ -51,11 +52,17 @@ def expected_decode_tps(curve: Optional[Dict[int, float]], inflight: int) -> flo
     return points[-1][1]
 
 
-def decode_credit(observed_tps: float, expected_tps: float, floor_ratio: float = SERVING_DECODE_FLOOR_RATIO) -> float:
+def decode_credit(
+    observed_tps: float,
+    expected_tps: float,
+    floor_ratio: float = SERVING_DECODE_FLOOR_RATIO,
+    tolerance_ratio: float = SERVING_DECODE_TOLERANCE_RATIO,
+) -> float:
+    """1.0 down to ``tolerance_ratio`` x expected, then linear, 0 under ``floor_ratio`` x expected."""
     if expected_tps <= 0:
         return 1.0
     ratio = observed_tps / expected_tps
-    return 0.0 if ratio < floor_ratio else min(1.0, ratio)
+    return 0.0 if ratio < floor_ratio else min(1.0, ratio / tolerance_ratio)
 
 
 def request_speed_credit(req: ServedRequest, release: ServingRelease) -> float:

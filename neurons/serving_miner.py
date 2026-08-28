@@ -39,6 +39,7 @@ from functools import partial
 from typing import Dict, Optional, Tuple
 
 import bittensor as bt
+import requests
 from bittensor.core.stream import StreamingSynapse
 from bittensor.utils.axon_utils import allowed_nonce_window_ns, calculate_diff_seconds
 from bittensor_wallet import Keypair
@@ -53,7 +54,7 @@ from gittensor.constants import (
 )
 from gittensor.serving.backends import InferenceBackend, load_backend
 from gittensor.serving.loadout import load_serving_loadout
-from gittensor.synapses import InferenceSynapse
+from gittensor.synapses import AttestSynapse, InferenceSynapse
 from neurons.base.neuron import BaseNeuron
 
 BTStreamingResponse = StreamingSynapse.BTStreamingResponse
@@ -75,6 +76,11 @@ class ServingMiner(BaseNeuron):
         self.axon = bt.Axon(wallet=self.wallet, config=self.config)
         self.axon.attach(
             forward_fn=partial(handle_inference, self),
+            blacklist_fn=partial(blacklist_inference, self),
+            priority_fn=partial(priority_inference, self),
+            verify_fn=partial(verify_inference, self),
+        ).attach(
+            forward_fn=partial(handle_attest, self),
             blacklist_fn=partial(blacklist_inference, self),
             priority_fn=partial(priority_inference, self),
             verify_fn=partial(verify_inference, self),
@@ -138,6 +144,34 @@ async def handle_inference(miner: ServingMiner, synapse: InferenceSynapse) -> BT
             await producer
 
     return synapse.create_streaming_response(token_streamer)
+
+
+async def handle_attest(miner: ServingMiner, synapse: AttestSynapse) -> AttestSynapse:
+    """Run the validator's hardware challenge on this miner's runtime (attest sidecar, docker/attest)."""
+    url = miner.release.attest_url
+    if not url:
+        synapse.error = 'no attest_url on the release'
+        return synapse
+
+    def call() -> dict:
+        r = requests.post(
+            f'{url.rstrip("/")}/v1/attest',
+            json={'seed': int(synapse.seed), 'iters': int(synapse.iters), 'fill': bool(synapse.fill)},
+            timeout=max(5.0, float(synapse.timeout or 45.0) - 2.0),
+        )
+        r.raise_for_status()
+        return r.json()
+
+    try:
+        payload = await asyncio.get_running_loop().run_in_executor(None, call)
+    except Exception as e:
+        synapse.error = f'attest sidecar: {e!r}'[:300]
+        return synapse
+    devices = payload.get('devices') or [payload]
+    synapse.devices = [dict(d) for d in devices]
+    synapse.wall_ms = float(devices[0].get('wall_ms') or 0.0) if devices else None
+    synapse.queued_ms = float(payload.get('queued_ms') or 0.0)
+    return synapse
 
 
 async def verify_inference(miner: ServingMiner, synapse: InferenceSynapse) -> None:

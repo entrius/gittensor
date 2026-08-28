@@ -1,5 +1,5 @@
 # Entrius 2025
-from typing import ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, List, Optional
 
 import bittensor as bt
 from pydantic import Field
@@ -101,3 +101,21 @@ class PatCheckSynapse(bt.Synapse):
     has_pat: Optional[bool] = None
     pat_valid: Optional[bool] = None
     rejection_reason: Optional[str] = None
+
+
+class AttestSynapse(bt.Synapse):
+    """Hardware attestation challenge (gittensor/validator/serving/attest.py). The miner answers with its runtime's
+    gt_attest result: per-device GPU UUID, bytes of free VRAM filled, the digest of a seeded GEMM chain and wall time."""
+
+    required_hash_fields: ClassVar[tuple[str, ...]] = ('seed', 'iters', 'fill')
+
+    # Request
+    seed: int
+    iters: int = 3
+    fill: bool = True
+
+    # Response
+    devices: Optional[List[Dict[str, Any]]] = None
+    wall_ms: Optional[float] = None
+    queued_ms: Optional[float] = None
+    error: Optional[str] = None

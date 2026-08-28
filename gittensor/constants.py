@@ -174,21 +174,21 @@ assert abs(OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE_CAP - 1.0) < EMISSION_SHA
 # Settlement is over the trailing hour: a miner's serving score is the mean of its last SERVING_SETTLEMENT_ROUNDS
 # round scores (missing rounds count 0), so a card verified for 45 of the last 60 minutes earns 75% of the price.
 SERVING_SETTLEMENT_ROUNDS = 12  # 12 x 5-minute audit rounds
-SERVING_CHALLENGE_TIMEOUT = 30.0  # seconds before a probe request counts as failed
 SERVING_READY_TTL_S = 900.0  # gateway stops routing when the last audit round is older than this
-# Load burst (telemetry). After settling the window, every READY miner is sent the blessed concurrency of salted
-# prompts at the same instant, verified afterwards by teacher forcing; verified tokens per second of decode time over
-# the release's blessed aggregate at that concurrency (`speed.decode_tps_target`) is reported per round and persisted
-# (dashboard: does this card's aggregate look like one 5090's?). It does not enter pay: capacity is priced by speed on
-# served traffic (below). The constants are fallbacks for a release without speed facts.
-SERVING_PROBE_REQUESTS = 16
-SERVING_PROBE_TARGET_TPS = 280.0
-# A probe reading can only be too low (another validator's burst, a user spike, a blip), never too high: the miner
-# had to deliver those verified tokens. A reading under SERVING_PROBE_DIP_RATIO x the miner's median of its last
-# three is re-measured once after a random SERVING_PROBE_RETRY_DELAY_S and the better reading kept; a real slowdown
-# dips twice and sticks.
-SERVING_PROBE_DIP_RATIO = 0.7
-SERVING_PROBE_RETRY_DELAY_S = (15.0, 45.0)
+# Hardware attestation (gittensor/validator/serving/attest.py, docker/attest). Each round a random
+# SERVING_ATTEST_COHORT_FRACTION of the READY miners (plus never-passed and last-round failures) is sent one fresh
+# seed at the same instant; the runtime image's gt_attest fills the card's free VRAM and runs a deterministic GEMM
+# chain. Expected digest and wall time come from the validator's own reference (same image). PASS needs the digest,
+# wall <= SERVING_ATTEST_BUDGET_RATIO x reference, and >= SERVING_ATTEST_MIN_FILL_RATIO of the free VRAM filled
+# (free = total - SERVING_VRAM_MODEL_RESERVED_BYTES; the release may override). Two hotkeys on one card cannot both
+# fill it at once (P(caught) = fraction^2 per round). Never a strike: capacity 0 that round, re-challenged next.
+SERVING_ATTEST_COHORT_FRACTION = 0.5
+SERVING_ATTEST_ITERS = 3
+SERVING_ATTEST_BUDGET_RATIO = 1.6
+SERVING_ATTEST_MIN_FILL_RATIO = 0.6
+SERVING_ATTEST_TIMEOUT = 45.0  # seconds: fill + chain on a 5090 is ~1.5 s; queued challenges show up as slow
+SERVING_ATTEST_UUID_MEMORY_ROUNDS = 12
+SERVING_VRAM_MODEL_RESERVED_BYTES = 24e9  # what sparkinfer holds with the model loaded (7498736 on a 5090: 23.7 GB)
 SERVING_VERIFY_WORKERS = 8  # concurrent /v1/score calls to the reference per round
 # Latency credit on the validator-observed time to first streamed token (network + queue + prefill). An honest
 # 5090 reports TTFT ~26 ms on-box (2026-08-27 conformance) and a 64-token answer in ~165 ms (2026-08-22/24); add
@@ -207,6 +207,8 @@ SERVING_LATENCY_ZERO_CREDIT_MS = 1_500.0
 # runtime that is not the blessed one is slower by integer factors under load, honest variance is +-10%. Round credit
 # is the mean over the round's served requests (misses 0), so availability, latency and speed price together.
 SERVING_DECODE_FLOOR_RATIO = 0.5
+SERVING_DECODE_TOLERANCE_RATIO = 0.8  # full credit down to this fraction of expected: the curve is measured on-box, the
+# validator observes stream delivery over the WAN (soak 5: honest cards read 0.75-0.96x); credit = min(1, ratio / this)
 SERVING_DECODE_MIN_TOKENS = 32
 SERVING_DECODE_PER_REQUEST_FALLBACK = ((1, 440.0), (6, 46.0), (16, 19.0))  # (concurrent requests, tok/s each)
 # Per-audit verdict. The blessed runtime is bit-reproducible (sparkinfer 7498736, SPARKINFER_DETERMINISTIC=1), so an

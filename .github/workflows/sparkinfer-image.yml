@@ -18,6 +18,10 @@ on:
         description: "CMAKE_CUDA_ARCHITECTURES"
         required: false
         default: "120"
+      image_tag:
+        description: "Image tag to push (default: the sparkinfer ref). Use e.g. <ref>-attest1 for a gittensor-side image change so the blessed tag is not overwritten."
+        required: false
+        default: ""
       conformance:
         description: "After the push, rent a 5090 on Lium, run the conformance checker and open the pin-bump PR on a pass"
         type: boolean
@@ -33,6 +37,7 @@ jobs:
   image:
     outputs:
       ref: ${{ steps.ref.outputs.ref }}
+      tag: ${{ steps.ref.outputs.tag }}
     # push-triggered runs (Dockerfile/workflow changed) only BUILD, to catch Dockerfile breakage in CI;
     # the image is pushed to Docker Hub only from the Run workflow button (workflow_dispatch).
     name: ${{ github.event_name == 'workflow_dispatch' && 'build and push' || 'build only (dry run)' }}
@@ -49,7 +54,8 @@ jobs:
             REF=$(jq -r '.releases[0].runtime_pin' gittensor/validator/weights/serving_loadout.json | sed 's/.*@//')
           fi
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
-          echo "building sparkinfer@$REF"
+          TAG="${{ inputs.image_tag }}"; echo "tag=${TAG:-$REF}" >> "$GITHUB_OUTPUT"
+          echo "building sparkinfer@$REF as entrius/sparkinfer:${TAG:-$REF}"
 
       - name: Free disk space (CUDA devel image is large)
         run: |
@@ -76,7 +82,7 @@ jobs:
             SPARKINFER_REF=${{ steps.ref.outputs.ref }}
             CUDA_ARCHS=${{ inputs.cuda_archs || '120' }}
           tags: |
-            entrius/sparkinfer:${{ steps.ref.outputs.ref }}
+            entrius/sparkinfer:${{ steps.ref.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -89,6 +95,7 @@ jobs:
     env:
       LIUM_API_KEY: ${{ secrets.LIUM_API_KEY }}
       REF: ${{ needs.image.outputs.ref }}
+      TAG: ${{ needs.image.outputs.tag }}
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
@@ -106,7 +113,7 @@ jobs:
       - name: Rent, boot, check, tear down
         env:
           CONFORMANCE_RENT_WAIT_MIN: "20"
-        run: scripts/serving_conformance_on_lium.sh "$REF" "conformance-$REF"
+        run: scripts/serving_conformance_on_lium.sh "$TAG" "conformance-$REF"
 
       - name: Upload the report
         if: always()
@@ -122,12 +129,14 @@ jobs:
             --slurpfile speed "conformance-$REF/speed.json" \
             '.releases[0].runtime_pin = $pin
              | .releases[0].speed = ((.releases[0].speed // {}) + {
-                 decode_tps_target: $speed[0].decode_tps_target,
                  single_stream_decode_tps: $speed[0].single_stream_decode_tps,
-                 probe_shaped_decode_tps: $speed[0].probe_shaped_decode_tps,
-                 burst_concurrency: $speed[0].burst_concurrency,
                  decode_per_request: $speed[0].decode_per_request,
                  measured_on: ($pin + " on a rented RTX 5090, actions run " + $run)
+               })
+             | .releases[0].attest = ((.releases[0].attest // {}) + {
+                 iters: ($speed[0].attest.attest_iters // 3),
+                 vram_model_reserved_bytes: ($speed[0].attest.vram_model_reserved_bytes // 24000000000),
+                 reference_wall_ms: $speed[0].attest.attest_ref_wall_ms
                })' \
             gittensor/validator/weights/serving_loadout.json > /tmp/loadout.json
           mv /tmp/loadout.json gittensor/validator/weights/serving_loadout.json
@@ -145,7 +154,7 @@ jobs:
             `entrius/sparkinfer:${{ env.REF }}` passed `scripts/check_serving_runtime.py` on a rented RTX 5090
             (run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} — report in the
             `serving-conformance-${{ env.REF }}` artifact). This bumps `runtime_pin` and writes the release's
-            blessing-time speed facts (`speed.decode_tps_target` = aggregate decode tok/s of one honest card at the
-            blessed `burst_concurrency` — capacity 1.0; 0 under the floor ratio). Update the sha named in the comments at
+            blessing-time speed facts (`speed.decode_per_request`, the per-request decode curve served traffic is
+            priced against) and attestation facts (`attest.*`). Update the sha named in the comments at
             `gittensor/constants.py` and `gittensor/serving/audit.py` if the blessing rules changed.
           add-paths: gittensor/validator/weights/serving_loadout.json

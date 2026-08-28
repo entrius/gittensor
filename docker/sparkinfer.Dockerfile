@@ -38,6 +38,11 @@ RUN git clone ${SPARKINFER_REPO} sparkinfer \
 RUN cmake -S sparkinfer -B sparkinfer/build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release -DBUILD_SERVER=ON -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHS} \
     && cmake --build sparkinfer/build
+# Hardware attestation challenge (docker/attest): deterministic fp32 GEMM chain + VRAM fill. -fmad=false so the
+# summation is bit-identical on every card of the architecture (the validator's reference recomputes the digest).
+COPY docker/attest/gt_attest.cu /src/attest/gt_attest.cu
+RUN nvcc -O3 -fmad=false -gencode arch=compute_${CUDA_ARCHS},code=sm_${CUDA_ARCHS} \
+        -o /src/attest/gt_attest /src/attest/gt_attest.cu -lnvidia-ml
 
 # ---------- runtime ----------
 FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION}
@@ -55,6 +60,9 @@ COPY --from=build /src/sparkinfer/build/runtime       build/runtime
 COPY --from=build /src/sparkinfer/build/moe           build/moe
 COPY --from=build /src/sparkinfer/build/server        build/server
 COPY --from=build /src/SPARKINFER_COMMIT              SPARKINFER_COMMIT
+COPY --from=build /src/attest/gt_attest               bin/gt_attest
+COPY docker/attest/attest_server.py                   bin/attest_server.py
+COPY docker/attest/entrypoint.sh                      bin/entrypoint.sh
 # sparkinfer_server links libsparkinfer_runtime.so + libsparkinfer_moe.so (ldd-verified on 1b8b962, 9e43bfa).
 ENV LD_LIBRARY_PATH=/opt/sparkinfer/build/runtime:/opt/sparkinfer/build/moe:${LD_LIBRARY_PATH}
 
@@ -73,7 +81,8 @@ ENV SPARKINFER_REF=${SPARKINFER_REF} \
     HOST=0.0.0.0 \
     PORT=8080
 VOLUME ["/opt/sparkinfer/models"]
-EXPOSE 8080
+# 8080 inference, 8081 attestation sidecar (docker/attest/attest_server.py)
+EXPOSE 8080 8081
 LABEL org.opencontainers.image.source="https://github.com/gittensor-ai-lab/sparkinfer" \
       io.gittensor.serving.runtime="sparkinfer" \
       io.gittensor.serving.runtime_ref="${SPARKINFER_REF}"
@@ -81,6 +90,6 @@ LABEL org.opencontainers.image.source="https://github.com/gittensor-ai-lab/spark
 HEALTHCHECK --interval=30s --timeout=5s --start-period=600s --retries=5 \
     CMD curl -fsS http://127.0.0.1:8080/v1/models || exit 1
 
-# run.sh downloads the blessed model + tokenizer into MODELS_DIR on first start (--download), then execs
-# the prebuilt server binary (it only rebuilds if the binary is missing, which it is not).
-ENTRYPOINT ["bash", "server/run.sh", "--download"]
+# bin/entrypoint.sh starts the attestation sidecar (:8081), then run.sh downloads the blessed model + tokenizer into
+# MODELS_DIR on first start (--download) and execs the prebuilt server binary.
+ENTRYPOINT ["bash", "bin/entrypoint.sh"]

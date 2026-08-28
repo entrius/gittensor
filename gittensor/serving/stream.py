@@ -168,4 +168,5 @@ async def consume_stream(
             final = chunk  # the dendrite yields the header-filled synapse last
     result = assembler.apply(final if final is not None else synapse)
     result.observed_ttft_ms = observed_ttft_ms
+    result.observed_latency_ms = (time.monotonic() - started) * 1000.0  # the miner's stream, not the user's read
     return result

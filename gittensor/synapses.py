@@ -67,6 +67,7 @@ class InferenceSynapse(bt.StreamingSynapse):
     finish_reason: Optional[str] = None
     usage: Optional[Dict[str, int]] = None
     observed_ttft_ms: Optional[float] = None  # set by the validator: wall-clock to the first streamed event
+    observed_latency_ms: Optional[float] = None  # set by the validator: wall-clock to the end of the miner's stream
 
     async def process_streaming_response(self, response):  # aiohttp ClientResponse
         async for chunk in response.content.iter_any():

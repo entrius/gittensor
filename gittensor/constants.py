@@ -286,6 +286,11 @@ BLOCKS_PER_TEMPO = 360
 SERVING_BACKEND_CONCURRENCY = 16  # miner: concurrent backend generations (sparkinfer >= 12954e6 handles 24)
 SERVING_SEEN_NONCES = 10_000  # miner: replay guard size; covers many minutes of validator traffic
 SERVING_MAX_TOKENS = 1024  # hard cap per request (API and miner both enforce)
+# Gateway: total characters across a request's messages (~4 per token). A prompt past the release's context makes
+# the runtime answer 400 — not the miner's fault, but every such request used to land in its window as a miss, so
+# one key holder could take any miner off READY with a few oversized prompts. The cap is set under the blessed
+# release's context; a request the runtime still rejects is checked against the reference before it counts.
+SERVING_MAX_PROMPT_CHARS = 16_000
 SERVING_DB_RETENTION_DAYS = 7  # validator: per-round serving rows older than this are pruned on each write
 SERVING_REQUEST_LOG_SIZE = 5_000  # in-memory ring of recent API/audit requests (telemetry)
 

@@ -93,6 +93,22 @@ def sample_for_audit(
     return [r for i, r in enumerate(served) if i in keep], [r for i, r in enumerate(served) if i not in keep]
 
 
+def reference_rejects(reference: Reference, messages: List[Dict[str, str]]) -> bool:
+    """Would the validator's own reference refuse this prompt (HTTP 4xx on a one-token greedy)? Only a live
+    reference can be asked; anything else, or any other failure, is 'no', so the miss stands."""
+    case_for = getattr(reference, 'case_for', None)
+    if case_for is None:
+        return False
+    try:
+        case_for(messages, 1)
+    except requests.HTTPError as e:
+        status = getattr(getattr(e, 'response', None), 'status_code', 0) or 0
+        return 400 <= status < 500
+    except Exception:
+        return False
+    return False
+
+
 def budget_refusal_plausible(
     state: ServingState, hotkey: str, staked_caller: bool, now: Optional[float] = None
 ) -> bool:
@@ -134,6 +150,8 @@ def verify_served_round(
         if not req.ok and 'budget' in req.detail.lower() and budget_refusal_plausible(state, req.hotkey, staked_caller):
             return None  # this validator over-sent by its own ledger; not the miner's fault
         if not req.ok:
+            if req.source == 'gateway' and reference_rejects(reference, req.messages):
+                return None  # an honest runtime refuses this prompt too (over context, bad shape): not the miner's
             return AuditVerdict(False, 0.0, float('inf'), req.detail or 'no completion')
         for attempt in range(2):  # a connection blip to the reference is retried once before going neutral
             try:
@@ -276,7 +294,9 @@ async def baseline_round(
                 release_id=release.release_id,
                 messages=messages,
                 ok=ok,
-                latency_ms=(time.monotonic() - started) * 1000.0 if ok else None,
+                latency_ms=(getattr(response, 'observed_latency_ms', None) or (time.monotonic() - started) * 1000.0)
+                if ok
+                else None,
                 completion=response.completion if response is not None else None,
                 tokens=list(response.tokens) if response is not None and response.tokens else None,
                 token_ids=list(response.token_ids) if response is not None and response.token_ids else None,

@@ -692,6 +692,90 @@ def test_verified_bytes_must_spell_the_users_completion():
     assert not spells(b'hello', 'hello world')
 
 
+def test_gateway_caps_prompt_size_and_stamps_the_miners_stream_end(monkeypatch):
+    """An oversized prompt is refused at the door (413), never sent to a miner. A request's latency is the end of
+    the miner's stream, not the moment a slow client finished reading it; and a stream the assembler cannot fold
+    releases the miner's in-flight slot like any other miss."""
+    from gittensor.constants import SERVING_MAX_PROMPT_CHARS
+    from gittensor.serving import api as api_module
+
+    good = _echo_release()
+    state = ServingState()
+    state.publish_round([ReadyMiner(uid=1, hotkey='hk1', axon=None, score=1.0, release_id=good.release_id)], {})  # type: ignore[arg-type]
+    app = build_app(state, ServingLoadout(releases=[good]), {'k'}, lambda: object(), 5.0)
+    client = TestClient(app)
+    headers = {'Authorization': 'Bearer k'}
+    big = client.post(
+        '/v1/chat/completions',
+        headers=headers,
+        json={'messages': [{'role': 'user', 'content': 'x' * (SERVING_MAX_PROMPT_CHARS + 1)}]},
+    )
+    assert big.status_code == 413 and state.inflight().get(1, 0) == 0 and not state.drain_served()
+
+    async def slow_reader_dispatch(dendrite, miner, messages, max_tokens, release, timeout, on_event=None):
+        syn = InferenceSynapse(messages=messages, model_id=release.model_id, max_tokens=max_tokens)
+        syn.completion, syn.served_model_id, syn.observed_latency_ms = 'hi', release.model_id, 12.0
+        if on_event is not None:
+            await on_event({'choices': [{'delta': {'content': 'hi'}}], 'model': release.model_id})
+            await on_event(None)
+        return syn
+
+    monkeypatch.setattr(api_module, '_dispatch', slow_reader_dispatch)
+    r = client.post('/v1/chat/completions', headers=headers, json={'messages': MSGS, 'stream': True})
+    assert r.status_code == 200
+    (served,) = state.drain_served()
+    assert served.ok and served.latency_ms == 12.0
+
+    async def broken_dispatch(dendrite, miner, messages, max_tokens, release, timeout, on_event=None):
+        if on_event is not None:
+            await on_event({'choices': [{'delta': {'content': 'hi'}}]})
+        raise AttributeError("'list' object has no attribute 'get'")
+
+    monkeypatch.setattr(api_module, '_dispatch', broken_dispatch)
+    r = client.post('/v1/chat/completions', headers=headers, json={'messages': MSGS, 'stream': True})
+    assert r.status_code == 200
+    (served,) = state.drain_served()
+    assert not served.ok and state.inflight().get(1, 0) == 0
+
+
+def test_runtime_rejected_prompt_is_checked_against_the_reference(monkeypatch):
+    """A gateway request the miner's runtime refused counts as a miss only if the validator's reference would have
+    answered it; when the reference refuses it too (over context) nobody is blamed. Baseline prompts are the
+    validator's own and never need the check."""
+    from types import SimpleNamespace
+
+    import requests
+
+    from gittensor.validator.serving.forward import verify_served_round
+
+    good = _echo_release()
+
+    class Reference(EchoReference):
+        def __init__(self, status):
+            super().__init__(good)
+            self.status = status
+
+        def case_for(self, messages, max_tokens=None):
+            if self.status:
+                err = requests.HTTPError('nope')
+                err.response = SimpleNamespace(status_code=self.status)
+                raise err
+
+    def run(reference, source='gateway'):
+        state = ServingState()
+        summary = {}
+        failed = _served(1, good, ok=False)
+        failed.source = source
+        verify_served_round(state, reference, good, [failed], summary)
+        return summary.get('neutral', 0), summary.get('miss', 0)
+
+    assert run(Reference(400)) == (1, 0)
+    assert run(Reference(500)) == (0, 1)
+    assert run(Reference(None)) == (0, 1)
+    assert run(Reference(400), source='baseline') == (0, 1)
+    assert run(EchoReference(good)) == (0, 1)
+
+
 def test_stream_assembler_collects_token_ids():
     from gittensor.serving.stream import SSEParser, StreamAssembler, result_to_sse
     from gittensor.synapses import InferenceSynapse

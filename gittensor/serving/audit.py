@@ -494,13 +494,19 @@ def verify_served(
 
 def spells(ref_bytes: bytes, completion: str) -> bool:
     """Does the decoded reference text read as ``completion``? Every maximal run of replacement characters in the
-    completion stands for one or more non-ASCII characters (a multibyte character split across streamed chunks);
-    nothing else may differ, so ASCII cannot be added, dropped or changed behind a valid transcript."""
+    completion stands for zero or more non-ASCII characters; nothing else may differ, so ASCII cannot be added,
+    dropped or changed behind a valid transcript.
+
+    Zero, not one: a runtime that splits a multibyte character across two chunks decodes the first chunk on its
+    own and streams U+FFFD for it, then streams the whole character once its bytes are in - so the run is beside
+    the character it stands for rather than in place of it, and the reference has nothing there to consume.
+    Measured on the blessed pin in soak 7: the caller was streamed "**<r>U+2308 m/2 <r>U+2309**" where the
+    reference reads "**U+2308 m/2 U+2309**", and requiring one character per run failed honest miners."""
     text = ref_bytes.decode('utf-8', 'replace')
     if '\ufffd' not in completion:
         return text == completion
     pattern = ''.join(
-        f'[^\\x00-\\x7f]{{1,{len(run)}}}' if run.startswith('\ufffd') else re.escape(run)
+        f'[^\\x00-\\x7f]{{0,{len(run)}}}' if run.startswith('\ufffd') else re.escape(run)
         for run in re.findall('\ufffd+|[^\ufffd]+', completion)
     )
     return re.fullmatch(pattern, text, re.DOTALL) is not None

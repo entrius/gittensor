@@ -2407,3 +2407,23 @@ def test_completion_keeps_the_deltas_when_the_bytes_cannot_be_trusted():
     none_reported.content, none_reported.tokens = 'hello', []
     none_reported.done = True
     assert none_reported.text() == 'hello'
+
+
+def test_spells_accepts_a_character_the_runtime_re_emitted_after_the_damaged_chunk():
+    """Soak 7, blessed pin: the caller was streamed '**<FFFD>⌈m/2<FFFD>⌉**' where the reference reads
+    '**⌈m/2⌉**' — the runtime streamed U+FFFD for the split first chunk and then the whole character. The run
+    sits beside the character it stands for, not in place of it, so honest miners were being missed."""
+    from gittensor.serving.audit import spells
+
+    assert spells('**⌈m/2⌉** and **m** children'.encode(), '**�⌈m/2�⌉** and **m** children')
+    assert spells('a⌈b'.encode(), 'a�b')  # the run does stand in for the character
+    assert spells('a⌈b'.encode(), 'a��b')  # ... or for a run of them
+
+
+def test_spells_still_refuses_altered_or_dropped_ascii():
+    from gittensor.serving.audit import spells
+
+    assert not spells('abc'.encode(), 'a�')  # ASCII dropped behind a replacement run
+    assert not spells('abc'.encode(), 'abd')
+    assert not spells('a⌈bc'.encode(), 'a�bd')  # ASCII changed beside a valid run
+    assert not spells('ab'.encode(), 'a�b�c')  # ASCII added

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import random
 import time
 from types import SimpleNamespace
 from typing import Dict
@@ -208,24 +209,54 @@ def _ready(uid: int, score: float = 1.0) -> ReadyMiner:
 
 
 def test_state_least_inflight_dispatch():
-    state = ServingState()
+    state = ServingState(_rng=random.Random(7))
     assert state.acquire() is None
     state.publish_round([_ready(1, 0.5), _ready(2, 1.0)], {})
     first = state.acquire()
-    assert first is not None and first.uid == 2  # tie on inflight -> higher score
-    second = state.acquire()
-    assert second is not None and second.uid == 1
-    third = state.acquire()
-    assert third is not None and third.uid == 2  # both at 1 inflight -> higher score again
-    state.release(2)
-    state.release(2)
-    again = state.acquire()
-    assert again is not None and again.uid == 2
+    assert first is not None
+    second = state.acquire()  # the idle miner is the only one with the fewest in flight
+    assert second is not None and second.uid != first.uid
+    assert state.inflight() == {1: 1, 2: 1}
+    state.release(first.uid)
+    again = state.acquire()  # ... and again once one of them frees up
+    assert again is not None and again.uid == first.uid
     state.publish_round([_ready(1)], {})
     only = state.acquire()
     assert only is not None and only.uid == 1
     state.record(RequestRecord(ts=0, kind='gateway', uid=1, ok=True, latency_ms=10))
     assert state.snapshot()['gateway_ok'] == 1
+
+
+def test_ready_routing_spreads_instead_of_always_picking_the_top_score():
+    """Soak 7: at one request per 20 s nothing overlaps, so a deterministic tie-break sent every request to one
+    miner - loading it until its own TTFT (1030 ms vs 461 ms) cut its credit to 0.68 while the other idled."""
+    from collections import Counter
+
+    state = ServingState(_rng=random.Random(0))
+    state.publish_round([_ready(1, 0.4), _ready(2, 1.0)], {})
+    picks = Counter()
+    for _ in range(400):
+        miner = state.acquire()
+        assert miner is not None
+        picks[miner.uid] += 1
+        state.release(miner.uid)
+    assert picks[1] > 0 and picks[2] > 0  # neither miner is starved of traffic
+    assert picks[2] > picks[1]  # the better-scoring miner is still preferred
+    assert state.inflight() == {1: 0, 2: 0}
+
+
+def test_ready_routing_is_uniform_when_no_score_separates_them():
+    from collections import Counter
+
+    state = ServingState(_rng=random.Random(1))
+    state.publish_round([_ready(1, 0.0), _ready(2, 0.0)], {})
+    picks = Counter()
+    for _ in range(200):
+        miner = state.acquire()
+        assert miner is not None
+        picks[miner.uid] += 1
+        state.release(miner.uid)
+    assert picks[1] > 0 and picks[2] > 0
 
 
 def test_acquire_filters_by_release():

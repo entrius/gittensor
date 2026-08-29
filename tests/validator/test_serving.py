@@ -2332,3 +2332,47 @@ def test_release_audit_bands_override_the_constants():
         loose.max_mean_abs_logprob_diff,
         loose.max_abs_logprob_diff,
     ).passed
+
+
+def test_completion_is_rebuilt_from_token_bytes_when_a_character_is_split():
+    """A multibyte character split across two tokens reaches the deltas as U+FFFD; the bytes still spell it.
+
+    Shape taken from a live 5090 serving the blessed pin: sparkinfer split U+2308 across two tokens, so the
+    caller received '**�⌈m/2�⌉**' for '**⌈m/2⌉**'.
+    """
+    from gittensor.serving.stream import StreamAssembler
+
+    ceiling, close = '⌈'.encode(), '⌉'.encode()  # 3 bytes each
+    pieces = [b'**', ceiling[:1], ceiling[1:], b'm/2', close[:1], close[1:], b'**']
+    a = StreamAssembler()
+    for raw in pieces:
+        a.content += raw.decode('utf-8', 'replace')  # what the runtime sent as delta text
+        a.tokens.append(raw.decode('utf-8', 'replace'))
+        a.token_bytes.append(list(raw))
+        a.token_logprobs.append(-0.1)
+    a.done = True
+
+    assert '�' in a.content  # the damage, as the runtime emitted it
+    assert a.text() == '**⌈m/2⌉**'
+    assert a.apply(InferenceSynapse(messages=MSGS, model_id='m')).completion == '**⌈m/2⌉**'
+
+
+def test_completion_keeps_the_deltas_when_the_bytes_cannot_be_trusted():
+    from gittensor.serving.stream import StreamAssembler
+
+    partial = StreamAssembler()  # a runtime that reports bytes for only some tokens
+    partial.content, partial.tokens = 'ab', ['a', 'b']
+    partial.token_bytes = [[97]]
+    partial.done = True
+    assert partial.text() == 'ab'
+
+    truncated = StreamAssembler()  # bytes that do not decode: keep what the caller was streamed
+    truncated.content, truncated.tokens = 'a�', ['a', '�']
+    truncated.token_bytes = [[97], [0xE2, 0x88]]
+    truncated.done = True
+    assert truncated.text() == 'a�'
+
+    none_reported = StreamAssembler()  # logprobs off: no bytes at all
+    none_reported.content, none_reported.tokens = 'hello', []
+    none_reported.done = True
+    assert none_reported.text() == 'hello'

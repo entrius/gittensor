@@ -101,11 +101,24 @@ class StreamAssembler:
                 if usage.get(name) is not None:
                     setattr(self, name, float(usage[name]))
 
+    def text(self) -> str:
+        """The completion as the caller should receive it.
+
+        A runtime decodes each token to text on its own, so a multibyte character split across two tokens arrives
+        as U+FFFD in both deltas: a completion reading "between **<r>U+2308 m/2 <r>U+2309**" where the model wrote
+        the ceiling brackets. The per-token bytes do not have that problem, so when every token reported them and
+        they decode cleanly they are the completion; otherwise the deltas stand as sent.
+        """
+        if not self.token_bytes or len(self.token_bytes) != len(self.tokens):
+            return self.content
+        decoded = b''.join(bytes(b) for b in self.token_bytes).decode('utf-8', 'replace')
+        return self.content if '\ufffd' in decoded else decoded
+
     def apply(self, synapse: InferenceSynapse) -> InferenceSynapse:
         """Write the assembled response onto ``synapse``; an unfinished stream leaves ``completion`` None (a miss)."""
         if not self.done:
             return synapse
-        synapse.completion = self.content
+        synapse.completion = self.text()
         synapse.served_model_id = self.model_id
         synapse.tokens = self.tokens or None
         synapse.token_ids = self.token_ids if self.token_ids and len(self.token_ids) == len(self.tokens) else None

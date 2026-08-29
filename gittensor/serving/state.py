@@ -15,6 +15,7 @@ Both threads also append to one request log (telemetry).
 """
 
 import math
+import random
 import threading
 import time
 from collections import deque
@@ -103,6 +104,7 @@ class ServingState:
     _sent_tokens: Dict[str, Deque[Tuple[float, int]]] = field(default_factory=dict)  # hotkey -> (ts, max_tokens)
     attest_round: int = 0
     last_round: dict = field(default_factory=dict)  # audit thread's summary of the last round, for /v1/serving/status
+    _rng: random.Random = field(default_factory=random.Random, repr=False)
     settlement_rounds: int = SERVING_SETTLEMENT_ROUNDS
     last_round_ts: float = 0.0
     ready_ttl_s: float = SERVING_READY_TTL_S
@@ -181,7 +183,12 @@ class ServingState:
             return list(self._ready.values()) if self._fresh() else []
 
     def acquire(self, release_id: Optional[str] = None, probation: bool = False) -> Optional[ReadyMiner]:
-        """Pick the READY miner (for ``release_id`` if given) with the fewest in-flight requests (ties -> higher score).
+        """Pick a READY miner (for ``release_id`` if given) with the fewest in-flight requests.
+
+        Among those, the choice is random, weighted by score: a better miner is sent more, but not everything.
+        Breaking the tie deterministically sends every request to one miner whenever requests do not overlap - at
+        one request per 20 s against sub-second completions, in-flight is always 0 - which loads that miner until
+        its own TTFT, and so its pay, falls, while the miner beside it is barely measured.
 
         With ``probation`` (baseline traffic) an idle probation miner is preferred, at most one request in flight
         each, so unverified miners get exactly the traffic they need to earn a window and no more.
@@ -203,9 +210,20 @@ class ServingState:
             candidates = [u for u, m in self._ready.items() if release_id is None or m.release_id == release_id]
             if not candidates:
                 return None
-            uid = min(candidates, key=lambda u: (self._inflight.get(u, 0), -self._ready[u].score))
+            fewest = min(self._inflight.get(u, 0) for u in candidates)
+            uid = self._weighted_choice([u for u in candidates if self._inflight.get(u, 0) == fewest])
             self._inflight[uid] = self._inflight.get(uid, 0) + 1
             return self._ready[uid]
+
+    def _weighted_choice(self, uids: List[int]) -> int:
+        """One of ``uids``, with probability proportional to score; uniform when no score separates them."""
+        if len(uids) == 1:
+            return uids[0]
+        weights = [max(0.0, self._ready[u].score) for u in uids]
+        total = sum(weights)
+        if total <= 0:
+            return self._rng.choice(uids)
+        return self._rng.choices(uids, weights=weights, k=1)[0]
 
     def release(self, uid: int) -> None:
         with self._lock:

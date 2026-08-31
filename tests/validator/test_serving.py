@@ -2427,3 +2427,50 @@ def test_spells_still_refuses_altered_or_dropped_ascii():
     assert not spells('abc'.encode(), 'abd')
     assert not spells('a⌈bc'.encode(), 'a�bd')  # ASCII changed beside a valid run
     assert not spells('ab'.encode(), 'a�b�c')  # ASCII added
+
+
+def test_store_persists_the_round_timestamp(tmp_path):
+    from gittensor.serving.store import ServingStore
+
+    store = ServingStore(tmp_path / 'serving.db')
+    state = ServingState()
+    state.last_round_ts = 123.5
+    store.save(state)
+    assert store.load(ServingState()).last_round_ts == 123.5
+
+
+def test_seed_ready_from_store_republishes_without_settling():
+    """A restart within the READY TTL republishes the durable verdicts so the gateway does not 429 until the
+    first live round; nothing settles from a seed, and a miner without a measured credit or attest on record
+    waits in probation rather than taking user traffic on an assumed speed."""
+    from gittensor.validator.serving import forward as fwd
+
+    release = _echo_release()
+    loadout = ServingLoadout(releases=[release])
+    axons = [SimpleNamespace(is_serving=True) for _ in range(5)]
+    validator = SimpleNamespace(
+        uid=0,
+        metagraph=SimpleNamespace(
+            hotkeys=['vali', 'hk1', 'hk2', 'hk3', 'hk4'], axons=axons, validator_trust=[0, 0, 0, 0, 0]
+        ),
+    )
+    state = ServingState()
+    for hk in ('hk1', 'hk2', 'hk4'):
+        for _ in range(6):
+            state.audits.record(hk, release.release_id, 1.0)
+    state.audits.strike('hk2', release.release_id)  # quarantined: neither READY nor probation
+    state.last_credit.update({'hk1': 0.9, 'hk2': 0.9})  # hk4 passed its window but has no measured credit
+    state.attest_status['hk1'] = {'passed': True, 'capacity': 2, 'round': 0}
+    state.attest_status['hk4'] = {'passed': True, 'capacity': 1, 'round': 0}
+    state.last_round_ts = time.time() - 60.0
+
+    fwd.seed_ready_from_store(validator, state, loadout=loadout)  # type: ignore[arg-type]
+    ready = state.ready_miners()
+    assert [(m.uid, m.release_id) for m in ready] == [(1, release.release_id)]
+    assert ready[0].score == pytest.approx(1.8)  # the last measured credit times the attested cards
+    assert state.snapshot()['probation_uids'] == [3, 4]
+    assert state.settled_scores() == {}  # a seed pays nothing
+
+    state.last_round_ts = time.time() - state.ready_ttl_s - 1.0
+    fwd.seed_ready_from_store(validator, state, loadout=loadout)  # type: ignore[arg-type]  # past the TTL: no trust
+    assert state.ready_miners() == []

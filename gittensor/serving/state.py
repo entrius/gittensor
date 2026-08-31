@@ -135,6 +135,20 @@ class ServingState:
             self.last_round = dict(summary or {})
             self.last_round_ts = time.time()
 
+    def seed_ready(self, miners: List[ReadyMiner], probation: Optional[List[ReadyMiner]] = None) -> None:
+        """Startup: republish the READY set derived from the durable store, without settling a score round.
+
+        Routing eligibility only — ``_history`` is untouched, so nothing is paid for a round this validator
+        did not run, and ``last_round_ts`` keeps the restored value: the TTL counts from the round that
+        actually measured these miners, so trust never outlives what an uninterrupted validator would have had.
+        """
+        with self._lock:
+            self._ready = {m.uid: m for m in miners}
+            self._probation = {m.uid: m for m in (probation or []) if m.uid not in self._ready}
+            live = set(self._ready) | set(self._probation)
+            self._inflight = {uid: self._inflight.get(uid, 0) for uid in live}
+            self.last_round = {'seeded': True, 'ready': len(self._ready), 'probation': len(self._probation)}
+
     def scores_for(self, hotkeys: Sequence[str]) -> Dict[int, float]:
         """Trailing-window settled scores keyed by current UID (missing rounds count 0); a UID whose hotkey
         changed since the rounds carries nothing over."""

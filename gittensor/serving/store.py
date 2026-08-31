@@ -75,6 +75,7 @@ class ServingStore:
                 [(uuid, hk, rnd) for uuid, (hk, rnd) in state.uuid_owner.items()],
             )
             db.execute('INSERT INTO meta VALUES (?, ?)', ('attest_round', str(int(state.attest_round))))
+            db.execute('INSERT INTO meta VALUES (?, ?)', ('last_round_ts', repr(float(state.last_round_ts))))
             db.executemany(
                 'INSERT INTO audit_values VALUES (?, ?, ?, ?)',
                 [(hk, rid, i, x) for hk, rid, xs in audits['values'] for i, x in enumerate(xs)],
@@ -120,6 +121,8 @@ class ServingStore:
                 for key, value in db.execute('SELECT key, value FROM meta'):
                     if key == 'attest_round':
                         state.attest_round = int(value)
+                    elif key == 'last_round_ts':
+                        state.last_round_ts = float(value)
                 for hk, credit in db.execute('SELECT hotkey, credit FROM last_credit'):
                     state.last_credit[str(hk)] = float(credit)
         except sqlite3.Error:

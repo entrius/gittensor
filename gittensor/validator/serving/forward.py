@@ -64,7 +64,7 @@ from gittensor.serving.state import ReadyMiner, RequestRecord, ServedRequest, Se
 from gittensor.serving.store import ServingStore
 from gittensor.serving.stream import consume_stream
 from gittensor.synapses import InferenceSynapse
-from gittensor.validator.serving.attest import attest_round
+from gittensor.validator.serving.attest import attest_round, status_capacity
 from gittensor.validator.serving.persist import ServingRoundStorage
 from gittensor.validator.serving.scoring import request_speed
 from gittensor.validator.utils.config import SERVING_PAY_CAP_WITHOUT_PRICING, STORE_DB_RESULTS
@@ -471,6 +471,52 @@ async def audit_round(
     return scores
 
 
+def seed_ready_from_store(validator: 'Validator', state: ServingState, loadout=None) -> None:
+    """Startup: republish the READY set from the durable verdicts so a restart does not 429 the gateway.
+
+    Routing eligibility only — no scores settle from a seed, so nothing is paid for a round this validator did
+    not run. ``last_round_ts`` comes restored from the store and is left alone: a restart longer than the READY
+    TTL seeds nothing and the gateway waits for a live round, exactly as if the validator had never stopped.
+    """
+    if time.time() - state.last_round_ts > state.ready_ttl_s:
+        return
+    loadout = loadout or load_serving_loadout()
+    serving = get_serving_axons(validator)
+    active = [(uid, hotkey, axon) for uid, hotkey, axon in serving if not is_dormant(state, hotkey)]
+    best: Dict[str, Tuple[float, str]] = {}
+    quarantined: set[str] = set()
+    for release in loadout.releases:
+        for _, hotkey, _ in active:
+            window = state.audits.verdict(hotkey, release.release_id)
+            if window.quarantined_until > 0.0:
+                quarantined.add(hotkey)
+                continue
+            if not window.passed:
+                continue
+            # No measured credit on record pays nothing: the miner waits one live round in probation rather
+            # than taking user traffic on an assumed speed.
+            score = state.last_credit.get(hotkey, 0.0) * status_capacity(
+                state.attest_status.get(hotkey), state.attest_round
+            )
+            if score > best.get(hotkey, (0.0, ''))[0]:
+                best[hotkey] = (score, release.release_id)
+    ready: List[ReadyMiner] = []
+    probation: List[ReadyMiner] = []
+    fallback_release = loadout.primary.release_id
+    for uid, hotkey, axon in active:
+        score, release_id = best.get(hotkey, (0.0, ''))
+        if score > 0.0:
+            ready.append(ReadyMiner(uid=uid, hotkey=hotkey, axon=axon, score=score, release_id=release_id))
+        elif hotkey not in quarantined:
+            probation.append(ReadyMiner(uid=uid, hotkey=hotkey, axon=axon, score=0.0, release_id=fallback_release))
+    if ready or probation:
+        state.seed_ready(ready, probation)
+        bt.logging.info(
+            f'Serving: seeded READY {sorted(m.uid for m in ready)} · probation {sorted(m.uid for m in probation)} '
+            f'from the durable store ({time.time() - state.last_round_ts:.0f}s since its last round)'
+        )
+
+
 def update_dormancy(
     state: ServingState, serving: Sequence[Tuple[int, str, bt.AxonInfo]], served: Sequence[ServedRequest]
 ) -> None:
@@ -548,6 +594,10 @@ class ServingAuditThread:
         # connector caps a session at 100 connections, which would queue late miners on the validator and skew
         # their measured throughput. Uncapped connector for the audit dendrite only.
         dendrite._session = loop.run_until_complete(_unlimited_session())
+        try:
+            seed_ready_from_store(self.validator, self.state)
+        except Exception as e:  # a seed is best-effort: the first live round publishes either way
+            bt.logging.warning(f'Serving: could not seed READY from the durable store ({e!r})')
         # Validators audit on the same interval; a per-hotkey phase offset keeps their attest cohorts from landing on a
         # miner at the same instant and each reading half a card.
         self._stop.wait(probe_phase_offset(self.validator.wallet.hotkey.ss58_address, self.interval_s))

@@ -64,7 +64,10 @@ for p in json.load(sys.stdin):
     items = ports.items() if isinstance(ports, dict) else [(x.get("internal") or x.get("internal_port"), x.get("external") or x.get("external_port")) for x in ports]
     for internal, external in items:
         if str(internal) == port and external:
-            print(f"http://{p.get(\"ssh_ip\") or p.get(\"ip\")}:{external}")
+            # No backslashes or nested double quotes in the f-string: this program is single-quoted into
+            # python3 -c, and a backslash inside an f-string expression is a SyntaxError before 3.12.
+            host = p.get("ssh_ip") or p.get("ip")
+            print(f"http://{host}:{external}")
 ' "$1" "$2" || true
 }
 

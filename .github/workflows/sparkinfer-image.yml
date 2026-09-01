@@ -145,7 +145,12 @@ jobs:
       - name: Rent, boot, check, tear down
         env:
           CONFORMANCE_RENT_WAIT_MIN: "20"
-        run: scripts/serving_conformance_on_lium.sh "$TAG" "conformance-$REF"
+        # lium registers ~/.ssh/id_ed25519 with every pod it rents (the SDK reads only that path); the checker's
+        # ssh tunnel into the runtime pod uses the same key.
+        run: |
+          mkdir -p -m 700 ~/.ssh
+          [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -N '' -q -f ~/.ssh/id_ed25519
+          scripts/serving_conformance_on_lium.sh "$TAG" "conformance-$REF"
 
       - name: Upload the report
         if: always()
@@ -163,12 +168,13 @@ jobs:
              | .releases[0].runtime_image = $image
              | .releases[0].speed = ((.releases[0].speed // {}) + {
                  single_stream_decode_tps: $speed[0].single_stream_decode_tps,
+                 aggregate_decode_tps: $speed[0].aggregate_decode_tps,
                  decode_per_request: $speed[0].decode_per_request,
                  measured_on: ($pin + " on a rented RTX 5090, actions run " + $run)
                })
              | .releases[0].attest = ((.releases[0].attest // {}) + {
                  iters: ($speed[0].attest.attest_iters // 3),
-                 vram_model_reserved_bytes: ($speed[0].attest.vram_model_reserved_bytes // 24000000000),
+                 vram_model_reserved_bytes: ($speed[0].attest.vram_model_reserved_bytes // .releases[0].attest.vram_model_reserved_bytes // 24000000000),
                  reference_wall_ms: $speed[0].attest.attest_ref_wall_ms
                })' \
             gittensor/validator/weights/serving_loadout.json > /tmp/loadout.json

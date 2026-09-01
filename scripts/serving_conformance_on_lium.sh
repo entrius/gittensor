@@ -24,7 +24,11 @@ RENT_WAIT_MIN="${CONFORMANCE_RENT_WAIT_MIN:-60}"
 BOOT_WAIT_MIN="${CONFORMANCE_BOOT_WAIT_MIN:-45}"
 mkdir -p "$OUT"
 
-cleanup() { lium rm "$POD" -y >/dev/null 2>&1 || true; lium rm "$ATTEST_POD" -y >/dev/null 2>&1 || true; }
+TUNNEL_PID=""
+cleanup() {
+  [ -n "$TUNNEL_PID" ] && kill "$TUNNEL_PID" >/dev/null 2>&1 || true
+  lium rm "$POD" -y >/dev/null 2>&1 || true; lium rm "$ATTEST_POD" -y >/dev/null 2>&1 || true
+}
 trap cleanup EXIT
 
 # `lium ls --gpu X --format json` returns [] even when cards are listed; filter the full listing instead.
@@ -32,7 +36,13 @@ trap cleanup EXIT
 # a bare .id there indexes a string and kills the run — and only ever when a matching card IS listed.
 # Prints the cheapest free 1x$GPU executor id not in $1 (space-separated ids already taken).
 free_node() {
-  lium ls --format json 2>/dev/null | jq -r --arg gpu "RTX$GPU" --arg taken " $1 " \
+  local listing
+  listing=$(lium ls --format json 2>/dev/null | sed -n '/^[[{]/,$p' || true)
+  if ! printf '%s\n' "$listing" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    echo "lium ls returned no JSON listing this minute, retrying: ${listing:0:120}" >&2
+    return 0
+  fi
+  printf '%s\n' "$listing" | jq -r --arg gpu "RTX$GPU" --arg taken " $1 " \
     '[.[] | select(type == "object") | . as $n
        | select(($n.id | type) == "string" and $n.gpu_type == $gpu and $n.gpu_count == 1
                 and ($n.vram_gb // 0) >= 30 and ($n.download_mbps // 0) >= 150
@@ -86,8 +96,32 @@ echo "runtime up at $BASE, attest at $ATTEST"
 curl -s "$ATTEST/info" | tee "$OUT/attest-info.json"; echo
 curl -s "$BASE/v1/models" | tee "$OUT/models.json"; echo
 
+# The checker talks to the runtime through an ssh tunnel, not the pod's public port: Lium's port proxy caps
+# concurrent connections per pod (~5 on some hosts), which serialises the 16-wide overload and speed bursts and
+# turns them into a false R6 failure and a straggler-dominated aggregate_decode_tps. One ssh connection carries
+# every stream, so the card is measured, not the proxy.
+SSH_URL=$(pod_url "$POD" 22); SSH_HP=${SSH_URL#http://}; SSH_HOST=${SSH_HP%%:*}; SSH_PORT=${SSH_HP##*:}
+[ -n "$SSH_HOST" ] && [ -n "$SSH_PORT" ] || { echo "runtime pod has no public ssh port"; lium ps; exit 2; }
+SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=15
+          -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -p "$SSH_PORT")
+TUNNEL="http://127.0.0.1:18080"
+for ((i = 0; i < 12; i++)); do
+  ssh "${SSH_OPTS[@]}" -N -L 18080:127.0.0.1:8080 "root@$SSH_HOST" 2>/dev/null &
+  TUNNEL_PID=$!
+  for ((j = 0; j < 5; j++)); do
+    sleep 2
+    curl -sf --max-time 5 "$TUNNEL/v1/models" >/dev/null 2>&1 && break 2
+    kill -0 "$TUNNEL_PID" 2>/dev/null || break
+  done
+  kill "$TUNNEL_PID" >/dev/null 2>&1 || true; TUNNEL_PID=""
+  sleep 10
+done
+[ -n "$TUNNEL_PID" ] && curl -sf --max-time 5 "$TUNNEL/v1/models" >/dev/null \
+  || { echo "ssh tunnel to root@$SSH_HOST:$SSH_PORT never carried /v1/models; not measuring through the port proxy"; exit 2; }
+echo "checker reaches the runtime through ssh root@$SSH_HOST:$SSH_PORT (tunnel $TUNNEL)"
+
 set +e
-uv run python scripts/check_serving_runtime.py --base-url "$BASE" --model-id "$MODEL_ID" --attest-url "$ATTEST" \
+uv run python scripts/check_serving_runtime.py --base-url "$TUNNEL" --model-id "$MODEL_ID" --attest-url "$ATTEST" \
   --determinism-count 30 --repeat 3 --parallel 16 --speed-json "$OUT/speed.json" 2>&1 | tee "$OUT/conformance.txt"
 RC=${PIPESTATUS[0]}
 set -e

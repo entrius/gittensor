@@ -25,7 +25,6 @@ CREATE TABLE IF NOT EXISTS quarantine (hotkey TEXT, release_id TEXT, until REAL,
 CREATE TABLE IF NOT EXISTS round_history (hotkey TEXT, seq INTEGER, score REAL, PRIMARY KEY (hotkey, seq));
 CREATE TABLE IF NOT EXISTS dormant (hotkey TEXT PRIMARY KEY, rounds INTEGER);
 CREATE TABLE IF NOT EXISTS attest (hotkey TEXT PRIMARY KEY, status TEXT);
-CREATE TABLE IF NOT EXISTS uuid_owner (uuid TEXT PRIMARY KEY, hotkey TEXT, round INTEGER);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS last_credit (hotkey TEXT PRIMARY KEY, credit REAL);
 """
@@ -64,16 +63,11 @@ class ServingStore:
                 'round_history',
                 'dormant',
                 'attest',
-                'uuid_owner',
                 'meta',
                 'last_credit',
             ):
                 db.execute(f'DELETE FROM {table}')
             db.executemany('INSERT INTO last_credit VALUES (?, ?)', list(state.last_credit.items()))
-            db.executemany(
-                'INSERT INTO uuid_owner VALUES (?, ?, ?)',
-                [(uuid, hk, rnd) for uuid, (hk, rnd) in state.uuid_owner.items()],
-            )
             db.execute('INSERT INTO meta VALUES (?, ?)', ('attest_round', str(int(state.attest_round))))
             db.execute('INSERT INTO meta VALUES (?, ?)', ('last_round_ts', repr(float(state.last_round_ts))))
             db.executemany(
@@ -116,8 +110,6 @@ class ServingStore:
                     state.dormant_rounds[hk] = int(rounds)
                 for hk, st in db.execute('SELECT hotkey, status FROM attest'):
                     state.attest_status[hk] = json.loads(st)
-                for uuid, hk, rnd in db.execute('SELECT uuid, hotkey, round FROM uuid_owner'):
-                    state.uuid_owner[str(uuid)] = (str(hk), int(rnd))
                 for key, value in db.execute('SELECT key, value FROM meta'):
                     if key == 'attest_round':
                         state.attest_round = int(value)

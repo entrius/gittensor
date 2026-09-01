@@ -10,8 +10,10 @@ to the audit loop (``enqueue_served`` / ``drain_served``) to be verified against
 the reference: served traffic *is* the audit. Miners that are not yet READY sit
 in *probation* and only receive traffic from baseline keys, so a new miner can
 earn a window without a real user ever hitting an unverified card. Per-round
-scores are settled over the trailing ``SERVING_SETTLEMENT_ROUNDS`` rounds.
-Both threads also append to one request log (telemetry).
+pay scores (served tokens in card-equivalents) are settled over the trailing
+``SERVING_SETTLEMENT_ROUNDS`` rounds; a READY miner's ``score`` is its routing
+weight (speed credit), separate from pay. Both threads also append to one
+request log (telemetry).
 """
 
 import math
@@ -33,7 +35,7 @@ class ReadyMiner:
     uid: int
     hotkey: str
     axon: bt.AxonInfo
-    score: float
+    score: float  # routing weight: the last measured speed credit
     release_id: str = ''  # release this miner passed audits for
 
 
@@ -99,7 +101,6 @@ class ServingState:
     _history: Dict[str, Deque[float]] = field(default_factory=dict)  # hotkey -> last N round scores
     dormant_rounds: Dict[str, int] = field(default_factory=dict)  # audit thread only: hotkey -> rounds w/o completion
     attest_status: Dict[str, dict] = field(default_factory=dict)  # audit thread only: hotkey -> last attest verdict
-    uuid_owner: Dict[str, Tuple[str, int]] = field(default_factory=dict)  # GPU UUID -> (hotkey, round last seen)
     last_credit: Dict[str, float] = field(default_factory=dict)  # audit thread only: hotkey -> last measured credit
     _sent_tokens: Dict[str, Deque[Tuple[float, int]]] = field(default_factory=dict)  # hotkey -> (ts, max_tokens)
     attest_round: int = 0
@@ -116,7 +117,7 @@ class ServingState:
         probation: Optional[List[ReadyMiner]] = None,
         summary: Optional[dict] = None,
     ) -> None:
-        """Audit thread: publish the READY and probation sets for the gateway and settle this round's scores.
+        """Audit thread: publish the READY and probation sets for the gateway and settle this round's pay scores.
 
         Every hotkey with history and no score this round records a 0, so a miner that vanishes stops earning
         within one settlement window.

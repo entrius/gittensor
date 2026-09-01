@@ -10,6 +10,7 @@ persist = pytest.importorskip('gittensor.validator.serving.persist')
 forward = pytest.importorskip('gittensor.validator.serving.forward')
 state_module = pytest.importorskip('gittensor.serving.state')
 classes = pytest.importorskip('gittensor.classes')
+SERVING_EMISSION_SHARE_CAP = pytest.importorskip('gittensor.constants').SERVING_EMISSION_SHARE_CAP
 loadout = pytest.importorskip('gittensor.serving.loadout')
 
 ROUND = {
@@ -36,7 +37,8 @@ ROUND = {
             'credit': 1.0,
             'ttft_ms': 48.3,
             'decode_tps': 190.0,
-            'capacity': 1.0,
+            'tokens': 84_000,
+            'attested': True,
             'score': 1.0,
             'last_miss': '',
             'status': 'ready',
@@ -53,7 +55,8 @@ ROUND = {
             'credit': 0.0,
             'ttft_ms': None,
             'decode_tps': None,
-            'capacity': 0.0,
+            'tokens': 0,
+            'attested': False,
             'score': 0.0,
             'last_miss': 'tokenization mismatch (3 vs 4)',
             'status': 'quarantined',
@@ -76,16 +79,17 @@ def test_round_rows_shape_and_pricing():
     summary, miners = persist.round_rows('vali', ts, ROUND, {'hk16': 0.5, 'hk27': 1 / 12}, pricing)
     assert summary[:3] == ('vali', ts, 4)
     assert summary[12] == pytest.approx(0.5 + 1 / 12)  # card equivalents = settled sum
-    assert 0 < summary[13] <= 0.035  # priced share inside the cap
+    assert 0 < summary[13] <= SERVING_EMISSION_SHARE_CAP  # priced share inside the cap
     assert summary[14:16] == (100.0, 1.0)
-    assert summary[16:18] == (0.70, 0.035)  # economics ride along so das never hard-codes them
+    assert summary[16:18] == (0.70, SERVING_EMISSION_SHARE_CAP)  # economics ride along so das never hard-codes them
     assert summary[18:] == (None,) * 7
     assert len(miners) == 2
     ready = next(m for m in miners if m[2] == 16)
     assert ready[5] == 'qwen' and ready[6] == 'ready'  # release_id defaults to model_id
     assert ready[13] == 48.3 and ready[14] == 190.0 and ready[17] == 0.5 and ready[18] is None
+    assert ready[15] == 1.0  # the capacity column now carries admission only
     quarantined = next(m for m in miners if m[2] == 27)
-    assert quarantined[6] == 'quarantined'
+    assert quarantined[6] == 'quarantined' and quarantined[15] == 0.0
     assert quarantined[10] == dt.datetime.fromtimestamp(1_800_000_000.0, dt.timezone.utc)
     assert quarantined[18].startswith('tokenization mismatch')
 
@@ -123,7 +127,7 @@ def test_round_rows_report_the_share_that_will_actually_be_paid():
     summary, _ = persist.round_rows('vali', ts, ROUND, {'hk16': 1.0}, None)
     assert summary[13] == 0.0 and summary[14] is None and summary[15] is None  # unpriced: nothing is paid
     summary, _ = persist.round_rows('vali', ts, ROUND, {'hk16': 1.0}, None, None, True)
-    assert summary[13] == 0.035  # testnet: the cap, matching what blend_emission_pools pays
+    assert summary[13] == SERVING_EMISSION_SHARE_CAP  # testnet: the cap, matching what blend_emission_pools pays
 
 
 def test_store_round_writes_and_prunes():
@@ -160,9 +164,9 @@ def test_store_round_skips_before_first_round():
 
 
 def test_miner_status():
-    assert forward.miner_status({'score': 0.9}) == 'ready'
-    assert forward.miner_status({'score': 0.0, 'quarantined_until': 5.0}) == 'quarantined'
-    assert forward.miner_status({'score': 0.0, 'quarantined_until': 0.0}) == 'probation'
+    assert forward.miner_status({'attested': True, 'score': 0.0}) == 'ready'  # admitted, nothing served yet
+    assert forward.miner_status({'attested': False, 'quarantined_until': 5.0}) == 'quarantined'
+    assert forward.miner_status({'attested': False, 'quarantined_until': 0.0}) == 'probation'
 
 
 def test_settled_scores():

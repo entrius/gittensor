@@ -1,31 +1,25 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-"""Hardware attestation of serving miners (sub-subnet B beta).
+"""Hardware attestation of serving miners (sub-subnet B beta): admission, pass/fail per hotkey.
 
-Each round the least recently challenged half of the READY miners (plus every miner that has never passed and every
-miner that failed last round) is sent one fresh ``AttestSynapse`` — same seed, same instant. The miner's attest
-sidecar (docker/attest, image ``entrius/gt-attest``) answers with ``gt_attest`` on every GPU it can see, all at once:
-device ``i`` fills its free VRAM with a seeded stream and runs a deterministic fp32 GEMM chain on ``seed + i``,
-returning the GPU's UUID, bytes filled, a SHA-256 digest and wall time. The validator asks its own reference sidecar
-(same image) for index 0 first, and for each further index a miner claims, so every expected digest comes from an
-honest 5090 — no GPU code runs in the validator process.
+Attestation answers one question — is there a real 5090 running the real model behind this hotkey? — and nothing
+here counts cards: pay is per token served (forward.py), and a card cannot serve more tokens than its silicon
+decodes. Each round the least recently challenged half of the READY miners (plus every miner that has never passed
+and every miner that failed last round) is sent one fresh ``AttestSynapse``. The miner's attest sidecar
+(docker/attest, image ``entrius/gt-attest``) answers with ``gt_attest`` on every GPU it can see, all at once: device
+``i`` fills its free VRAM with a seeded stream and runs a deterministic fp32 GEMM chain on ``seed + i``, returning the
+GPU's UUID, bytes filled, a SHA-256 digest and wall time. The validator asks its own reference sidecar (same image)
+for index 0 first, and for each further index a miner claims, so every expected digest comes from an honest 5090 —
+no GPU code runs in the validator process.
 
 What the validator can measure itself is the digest and the round trip; every other field of a card's report is the
 miner's own number. So a card PASSES when its digest matches its index's, its wall is within
 ``SERVING_ATTEST_BUDGET_RATIO`` x the reference's, most of its free VRAM was filled and the model was resident before
-the fill — and the whole reply arrived within that budget plus ``SERVING_ATTEST_RTT_SLACK_MS``. Cards run in parallel
-on an honest box, so N cards take one card's wall; one card faking N runs the chain N times and misses the round trip.
-A hotkey's ``capacity`` is its passing cards (at most ``SERVING_ATTEST_MAX_CARDS``).
-
-Overlap is the mechanism against sharing: two hotkeys fronting one card cannot both fill its free VRAM at the same
-instant and their chains run ~2x slower, so a sharing pair is caught within a few rounds (P = fraction^2 per round).
-A GPU UUID belongs to the first hotkey that passed with it; another hotkey reporting the same UUID loses that card
-while the holder keeps it (a claim lapses after ``SERVING_ATTEST_UUID_MEMORY_ROUNDS`` unrenewed rounds). Two hotkeys
-claiming an unowned UUID in the same round both fail it. A failure is never a strike: capacity 0 for the round,
-re-challenged next round. Miners not in the cohort keep their last verdict until it is older than the memory window;
-a miner with no verdict yet is not READY (admission). A fault in this module is neutral for the cohort, never fatal
-for the round.
+the fill — and the whole reply arrived within that budget plus ``SERVING_ATTEST_RTT_SLACK_MS``. A hotkey passes with
+any passing card. A failure is never a strike: not READY for the round, re-challenged next round. Miners not in the
+cohort keep their last verdict until it is older than ``SERVING_ATTEST_MEMORY_ROUNDS``; a miner with no verdict yet
+is not READY. A fault in this module is neutral for the cohort, never fatal for the round.
 """
 
 import asyncio
@@ -42,11 +36,11 @@ from gittensor.constants import (
     SERVING_ATTEST_COHORT_FRACTION,
     SERVING_ATTEST_ITERS,
     SERVING_ATTEST_MAX_CARDS,
+    SERVING_ATTEST_MEMORY_ROUNDS,
     SERVING_ATTEST_MIN_FILL_RATIO,
     SERVING_ATTEST_MODEL_RESIDENT_RATIO,
     SERVING_ATTEST_RTT_SLACK_MS,
     SERVING_ATTEST_TIMEOUT,
-    SERVING_ATTEST_UUID_MEMORY_ROUNDS,
     SERVING_VRAM_MODEL_RESERVED_BYTES,
 )
 from gittensor.serving.loadout import ServingRelease
@@ -84,10 +78,6 @@ class AttestVerdict:
     cards: List[CardVerdict] = field(default_factory=list)
 
     @property
-    def capacity(self) -> int:
-        return sum(1 for c in self.cards if c.passed)
-
-    @property
     def uuids(self) -> List[str]:
         return [c.uuid for c in self.cards if c.passed and c.uuid]
 
@@ -97,7 +87,6 @@ class AttestVerdict:
             'reason': self.reason,
             'uuid': self.uuid,
             'uuids': self.uuids,
-            'capacity': self.capacity,
             'cards': [c.as_dict() for c in self.cards],
             'wall_ms': self.wall_ms,
             'filled_bytes': self.filled_bytes,
@@ -106,17 +95,14 @@ class AttestVerdict:
         }
 
 
-def status_capacity(
-    status: Optional[dict], round_no: Optional[int] = None, memory_rounds: int = SERVING_ATTEST_UUID_MEMORY_ROUNDS
-) -> int:
-    """Cards a stored attest status pays for (statuses persisted before ``capacity`` existed count one card). A
-    verdict older than ``memory_rounds`` — a miner the reference could not re-challenge for that long — pays nothing
-    until it is renewed."""
+def status_passed(
+    status: Optional[dict], round_no: Optional[int] = None, memory_rounds: int = SERVING_ATTEST_MEMORY_ROUNDS
+) -> bool:
+    """Does a stored attest status still admit the hotkey? A verdict older than ``memory_rounds`` — a miner the
+    reference could not re-challenge for that long — admits nothing until it is renewed."""
     if not status or not status.get('passed'):
-        return 0
-    if round_no is not None and round_no - int(status.get('round', round_no)) > memory_rounds:
-        return 0
-    return int(status.get('capacity', 1))
+        return False
+    return round_no is None or round_no - int(status.get('round', round_no)) <= memory_rounds
 
 
 def choose_cohort(
@@ -126,8 +112,7 @@ def choose_cohort(
     membership is still unpredictable), plus every never-attested hotkey and every last-round failure.
 
     Pure random sampling let one hotkey go unchallenged for many rounds (soak 6: the other of two was drawn three
-    rounds running); with recency first, every hotkey is challenged at least every ``1/fraction`` rounds while a
-    sharing pair still lands together within a few rounds.
+    rounds running); with recency first, every hotkey is challenged at least every ``1/fraction`` rounds.
     """
     rng = rng or secrets.SystemRandom()
     pool = list(hotkeys)
@@ -235,9 +220,9 @@ def judge(
     max_cards: int = SERVING_ATTEST_MAX_CARDS,
 ) -> AttestVerdict:
     """Every card the sidecar reported is judged on its own against its index's expected digest; the hotkey passes
-    with any passing card and its capacity is the count. ``elapsed_ms`` is the validator's own round trip for the
-    whole reply: past one card's budget plus the slack, no card passes, however each card's own wall reads. The
-    reason names the first failing card when one fails."""
+    with any passing card. ``elapsed_ms`` is the validator's own round trip for the whole reply: past one card's
+    budget plus the slack, no card passes, however each card's own wall reads. The reason names the first failing
+    card when one fails."""
     if response is None or response.devices is None:
         detail = getattr(response, 'error', None) or getattr(
             getattr(response, 'dendrite', None), 'status_message', None
@@ -308,61 +293,6 @@ async def send_challenges(
     return {hotkey: resp for (_, hotkey, _), resp in zip(targets, results)}
 
 
-def claim_uuids(
-    state: ServingState,
-    judged: Dict[str, AttestVerdict],
-    round_no: int,
-    memory_rounds: int = SERVING_ATTEST_UUID_MEMORY_ROUNDS,
-) -> Dict[str, List[str]]:
-    """Settle GPU ownership for this round's passing cards; hotkey -> UUIDs it loses.
-
-    A UUID belongs to the first hotkey that passed with it and stays its own while the claim is renewed within
-    ``memory_rounds``. Another hotkey reporting the holder's UUID loses that card; the holder keeps it — so a card
-    cannot be taken from a miner by naming its UUID. Two hotkeys naming an unowned UUID in the same round are the
-    sharing case the overlap is there to catch: both lose it.
-    """
-    for uuid, (owner, seen) in list(state.uuid_owner.items()):
-        if round_no - seen > memory_rounds:
-            del state.uuid_owner[uuid]
-    claims: Dict[str, List[str]] = {}
-    for hk in sorted(judged):
-        for uuid in judged[hk].uuids:
-            claims.setdefault(uuid, []).append(hk)
-    lost: Dict[str, List[str]] = {}
-    for uuid, hks in sorted(claims.items()):
-        owner = state.uuid_owner.get(uuid)
-        if owner is not None and owner[0] in hks:
-            keep: Optional[str] = owner[0]
-        elif len(hks) == 1 and owner is None:
-            keep = hks[0]
-        else:
-            keep = None  # unowned and contested this round (sharing), or owned by someone not answering now
-        if keep is not None:
-            state.uuid_owner[uuid] = (keep, round_no)
-        for hk in hks:
-            if hk != keep:
-                lost.setdefault(hk, []).append(uuid)
-    return lost
-
-
-def _apply_lost_cards(state: ServingState, hk: str, uuids: List[str]) -> None:
-    st = dict(state.attest_status.get(hk, {}))
-    cards = []
-    for card in st.get('cards', []):
-        if card.get('passed') and card.get('uuid') in uuids:
-            card = {**card, 'passed': False, 'reason': f'duplicate GPU {card.get("uuid")} (held by another hotkey)'}
-        cards.append(card)
-    passing = [c for c in cards if c.get('passed')]
-    st.update(
-        cards=cards,
-        uuids=[c['uuid'] for c in passing if c.get('uuid')],
-        capacity=len(passing),
-        passed=bool(passing),
-        reason=f'duplicate GPU {uuids[0]} (held by another hotkey)' if not passing else st.get('reason', 'ok'),
-    )
-    state.attest_status[hk] = st
-
-
 async def attest_round(
     state: ServingState,
     dendrite: bt.Dendrite,
@@ -370,20 +300,19 @@ async def attest_round(
     release: ServingRelease,
     rng=None,
     timeout: float = SERVING_ATTEST_TIMEOUT,
-) -> Dict[str, int]:
-    """Challenge this round's cohort, update ``state.attest_status``; return hotkey -> attested cards (0 = not
-    attested) for every candidate.
+) -> Dict[str, bool]:
+    """Challenge this round's cohort, update ``state.attest_status``; return hotkey -> admitted for every candidate.
 
-    Without an ``attest_reference_url`` (localnet / echo) attestation is off and every candidate counts as one card.
+    Without an ``attest_reference_url`` (localnet / echo) attestation is off and every candidate is admitted.
     If the reference itself fails, or anything in here does, nothing changes this round (neutral).
     """
     round_no = state.attest_round = getattr(state, 'attest_round', 0) + 1
     if not release.attest_reference_url:
-        return {hk: 1 for _, hk, _ in candidates}
+        return {hk: True for _, hk, _ in candidates}
     hotkeys = [hk for _, hk, _ in candidates]
 
-    def carried() -> Dict[str, int]:
-        return {hk: status_capacity(state.attest_status.get(hk), round_no) for hk in hotkeys}
+    def carried() -> Dict[str, bool]:
+        return {hk: status_passed(state.attest_status.get(hk), round_no) for hk in hotkeys}
 
     try:
         return await _attest_round(state, dendrite, candidates, release, round_no, rng, timeout)
@@ -400,7 +329,7 @@ async def _attest_round(
     round_no: int,
     rng,
     timeout: float,
-) -> Dict[str, int]:
+) -> Dict[str, bool]:
     hotkeys = [hk for _, hk, _ in candidates]
     cohort = set(choose_cohort(hotkeys, state.attest_status, rng=rng))
     seed = secrets.randbits(62)
@@ -409,7 +338,7 @@ async def _attest_round(
         expected0, ref_wall = await asyncio.to_thread(reference_challenge, release, seed, iters, timeout)
     except Exception as e:
         bt.logging.error(f'Serving: reference attestation failed, attest neutral this round: {e!r}')
-        return {hk: status_capacity(state.attest_status.get(hk), round_no) for hk in hotkeys}
+        return {hk: status_passed(state.attest_status.get(hk), round_no) for hk in hotkeys}
     targets = [(uid, hk, axon) for uid, hk, axon in candidates if hk in cohort]
     responses = await send_challenges(dendrite, targets, seed, iters, timeout)
     # One reference digest per device index any miner claimed (index i answers seed + i), at most MAX_CARDS.
@@ -422,20 +351,14 @@ async def _attest_round(
             bt.logging.warning(f'Serving: reference attestation for device index {i} failed: {e!r}')
             digests[i] = None
     now = time.time()
-    judged: Dict[str, AttestVerdict] = {}
     for uid, hk, _ in targets:
         resp, elapsed = responses.get(hk, (None, 0.0))
         verdict = judge(resp, lambda i: digests.get(i), ref_wall, release, elapsed_ms=elapsed)
-        judged[hk] = verdict
         state.attest_status[hk] = verdict.as_status(now, round_no)
         bt.logging.info(
             f'Serving: UID {uid} attest {"PASS" if verdict.passed else "FAIL"} '
             f'{verdict.wall_ms or 0:.0f} ms (ref {ref_wall:.0f}, rtt {elapsed:.0f}) fill '
-            f'{verdict.filled_bytes / 1e9:.1f} GB cards {verdict.capacity}/{len(verdict.cards)} '
+            f'{verdict.filled_bytes / 1e9:.1f} GB cards {len(verdict.uuids)}/{len(verdict.cards)} '
             f'uuid {verdict.uuid or "-"}{"" if verdict.reason.startswith("ok") else " — " + verdict.reason}'
         )
-    for hk, uuids in claim_uuids(state, judged, round_no).items():
-        uid = next((u for u, h, _ in candidates if h == hk), '?')
-        bt.logging.warning(f'Serving: UID {uid} attest FAIL — duplicate GPU {uuids[0]} across hotkeys')
-        _apply_lost_cards(state, hk, uuids)
-    return {hk: status_capacity(state.attest_status.get(hk), round_no) for hk in hotkeys}
+    return {hk: status_passed(state.attest_status.get(hk), round_no) for hk in hotkeys}

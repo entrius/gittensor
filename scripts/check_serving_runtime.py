@@ -296,10 +296,11 @@ def _stream_once(base_url: str, model_id: str, messages, max_tokens: int, timeou
 def speed_profile(base_url: str, model_id: str, max_tokens: int, timeout: float, burst: int, reps: int = 3) -> Dict:
     """Blessing-time speed facts for one honest card on this runtime, measured the way the validator measures.
 
-    ``single_stream``: one request at a time. ``probe_shaped``: ``burst`` concurrent requests, aggregate verified
-    tokens per second of decode time (batch wall-clock minus the first TTFT) — the number the capacity probe
-    compares a miner against. Client TTFT includes this client's RTT, so decode rates are RTT-free; the TTFT rows
-    are informational unless the client is on-box.
+    ``single_stream``: one request at a time. ``aggregate_decode_tps``: ``burst`` concurrent requests, aggregate
+    verified tokens per second of decode time (batch wall-clock minus the first TTFT) — what one card serves flat
+    out, so the per-token rate the validator pays at is SERVING_GPU_HOUR_USD over an hour of it. Client TTFT
+    includes this client's RTT, so decode rates are RTT-free; the TTFT rows are informational unless the client is
+    on-box.
     """
     prompts = make_prompts(burst * reps, seed=23)
     single = []
@@ -328,13 +329,11 @@ def speed_profile(base_url: str, model_id: str, max_tokens: int, timeout: float,
         curve[6] = round(statistics.median(t / max(w - tt, 1e-3) for t, tt, w in r6), 1)
     return {
         'single_stream_decode_tps': round(single_tps, 1),
-        'probe_shaped_decode_tps': round(probe_tps, 1),
-        'probe_burst': burst,
+        # what the release carries as speed.aggregate_decode_tps: one card's output tok/s under load
+        'aggregate_decode_tps': round(probe_tps, 1),
+        'burst_concurrency': burst,
         'client_ttft_ms_median': round(statistics.median(t for _, t in single), 1),
         'max_tokens': max_tokens,
-        # what the release carries: capacity = aggregate / decode_tps_target capped at 1, 0 under the floor ratio
-        'decode_tps_target': round(probe_tps, 1),
-        'burst_concurrency': burst,
         # concurrent requests -> per-request decode tok/s of one honest card: the validator prices a served request
         # against this curve at the load it had in flight to the miner
         'decode_per_request': {str(k): v for k, v in sorted(curve.items())},
@@ -343,8 +342,8 @@ def speed_profile(base_url: str, model_id: str, max_tokens: int, timeout: float,
 
 def check_attest(rep: Report, base_url: str, timeout: float, attest_url: Optional[str] = None) -> Dict:
     """A1: the attest container beside the runtime (entrius/gt-attest, :8081 on the runtime's host unless
-    ``attest_url`` says otherwise) answers a seeded challenge with a digest inside 3 s idle, and two simultaneous
-    challenges each take >= 1.6x a single one (the property the cohort check rests on)."""
+    ``attest_url`` says otherwise) answers a seeded challenge with a deterministic digest inside 3 s idle — the
+    admission check validators run; nothing counts cards."""
     from urllib.parse import urlsplit, urlunsplit
 
     parts = urlsplit(base_url)
@@ -366,22 +365,6 @@ def check_attest(rep: Report, base_url: str, timeout: float, attest_url: Optiona
     again = requests.post(f'{attest_url}/v1/attest', json={'seed': 12345, 'iters': 3, 'fill': True}, timeout=timeout)
     same = again.ok and (again.json().get('devices') or [again.json()])[0].get('digest') == dev.get('digest')
     rep.add('A1 digest deterministic for a seed', MUST, bool(same))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        pair = list(
-            pool.map(
-                lambda _: requests.post(
-                    f'{attest_url}/v1/attest', json={'seed': 777, 'iters': 3, 'fill': True}, timeout=timeout
-                ).json(),
-                range(2),
-            )
-        )
-    walls = [float((r.get('devices') or [r])[0].get('wall_ms') or 0.0) + float(r.get('queued_ms') or 0.0) for r in pair]
-    rep.add(
-        'A1 two simultaneous challenges each >= 1.6x one',
-        MUST,
-        min(walls) >= 1.6 * wall,
-        f'{walls[0]:.0f} / {walls[1]:.0f} ms vs {wall:.0f}',
-    )
     facts.update(
         attest_ref_wall_ms=round(wall, 1),
         attest_iters=3,

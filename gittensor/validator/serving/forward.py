@@ -16,15 +16,21 @@ wipes the window and quarantines the hotkey. Miners whose window passes are
 published READY; serving axons that are not READY (and not quarantined) are
 published as *probation* so baseline traffic can give them a window.
 
-    round score = window passes (0/1) x mean speed credit over this round's served requests x attested cards
+    admitted    = window passes x speed credit > 0 x hardware attestation passes
+    round score = admitted x output tokens the gateway saw the miner serve, in card-equivalents
 
-Speed credit is measured on served traffic only (TTFT and decode rate against the
-blessing's curve at the load this validator imposed; ``scoring.py``); a round with
-nothing verified freezes at the last measured credit. ``attested cards`` is the
-miner's last hardware attestation verdict (``attest.py``: the least recently
-challenged half of the READY miners is challenged every round; a miner with no
-verdict yet stays on probation). Round scores are settled over the trailing
-``SERVING_SETTLEMENT_ROUNDS`` rounds by ``ServingState``.
+Pay is per token served, counted from the gateway's own served-request records
+(never the miner's word) and priced against the release's aggregate decode speed
+(``scoring.card_equivalents``): a card flat out for the hour earns one card-hour,
+an idle one nothing, and no card count or per-hotkey cap enters — the only
+ceiling is the emission pool. Speed credit is measured on served traffic only
+(TTFT and decode rate against the blessing's curve at the load this validator
+imposed; ``scoring.py``) and is the READY miner's routing weight, so a slow card
+is sent less and serves fewer paid tokens; a round with nothing verified freezes
+at the last measured credit. Attestation (``attest.py``) is pass/fail admission:
+the least recently challenged half of the READY miners is challenged every round;
+a miner with no verdict yet stays on probation. Round scores are settled over the
+trailing ``SERVING_SETTLEMENT_ROUNDS`` rounds by ``ServingState``.
 """
 
 import asyncio
@@ -64,10 +70,14 @@ from gittensor.serving.state import ReadyMiner, RequestRecord, ServedRequest, Se
 from gittensor.serving.store import ServingStore
 from gittensor.serving.stream import consume_stream
 from gittensor.synapses import InferenceSynapse
-from gittensor.validator.serving.attest import attest_round, status_capacity
+from gittensor.validator.serving.attest import attest_round, status_passed
 from gittensor.validator.serving.persist import ServingRoundStorage
-from gittensor.validator.serving.scoring import request_speed
-from gittensor.validator.utils.config import SERVING_PAY_CAP_WITHOUT_PRICING, STORE_DB_RESULTS
+from gittensor.validator.serving.scoring import card_equivalents, paid_tokens, request_speed, token_rate_usd
+from gittensor.validator.utils.config import (
+    SERVING_AUDIT_INTERVAL_S,
+    SERVING_PAY_CAP_WITHOUT_PRICING,
+    STORE_DB_RESULTS,
+)
 
 if TYPE_CHECKING:
     from neurons.validator import Validator
@@ -149,21 +159,30 @@ def verify_served_round(
     last_miss: Optional[Dict[str, str]] = None,
     rng=None,
     staked_caller: bool = False,
-) -> Dict[str, List[RequestSpeed]]:
+) -> Tuple[Dict[str, List[RequestSpeed]], Dict[str, int]]:
     """Verify this round's audit sample of the requests served for ``release`` into the window; return per-request
-    speed per hotkey.
+    speed per hotkey and the output tokens each hotkey is paid for.
 
-    Reference calls run on a small thread pool; window updates stay on this thread. ``last_miss`` (hotkey ->
-    reason) is filled with the most recent miss or strike reason so the round report can show a miner why.
-    ``staked_caller``: this validator clears the miner's stake floor, so no miner has a budget to refuse it on.
+    Paid tokens are what the gateway saw served on user traffic: every unsampled completion, and every sampled one
+    the reference did not fail. Baseline prompts anchor eligibility, not income. Reference calls run on a small
+    thread pool; window updates stay on this thread. ``last_miss`` (hotkey -> reason) is filled with the most
+    recent miss or strike reason so the round report can show a miner why. ``staked_caller``: this validator clears
+    the miner's stake floor, so no miner has a budget to refuse it on.
     """
     summary = summary if summary is not None else {}
     last_miss = last_miss if last_miss is not None else {}
+    tokens: Dict[str, int] = {}
+
+    def pay(req: ServedRequest) -> None:
+        if req.source == 'gateway' and req.ok:
+            tokens[req.hotkey] = tokens.get(req.hotkey, 0) + paid_tokens(req)
+
     mine, skipped = sample_for_audit([req for req in served if req.release_id == release.release_id], rng=rng)
     for req in skipped:
         summary['served'] = summary.get('served', 0) + 1
         summary[req.source] = summary.get(req.source, 0) + 1
         summary['unsampled'] = summary.get('unsampled', 0) + 1
+        pay(req)
 
     def judge(req: ServedRequest) -> Optional[AuditVerdict]:
         if not req.ok and 'budget' in req.detail.lower() and budget_refusal_plausible(state, req.hotkey, staked_caller):
@@ -226,7 +245,10 @@ def verify_served_round(
         bump(req.source)
         if verdict is None:
             bump('neutral')
+            pay(req)
             continue
+        if verdict.passed:
+            pay(req)
         if not verdict.passed and not verdict.hard and req.uid in ready_uids:
             bt.logging.info(
                 f'Serving: READY UID {req.uid} missed a {req.source} request ({verdict.reason}; '
@@ -260,7 +282,7 @@ def verify_served_round(
                 detail=verdict.reason,
             )
         )
-    return speeds
+    return speeds, tokens
 
 
 def _mean(xs: List[float]) -> Optional[float]:
@@ -358,8 +380,10 @@ async def audit_round(
     loadout=None,
     attest_rng=None,
     staked_caller: bool = False,
+    round_s: float = SERVING_AUDIT_INTERVAL_S,
 ) -> Dict[str, float]:
-    """Verify served traffic, settle windows, attest READY miners; publish READY/probation; return hotkey -> score."""
+    """Verify served traffic, settle windows, attest READY miners; publish READY/probation; return hotkey -> pay
+    score (served tokens in card-equivalents over ``round_s``, the wall clock the tokens were served in)."""
     loadout = loadout or load_serving_loadout()
     served = state.drain_served()
     if not serving:
@@ -371,7 +395,8 @@ async def audit_round(
     active = [(uid, hotkey, axon) for uid, hotkey, axon in serving if not is_dormant(state, hotkey)]
     dormant = len(serving) - len(active)
 
-    best: Dict[str, Tuple[float, str]] = {hotkey: (0.0, '') for _, hotkey, _ in active}
+    # Per admitted hotkey, the release it is READY for: (pay, routing weight, release_id), best pay first.
+    admitted: Dict[str, Tuple[float, float, str]] = {}
     axon_of = {uid: axon for uid, _, axon in serving}
     probation: Dict[int, ReadyMiner] = {}
     summary: Dict[str, int] = {}
@@ -387,7 +412,9 @@ async def audit_round(
                 'set SERVING_REFERENCE_URL to a conformant runtime'
             )
             continue
-        speeds = verify_served_round(state, reference, release, served, summary, last_miss, staked_caller=staked_caller)
+        speeds, tokens = verify_served_round(
+            state, reference, release, served, summary, last_miss, staked_caller=staked_caller
+        )
         passing: List[Tuple[int, str, bt.AxonInfo, float]] = []
         for uid, hotkey, axon in active:
             window = state.audits.verdict(hotkey, release.release_id)
@@ -406,13 +433,14 @@ async def audit_round(
                 'credit': round(credit, 4),
                 'ttft_ms': _mean([sp.ttft_ms for sp in round_speeds if sp.ttft_ms is not None]),
                 'decode_tps': _mean([sp.decode_tps for sp in round_speeds if sp.decode_tps is not None]),
-                'capacity': 0.0,
+                'tokens': tokens.get(hotkey, 0),
+                'attested': False,
                 'score': 0.0,
                 'last_miss': last_miss.get(hotkey, ''),
             }
             bt.logging.debug(
                 f'Serving: UID {uid} {release.release_id} window {window.as_dict()} '
-                f'served {len(round_speeds)} credit {credit:.3f}'
+                f'served {len(round_speeds)} credit {credit:.3f} tokens {tokens.get(hotkey, 0)}'
             )
             if window.passed and credit > 0.0:
                 passing.append((uid, hotkey, axon, credit))
@@ -424,13 +452,13 @@ async def audit_round(
             state, dendrite, [(uid, hotkey, axon) for uid, hotkey, axon, _ in passing], release, rng=attest_rng
         )
         for uid, hotkey, _, credit in passing:
-            cards = int(attested.get(hotkey, 0))
-            ok = cards > 0
-            score = credit * cards  # one card-hour per attested card at this speed
+            ok = bool(attested.get(hotkey, False))
+            # Pay is what the gateway saw served, nothing else: an admitted card with no traffic earns nothing.
+            score = card_equivalents(windows[uid]['tokens'], release, round_s) if ok else 0.0
             st = state.attest_status.get(hotkey, {})
             bt.logging.info(
-                f'Serving: UID {uid} {release.release_id} attested {"yes" if ok else "no"} cards {cards} '
-                f'speed credit {credit:.2f} score {score:.3f}'
+                f'Serving: UID {uid} {release.release_id} attested {"yes" if ok else "no"} '
+                f'speed credit {credit:.2f} tokens {windows[uid]["tokens"]} score {score:.4f} card-equivalents'
             )
             windows[uid].update(
                 attested=ok,
@@ -438,8 +466,7 @@ async def audit_round(
                 gpu_uuids=st.get('uuids', [st['uuid']] if st.get('uuid') else []),
                 attest_ms=st.get('wall_ms'),
                 attest_reason=st.get('reason', 'not attested yet'),
-                capacity=float(cards),
-                score=round(score, 4),
+                score=round(score, 6),
             )
             if not ok and not windows[uid]['last_miss']:
                 windows[uid]['last_miss'] = f'not attested: {st.get("reason", "not attested yet")}'
@@ -447,15 +474,15 @@ async def audit_round(
                 probation[uid] = ReadyMiner(
                     uid=uid, hotkey=hotkey, axon=axon_of[uid], score=0.0, release_id=release.release_id
                 )
-            if score > best[hotkey][0]:
-                best[hotkey] = (score, release.release_id)
+            if ok and (score, credit) > admitted.get(hotkey, (0.0, 0.0, ''))[:2]:
+                admitted[hotkey] = (score, credit, release.release_id)
 
-    scores = {hotkey: score for hotkey, (score, _) in best.items()}
+    scores = {hotkey: admitted.get(hotkey, (0.0,))[0] for _, hotkey, _ in active}
     ready: List[ReadyMiner] = []
     for uid, hotkey, axon in active:
-        score, release_id = best[hotkey]
-        if score > 0.0:
-            ready.append(ReadyMiner(uid=uid, hotkey=hotkey, axon=axon, score=score, release_id=release_id))
+        if hotkey in admitted:
+            _, credit, release_id = admitted[hotkey]
+            ready.append(ReadyMiner(uid=uid, hotkey=hotkey, axon=axon, score=credit, release_id=release_id))
             probation.pop(uid, None)
     for uid, report in windows.items():
         report['status'] = miner_status(report)
@@ -466,7 +493,9 @@ async def audit_round(
         f'Serving round: served {summary.get("served", 0)} (gateway {summary.get("gateway", 0)} / baseline '
         f'{summary.get("baseline", 0)}) · pass {summary.get("pass", 0)} · miss {summary.get("miss", 0)} · '
         f'strike {summary.get("strike", 0)} · neutral {summary.get("neutral", 0)} · READY {len(ready)} '
-        f'{[m.uid for m in ready]} · probation {len(probation)} · quarantined {quarantined} · dormant {dormant}'
+        f'{[m.uid for m in ready]} · probation {len(probation)} · quarantined {quarantined} · dormant {dormant} · '
+        f'paid {sum(w["tokens"] for w in windows.values())} output tokens at '
+        f'${token_rate_usd(loadout.releases[0]) * 1e6:.3f}/M'
     )
     return scores
 
@@ -491,22 +520,20 @@ def seed_ready_from_store(validator: 'Validator', state: ServingState, loadout=N
             if window.quarantined_until > 0.0:
                 quarantined.add(hotkey)
                 continue
-            if not window.passed:
+            if not window.passed or not status_passed(state.attest_status.get(hotkey), state.attest_round):
                 continue
-            # No measured credit on record pays nothing: the miner waits one live round in probation rather
+            # No measured credit on record routes nothing: the miner waits one live round in probation rather
             # than taking user traffic on an assumed speed.
-            score = state.last_credit.get(hotkey, 0.0) * status_capacity(
-                state.attest_status.get(hotkey), state.attest_round
-            )
-            if score > best.get(hotkey, (0.0, ''))[0]:
-                best[hotkey] = (score, release.release_id)
+            credit = state.last_credit.get(hotkey, 0.0)
+            if credit > best.get(hotkey, (0.0, ''))[0]:
+                best[hotkey] = (credit, release.release_id)
     ready: List[ReadyMiner] = []
     probation: List[ReadyMiner] = []
     fallback_release = loadout.primary.release_id
     for uid, hotkey, axon in active:
-        score, release_id = best.get(hotkey, (0.0, ''))
-        if score > 0.0:
-            ready.append(ReadyMiner(uid=uid, hotkey=hotkey, axon=axon, score=score, release_id=release_id))
+        credit, release_id = best.get(hotkey, (0.0, ''))
+        if credit > 0.0:
+            ready.append(ReadyMiner(uid=uid, hotkey=hotkey, axon=axon, score=credit, release_id=release_id))
         elif hotkey not in quarantined:
             probation.append(ReadyMiner(uid=uid, hotkey=hotkey, axon=axon, score=0.0, release_id=fallback_release))
     if ready or probation:
@@ -545,8 +572,9 @@ def skip_baseline(state: ServingState, hotkey: str) -> bool:
 
 
 def miner_status(report: dict) -> str:
-    """'ready' | 'quarantined' | 'probation' for one UID's round report."""
-    if report.get('score', 0.0) > 0.0:
+    """'ready' | 'quarantined' | 'probation' for one UID's round report. READY is admission, not pay: an attested
+    miner that served nothing this round is still routed."""
+    if report.get('attested'):
         return 'ready'
     if report.get('quarantined_until', 0.0) > 0.0:
         return 'quarantined'
@@ -607,7 +635,13 @@ class ServingAuditThread:
             try:
                 serving = get_serving_axons(self.validator)
                 loop.run_until_complete(
-                    audit_round(self.state, dendrite, serving, staked_caller=is_staked_caller(self.validator))
+                    audit_round(
+                        self.state,
+                        dendrite,
+                        serving,
+                        staked_caller=is_staked_caller(self.validator),
+                        round_s=self.interval_s,
+                    )
                 )
             except Exception as e:  # a serving fault must never take the validator down
                 # Nothing is published: the READY set stands until the TTL runs out and no hotkey records a zero

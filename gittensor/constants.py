@@ -152,7 +152,7 @@ RECYCLE_UID = 0
 
 # Combined scoring pool distributed by repository emission_share, then by per-repo PR/issue split.
 # Pools (OSS + SERVING) must sum to 1.0; anything unallocated within them recycles to RECYCLE_UID.
-OSS_EMISSION_SHARE = 0.965  # repo emission_share values are fractions of THIS pool (sparkinfer 0.4 -> 37% of total)
+OSS_EMISSION_SHARE = 0.90  # repo emission_share values are fractions of THIS pool (sparkinfer 0.4 -> 36% of total)
 DEFAULT_ISSUE_DISCOVERY_SHARE = 0.5
 EMISSION_SHARE_TOLERANCE = 1e-9
 MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software, at maximum
@@ -160,49 +160,55 @@ MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software,
 # =============================================================================
 # Serving (sub-subnet B beta)
 # =============================================================================
-# Serving miners are paid an accounting price per verified GPU-hour, not a fixed slice: each READY card-equivalent
-# (capacity-weighted, so N hotkeys on one card sum to one card) earns SERVING_GPU_HOUR_USD, converted to an emission
-# share through the on-chain alpha/TAO price and the TAO/USD rate published in serving_loadout.json (`pricing`).
-# The share is capped at SERVING_EMISSION_SHARE_CAP; what the fleet does not earn recycles to RECYCLE_UID, never to
-# OSS. 2026-08-26 (2,950 alpha/day to miners, $0.85/alpha): $0.70/h funds ~5 cards inside the 3.5% cap. With no
-# price data (testnet) the cap is paid pro-rata. Move OSS_EMISSION_SHARE in the same commit so the pools sum to 1.0.
+# Serving miners are paid per output token the gateway saw them serve, at a rate derived from the card-hour target:
+# rate = SERVING_GPU_HOUR_USD / (one card's aggregate decode tok/s x 3600), so a 5090 flat out for an hour (~1M
+# output tokens on the current runtime) earns exactly the card-hour and an idle one earns nothing. A round score is
+# those tokens in card-equivalents (tokens / (aggregate tok/s x round seconds)); the settled mean is priced at
+# SERVING_GPU_HOUR_USD, converted to an emission share through the on-chain alpha/TAO price and the TAO/USD rate
+# published in serving_loadout.json (`pricing`). No card count and no per-hotkey cap: served volume is the capacity
+# proof, and a real 5090 cannot out-decode its silicon. The only ceiling is SERVING_EMISSION_SHARE_CAP — above it the
+# fleet dilutes pro-rata by token share; what it does not earn recycles to RECYCLE_UID, never to OSS. With no price
+# data (testnet) the cap is paid pro-rata. Move OSS_EMISSION_SHARE in the same commit so the pools sum to 1.0.
 SERVING_GPU_HOUR_USD = 0.70
-SERVING_EMISSION_SHARE_CAP = 0.035
+SERVING_EMISSION_SHARE_CAP = 0.10
+# Output tok/s one card sustains under load on the blessed runtime, for a release without its own
+# `speed.aggregate_decode_tps` (sparkinfer 7498736 on a 5090: 279-282 at 16 concurrent, 2026-08-27).
+SERVING_AGGREGATE_DECODE_TPS_FALLBACK = 280.0
 # Pricing the cap needs the chain's alpha/TAO price and the published TAO/USD rate. A round that cannot read them
 # reuses the last usable pricing for up to SERVING_PRICING_MAX_AGE_S, so a chain hiccup does not move pay. With no
 # usable pricing at all the fleet is paid nothing: the alternative (the whole cap, split pro-rata) hands one verified
-# card 3.5% of emissions. A network with no price data to read - testnet - sets SERVING_PAY_CAP_WITHOUT_PRICING.
+# card the whole cap. A network with no price data to read - testnet - sets SERVING_PAY_CAP_WITHOUT_PRICING.
 SERVING_PRICING_MAX_AGE_S = 3600.0
 assert abs(OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE_CAP - 1.0) < EMISSION_SHARE_TOLERANCE, (
     'emission pools must sum to 1.0'
 )
 # Settlement is over the trailing hour: a miner's serving score is the mean of its last SERVING_SETTLEMENT_ROUNDS
-# round scores (missing rounds count 0), so a card verified for 45 of the last 60 minutes earns 75% of the price.
+# round scores (missing rounds count 0), so the hour's served tokens are what is priced. Shorten it to move pay
+# faster after a scoring change; the global moving_average_alpha is shared with OSS and is not the knob.
 SERVING_SETTLEMENT_ROUNDS = 12  # 12 x 5-minute audit rounds
 SERVING_READY_TTL_S = 900.0  # gateway stops routing when the last audit round is older than this
-# Hardware attestation (gittensor/validator/serving/attest.py, docker/attest). Each round a random
-# SERVING_ATTEST_COHORT_FRACTION of the READY miners (plus never-passed and last-round failures) is sent one fresh
-# seed at the same instant; the runtime image's gt_attest fills the card's free VRAM and runs a deterministic GEMM
-# chain. Expected digest and wall time come from the validator's own reference (same image). PASS needs the digest,
-# wall <= SERVING_ATTEST_BUDGET_RATIO x reference, and >= SERVING_ATTEST_MIN_FILL_RATIO of the free VRAM filled
-# (free = total - SERVING_VRAM_MODEL_RESERVED_BYTES; the release may override). Two hotkeys on one card cannot both
-# fill it at once (P(caught) = fraction^2 per round). Never a strike: capacity 0 that round, re-challenged next.
+# Hardware attestation (gittensor/validator/serving/attest.py, docker/attest) is admission, pass/fail per hotkey:
+# is there a real 5090 running the real model behind it? Nothing counts cards — pay is per token served. Each round
+# the least recently challenged SERVING_ATTEST_COHORT_FRACTION of the READY miners (plus never-passed and last-round
+# failures) is sent one fresh seed; the attest container's gt_attest fills the card's free VRAM and runs a
+# deterministic GEMM chain. Expected digest and wall time come from the validator's own reference (same image). A
+# card PASSES on the digest, wall <= SERVING_ATTEST_BUDGET_RATIO x reference, >= SERVING_ATTEST_MIN_FILL_RATIO of
+# the free VRAM filled (free = total - SERVING_VRAM_MODEL_RESERVED_BYTES; the release may override) and the model
+# resident; a hotkey passes with any passing card. Never a strike: not READY that round, re-challenged next.
 SERVING_ATTEST_COHORT_FRACTION = 0.5
 SERVING_ATTEST_ITERS = 3
 SERVING_ATTEST_BUDGET_RATIO = 1.6
 SERVING_ATTEST_MIN_FILL_RATIO = 0.6
 SERVING_ATTEST_TIMEOUT = 45.0  # seconds: fill + chain on a 5090 is ~1.5 s; queued challenges show up as slow
-SERVING_ATTEST_UUID_MEMORY_ROUNDS = 12  # a verdict (and a UUID claim) older than this pays nothing until renewed
-# Every field of a card's report except the digest is the miner's own number, so the count of cards is held to two
-# things the validator measures itself: each device index answers its own seed (seed + index), which the reference
-# recomputes, and the whole reply must arrive within one card's budget plus this network slack — gt_attest runs the
-# cards in parallel, so N real cards take one card's wall and one card faking N takes N of them. At most
-# SERVING_ATTEST_MAX_CARDS are judged (and priced) per hotkey.
+SERVING_ATTEST_MEMORY_ROUNDS = 12  # a verdict older than this admits nothing until renewed
+# Every field of a card's report except the digest is the miner's own number, so the whole reply must also arrive
+# within one card's budget plus this network slack. Each device index answers its own seed (seed + index); the
+# reference recomputes at most SERVING_ATTEST_MAX_CARDS of them per round.
 SERVING_ATTEST_RTT_SLACK_MS = 2_000.0
 SERVING_ATTEST_MAX_CARDS = 8
-# A card counts only with the model resident: free VRAM before the fill must be at most total minus this fraction of
-# the reservation (a bare 5090 shows ~32 GB free, one holding the model ~8 GB). Every passing card is a card-hour, so
-# a multi-GPU hotkey earns per card it actually serves from — a second card with nothing loaded earns nothing.
+# A card passes only with the model resident: free VRAM before the fill must be at most total minus this fraction of
+# the reservation (a bare 5090 shows ~32 GB free, one holding the model ~8 GB). A spare card with nothing loaded is
+# not a serving card.
 SERVING_ATTEST_MODEL_RESIDENT_RATIO = 0.8
 SERVING_VRAM_MODEL_RESERVED_BYTES = 24e9  # what sparkinfer holds with the model loaded (7498736 on a 5090: 23.7 GB)
 SERVING_VERIFY_WORKERS = 8  # concurrent /v1/score calls to the reference per round
@@ -212,7 +218,8 @@ SERVING_VERIFY_WORKERS = 8  # concurrent /v1/score calls to the reference per ro
 # falls linearly to 0 at ZERO, so a miner proxying to a GPU in another region or queueing requests loses credit
 # in proportion. Generation length does not enter (mini-soak 2026-08-27: total latency of 64-512-token answers
 # scored a perfect miner at 0.24). Same-region proxying is NOT visible here; that is the one-GPU-many-hotkeys
-# case, caught by the attestation overlap and the decode floor under load.
+# case, which pay-per-token makes pointless (the hotkeys split one card's tokens) and the decode floor catches
+# under load.
 SERVING_LATENCY_FULL_CREDIT_MS = 500.0
 SERVING_LATENCY_ZERO_CREDIT_MS = 1_500.0
 # Decode speed on served traffic. Each served request with at least SERVING_DECODE_MIN_TOKENS completion tokens
@@ -221,7 +228,8 @@ SERVING_LATENCY_ZERO_CREDIT_MS = 1_500.0
 # `speed.decode_per_request` curve, interpolated), so a miner busy with our own load is not penalised for it.
 # Credit = min(1, observed / expected); under SERVING_DECODE_FLOOR_RATIO it is 0 — a card shared between hotkeys or a
 # runtime that is not the blessed one is slower by integer factors under load, honest variance is +-10%. Round credit
-# is the mean over the round's served requests (misses 0), so availability, latency and speed price together.
+# is the mean over the round's served requests (misses 0); it is the routing weight, not a pay multiplier — a slow
+# card is sent less traffic and so serves fewer paid tokens.
 SERVING_DECODE_FLOOR_RATIO = 0.5
 SERVING_DECODE_TOLERANCE_RATIO = 0.8  # full credit down to this fraction of expected: the curve is measured on-box, the
 # validator observes stream delivery over the WAN (soak 5: honest cards read 0.75-0.96x); credit = min(1, ratio / this)

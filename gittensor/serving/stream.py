@@ -15,6 +15,7 @@ so the miner can't tell the two apart and users get tokens as they decode.
   ``call_stream`` to a filled synapse, optionally relaying each event.
 """
 
+import asyncio
 import json
 import time
 from dataclasses import dataclass, field
@@ -163,13 +164,32 @@ async def consume_stream(
     synapse: InferenceSynapse,
     timeout: float,
     on_event: Optional[Callable[[Event], Awaitable[None]]] = None,
+    first_byte_s: Optional[float] = None,
 ) -> InferenceSynapse:
-    """Stream one inference from ``axon`` and return the filled synapse; relay each event to ``on_event`` if given."""
+    """Stream one inference from ``axon`` and return the filled synapse; relay each event to ``on_event`` if given.
+
+    ``first_byte_s`` bounds the wait for the axon's first yield only: silence past it raises ``TimeoutError``,
+    while a stream that answered promptly keeps the full ``timeout`` however long it runs.
+    """
     parser, assembler = SSEParser(), StreamAssembler()
     final: Optional[InferenceSynapse] = None
     started = time.monotonic()
     observed_ttft_ms: Optional[float] = None
-    async for chunk in dendrite.call_stream(target_axon=axon, synapse=synapse, timeout=timeout, deserialize=False):
+    stream = dendrite.call_stream(target_axon=axon, synapse=synapse, timeout=timeout, deserialize=False).__aiter__()
+    waiting_first = first_byte_s is not None
+    while True:
+        step = stream.__anext__()
+        try:
+            chunk = await (asyncio.wait_for(step, first_byte_s) if waiting_first else step)
+        except StopAsyncIteration:
+            break
+        except asyncio.TimeoutError:
+            try:
+                await stream.aclose()
+            except Exception:
+                pass
+            raise TimeoutError(f'no first byte from the axon within {first_byte_s}s')
+        waiting_first = False
         if isinstance(chunk, (bytes, bytearray)):
             for event in parser.feed(bytes(chunk)):
                 if observed_ttft_ms is None:

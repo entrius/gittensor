@@ -53,6 +53,7 @@ from gittensor.constants import (
     BLOCKS_PER_TEMPO,
     SERVING_AUDIT_SAMPLE_FRACTION,
     SERVING_AUDIT_SAMPLE_MIN,
+    SERVING_BASELINE_FIRST_BYTE_S,
     SERVING_BASELINE_PER_ROUND,
     SERVING_BUDGET_REFUSAL_RATIO,
     SERVING_DORMANT_AFTER_ROUNDS,
@@ -325,7 +326,9 @@ async def baseline_round(
         state.charge_sent(hotkey, max_tokens)
         started = time.monotonic()
         try:
-            response = await consume_stream(dendrite, axon, synapse, release.request_timeout)
+            response = await consume_stream(
+                dendrite, axon, synapse, release.request_timeout, first_byte_s=SERVING_BASELINE_FIRST_BYTE_S
+            )
         except Exception as e:
             response, err = None, repr(e)
         else:

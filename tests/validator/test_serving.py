@@ -1401,6 +1401,42 @@ def test_consume_stream_observes_time_to_first_token():
     assert miss.completion is None and miss.observed_ttft_ms is None
 
 
+def test_consume_stream_first_byte_bound_cuts_silence_not_slowness():
+    import asyncio
+    from types import SimpleNamespace
+
+    from gittensor.serving.stream import consume_stream
+    from gittensor.synapses import InferenceSynapse
+
+    good = _echo_release()
+    axon = SimpleNamespace(is_serving=True)
+    syn = InferenceSynapse(messages=MSGS, model_id=good.model_id, max_tokens=4, logprobs=True)
+
+    class Silent:
+        async def call_stream(self, **kw):
+            await asyncio.sleep(10)
+            yield kw['synapse']
+
+    with pytest.raises(TimeoutError, match='first byte'):
+        asyncio.run(consume_stream(Silent(), axon, syn, 60.0, first_byte_s=0.05))  # type: ignore[arg-type]
+
+    class SlowTail:
+        def __init__(self, inner):
+            self.inner = inner
+
+        async def call_stream(self, **kw):
+            first = True
+            async for chunk in self.inner.call_stream(**kw):
+                if not first:
+                    await asyncio.sleep(0.12)
+                first = False
+                yield chunk
+
+    inner, _ = _dendrite_echoing(good)
+    out = asyncio.run(consume_stream(SlowTail(inner), axon, syn.model_copy(), 5.0, first_byte_s=0.05))  # type: ignore[arg-type]
+    assert out.completion
+
+
 def test_latency_credit_uses_time_to_first_token_not_total_latency(monkeypatch):
     """A long answer that streamed promptly earns full credit; a slow first token does not."""
     from types import SimpleNamespace
@@ -1866,7 +1902,7 @@ def test_axon_that_answers_without_a_completion_gets_a_real_reason(monkeypatch):
     good = _echo_release()
     axon = SimpleNamespace(is_serving=True)
 
-    async def consume(_dendrite, _axon, synapse, _timeout):
+    async def consume(_dendrite, _axon, synapse, _timeout, **_kw):
         synapse.dendrite = bt.TerminalInfo(status_message='Success')
         return synapse  # unfilled: no completion, no served_model_id
 

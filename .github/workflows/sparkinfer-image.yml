@@ -174,7 +174,7 @@ jobs:
                })
              | .releases[0].attest = ((.releases[0].attest // {}) + {
                  iters: ($speed[0].attest.attest_iters // 3),
-                 vram_model_reserved_bytes: ($speed[0].attest.vram_model_reserved_bytes // 24000000000),
+                 vram_model_reserved_bytes: ($speed[0].attest.vram_model_reserved_bytes // .releases[0].attest.vram_model_reserved_bytes // 24000000000),
                  reference_wall_ms: $speed[0].attest.attest_ref_wall_ms
                })' \
             gittensor/validator/weights/serving_loadout.json > /tmp/loadout.json

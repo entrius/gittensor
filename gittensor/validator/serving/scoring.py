@@ -1,33 +1,61 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-"""Serving speed credit (sub-subnet B beta).
+"""Serving speed credit and token pay (sub-subnet B beta).
 
 Correctness is decided by the rolling ``AuditWindow`` (gittensor/serving/audit.py);
-this module only prices speed, on served traffic. Two validator-observed numbers
-per served request: time to first streamed token (network + queue + prefill) —
-1.0 up to SERVING_LATENCY_FULL_CREDIT_MS, 0.0 at SERVING_LATENCY_ZERO_CREDIT_MS —
-and decode rate, completion tokens over (total − TTFT), against what one honest
-card does on this runtime at the load this validator itself had in flight to the
-miner (the release's blessing-time curve). Credit = ttft_credit × decode_credit;
-decode under SERVING_DECODE_FLOOR_RATIO × expected is 0. A miner's round score is
-its window verdict (0/1) times the mean credit over the round's served requests —
-misses earn 0 credit, which folds availability in.
+this module prices speed and tokens, both on served traffic. Speed: two
+validator-observed numbers per served request — time to first streamed token
+(network + queue + prefill), 1.0 up to SERVING_LATENCY_FULL_CREDIT_MS, 0.0 at
+SERVING_LATENCY_ZERO_CREDIT_MS — and decode rate, completion tokens over
+(total − TTFT), against what one honest card does on this runtime at the load this
+validator itself had in flight to the miner (the release's blessing-time curve).
+Credit = ttft_credit × decode_credit; decode under SERVING_DECODE_FLOOR_RATIO ×
+expected is 0. The mean credit over a round's served requests is the miner's
+routing weight. Pay: the output tokens the gateway saw a hotkey serve in the
+round, in card-equivalents — ``tokens / (one card's aggregate decode tok/s ×
+round seconds)`` — so an hour flat out on one card is one card-hour
+(SERVING_GPU_HOUR_USD) and the per-token rate falls out of the release's speed.
 """
 
 from typing import Dict, Optional, Sequence, Tuple
 
 from gittensor.classes import RequestSpeed
 from gittensor.constants import (
+    SERVING_AGGREGATE_DECODE_TPS_FALLBACK,
     SERVING_DECODE_FLOOR_RATIO,
     SERVING_DECODE_MIN_TOKENS,
     SERVING_DECODE_PER_REQUEST_FALLBACK,
     SERVING_DECODE_TOLERANCE_RATIO,
+    SERVING_GPU_HOUR_USD,
     SERVING_LATENCY_FULL_CREDIT_MS,
     SERVING_LATENCY_ZERO_CREDIT_MS,
 )
 from gittensor.serving.loadout import ServingRelease
 from gittensor.serving.state import ServedRequest
+
+
+def aggregate_decode_tps(release: ServingRelease) -> float:
+    """Output tok/s one honest card sustains under load on ``release``: the token rate's physical base."""
+    return release.aggregate_decode_tps or SERVING_AGGREGATE_DECODE_TPS_FALLBACK
+
+
+def token_rate_usd(release: ServingRelease) -> float:
+    """USD per output token: the card-hour target spread over what one card decodes in an hour."""
+    return SERVING_GPU_HOUR_USD / (aggregate_decode_tps(release) * 3600.0)
+
+
+def card_equivalents(tokens: int, release: ServingRelease, seconds: float) -> float:
+    """Cards it takes to decode ``tokens`` output tokens in ``seconds`` on ``release``: 1.0 is one card flat out."""
+    if tokens <= 0 or seconds <= 0:
+        return 0.0
+    return tokens / (aggregate_decode_tps(release) * seconds)
+
+
+def paid_tokens(req: ServedRequest) -> int:
+    """Output tokens the gateway saw ``req`` serve, never more than it asked for."""
+    n = len(req.tokens or [])
+    return min(n, req.max_tokens) if req.max_tokens > 0 else n
 
 
 def latency_credit(elapsed_ms: float, full_ms: Optional[float] = None, zero_ms: Optional[float] = None) -> float:

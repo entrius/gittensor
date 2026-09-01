@@ -41,9 +41,9 @@ def round_rows(
 ) -> tuple[tuple, list[tuple]]:
     """(serving_rounds row, serving_miner_rounds rows) for one audit round.
 
-    ``card_equivalents`` and ``pool_share`` are what the next OSS round will pay on: settled scores summed, priced
-    through ``serving_share`` exactly as ``blend_emission_pools`` does. The economics ($/GPU-hour, cap) and the
-    enforced release (pin, digest) ride along so readers never hard-code them.
+    ``card_equivalents`` and ``pool_share`` are what the next OSS round will pay on: settled scores (served tokens
+    in card-hours) summed, priced through ``serving_share`` exactly as ``blend_emission_pools`` does. The economics
+    ($/card-hour, cap) and the enforced release (pin, digest) ride along so readers never hard-code them.
     """
     windows: Dict[int, dict] = last_round.get('windows', {})
     card_equiv = sum(settled.values())
@@ -95,7 +95,7 @@ def round_rows(
                 float(w.get('credit', 0.0)),
                 w.get('ttft_ms'),
                 w.get('decode_tps'),
-                float(w.get('capacity', 0.0)),
+                1.0 if w.get('attested') else 0.0,  # the capacity column predates per-token pay: admission only
                 float(w.get('score', 0.0)),
                 float(settled.get(str(w.get('hotkey', '')), 0.0)),
                 (str(w.get('last_miss', '') or '')[:500]) or None,

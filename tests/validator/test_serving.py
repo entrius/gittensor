@@ -1000,12 +1000,29 @@ def _served(uid: int, release: ServingRelease, ok: bool = True, wrong: bool = Fa
     )
 
 
+ROUND_S = 300.0
+
+
 def _round(state, dendrite, serving, release, monkeypatch, probes: int = 0):
     import asyncio
 
     from gittensor.validator.serving import forward as fwd
 
-    return asyncio.run(fwd.audit_round(state, dendrite, serving, ServingLoadout(releases=[release])))  # type: ignore[arg-type]
+    return asyncio.run(
+        fwd.audit_round(state, dendrite, serving, ServingLoadout(releases=[release]), round_s=ROUND_S)  # type: ignore[arg-type]
+    )
+
+
+def _pay(tokens: int, release: ServingRelease, round_s: float = ROUND_S) -> float:
+    """The round score ``tokens`` gateway-served output tokens are worth: card-equivalents over the round."""
+    from gittensor.validator.serving.scoring import card_equivalents
+
+    return card_equivalents(tokens, release, round_s)
+
+
+def _weights(state) -> Dict[int, float]:
+    """Routing weight (speed credit) per READY UID."""
+    return {m.uid: m.score for m in state.ready_miners()}
 
 
 def test_verify_served_teacher_forces_the_completion():
@@ -1120,8 +1137,9 @@ def test_audit_round_verifies_served_traffic(monkeypatch):
     state.enqueue_served(_served(2, good, wrong=True))
 
     scores = _round(state, dendrite, serving, good, monkeypatch)
-    assert scores['hk1'] == pytest.approx(0.8)  # 4 of 5 served requests earned full latency credit
-    assert scores['hk2'] == 0.0 and scores['hk3'] == 0.0
+    assert scores['hk1'] == pytest.approx(_pay(4 * 8, good))  # paid for the 4 completions it served, not the miss
+    assert scores['hk2'] == 0.0 and scores['hk3'] == 0.0  # struck / unverified: nothing, whatever they served
+    assert _weights(state) == {1: pytest.approx(0.8)}  # 4 of 5 served requests earned full latency credit
     w1, w2 = state.audits.verdict('hk1', good.model_id), state.audits.verdict('hk2', good.model_id)
     assert w1.passed and w1.n_audits == 5 and w1.mean == 0.8
     assert not w2.passed and w2.n_audits == 0 and w2.quarantined_until > 0  # struck
@@ -1129,11 +1147,12 @@ def test_audit_round_verifies_served_traffic(monkeypatch):
     assert state.snapshot()['probation_uids'] == [3]  # the cheater is quarantined, not on probation
     assert sum(1 for r in state.recent(50) if r.kind == 'verify') == 7
 
-    # A round in which nothing of hk1's was verified freezes its credit at what was last measured (0.8) rather
-    # than crediting a perfect round the validator never observed.
+    # A round in which nothing of hk1's was served pays nothing but keeps it READY, at the credit last measured
+    # (0.8) rather than a perfect one the validator never observed.
     scores = _round(state, dendrite, serving, good, monkeypatch)
-    assert scores['hk1'] == 0.8 and [m.uid for m in state.ready_miners()] == [1]
+    assert scores['hk1'] == 0.0 and _weights(state) == {1: pytest.approx(0.8)}
     assert state.last_credit['hk1'] == 0.8
+    assert state.last_round['windows'][1]['status'] == 'ready' and state.last_round['windows'][1]['tokens'] == 0
 
 
 def test_baseline_round_spreads_prompts_and_queues_them_for_verification(monkeypatch):
@@ -1162,7 +1181,8 @@ def test_baseline_round_spreads_prompts_and_queues_them_for_verification(monkeyp
     for q in queued:
         state.enqueue_served(q)
     scores = _round(state, dendrite, serving, good, monkeypatch)
-    assert scores['hk1'] == 1.0 and scores['hk2'] == 0.0 and scores['hk3'] == 0.0
+    assert scores == {'hk1': 0.0, 'hk2': 0.0, 'hk3': 0.0}  # baseline prompts anchor eligibility, not income
+    assert _weights(state) == {1: 1.0}
     assert state.audits.verdict('hk1', good.model_id).n_audits == 2
     assert (
         state.audits.verdict('hk2', good.model_id).n_audits == 2
@@ -1396,7 +1416,8 @@ def test_latency_credit_uses_time_to_first_token_not_total_latency(monkeypatch):
     state.enqueue_served(prompt)
     state.enqueue_served(slow)
     scores = _round(state, dendrite, [(1, 'hk1', axon), (2, 'hk2', axon)], good, monkeypatch)
-    assert scores['hk1'] == 1.0 and scores['hk2'] == pytest.approx(0.5)
+    assert _weights(state) == {1: 1.0, 2: pytest.approx(0.5)}
+    assert scores['hk1'] == scores['hk2'] == pytest.approx(_pay(8, good))  # speed routes; tokens pay
 
 
 def test_ready_miner_misses_are_logged_with_a_reason(monkeypatch):
@@ -1440,11 +1461,11 @@ def test_audit_round_skips_release_without_reference(monkeypatch):
     from gittensor.validator.serving import forward as fwd
 
     scores = asyncio.run(
-        fwd.audit_round(state, dendrite, [(1, 'hk1', axon)], ServingLoadout(releases=[bad, good]))  # type: ignore[arg-type]
+        fwd.audit_round(state, dendrite, [(1, 'hk1', axon)], ServingLoadout(releases=[bad, good]), round_s=ROUND_S)  # type: ignore[arg-type]
     )
-    assert scores == {'hk1': 1.0}
+    assert scores == {'hk1': pytest.approx(_pay(8, good))}
     assert [m.uid for m in state.ready_miners()] == [1]
-    assert state.scores_for(['v', 'hk1']) == {1: 1.0}
+    assert state.scores_for(['v', 'hk1']) == {1: pytest.approx(_pay(8, good))}
     assert state.scores_for(['v', 'other']) == {}  # UID 1's hotkey changed since the round: nothing carries over
 
 
@@ -1513,6 +1534,96 @@ def test_release_speed_curve_parses(tmp_path):
     path = tmp_path / 'loadout.json'
     path.write_text(json.dumps(raw))
     assert load_serving_loadout(path).primary.decode_per_request == {1: 440.0, 16: 19.5}
+
+
+def test_token_pay_is_derived_from_the_release_speed(tmp_path):
+    """Only the card-hour target is hand-set: the per-token rate is that target over what one card decodes in an
+    hour, so a card flat out earns exactly the card-hour, 1.5 cards' worth of tokens earns 1.5, an idle card 0."""
+    from gittensor.constants import SERVING_AGGREGATE_DECODE_TPS_FALLBACK, SERVING_GPU_HOUR_USD
+    from gittensor.serving.loadout import load_serving_loadout
+    from gittensor.validator.serving.scoring import (
+        aggregate_decode_tps,
+        card_equivalents,
+        paid_tokens,
+        token_rate_usd,
+    )
+
+    release = _echo_release()
+    release.aggregate_decode_tps = 280.0
+    hour = int(280.0 * 3600)  # ~1.0M output tokens: one 5090 for an hour on the current runtime
+    assert card_equivalents(hour, release, 3600.0) == pytest.approx(1.0)
+    assert card_equivalents(hour // 2, release, 3600.0) == pytest.approx(0.5)
+    assert card_equivalents(1_500_000, release, 3600.0) * SERVING_GPU_HOUR_USD == pytest.approx(1.04, abs=0.01)
+    assert card_equivalents(hour // 12, release, 300.0) == pytest.approx(1.0)  # one 5-minute round flat out
+    assert card_equivalents(0, release, 300.0) == 0.0 and card_equivalents(100, release, 0.0) == 0.0
+    assert token_rate_usd(release) * 1e6 == pytest.approx(0.694, abs=0.001)  # $/M output
+    assert token_rate_usd(release) * hour == pytest.approx(SERVING_GPU_HOUR_USD)
+    bare = _echo_release()
+    assert aggregate_decode_tps(bare) == SERVING_AGGREGATE_DECODE_TPS_FALLBACK
+    raw = {'releases': [{'model_id': 'm', 'backend': 'echo', 'speed': {'aggregate_decode_tps': 400}}]}
+    path = tmp_path / 'loadout.json'
+    path.write_text(json.dumps(raw))
+    assert aggregate_decode_tps(load_serving_loadout(path).primary) == 400.0
+    assert load_serving_loadout().primary.aggregate_decode_tps  # the shipped release self-prices
+    # the gateway pays what it asked for at most: a runtime that streams past max_tokens is not paid for it
+    req = _served(1, release)
+    assert paid_tokens(req) == 8
+    req.max_tokens = 5
+    assert paid_tokens(req) == 5
+    req.tokens = None
+    assert paid_tokens(req) == 0
+
+
+def test_pay_counts_gateway_tokens_the_reference_did_not_fail():
+    """Unsampled completions pay in full; a sampled one pays only if it verified; a failed request and baseline
+    prompts pay nothing; a neutral verdict (reference hiccup) still pays what the gateway saw served."""
+    import random
+
+    from gittensor.validator.serving.forward import verify_served_round
+
+    good = _echo_release()
+    ref = EchoReference(good)
+    served = [_served(1, good) for _ in range(12)]  # min(10, 20%) sampled: 2 go unverified
+    served += [_served(2, good), _served(2, good, wrong=True), _served(2, good, ok=False)]
+    baseline = _served(3, good)
+    baseline.source = 'baseline'
+    served.append(baseline)
+    state = ServingState()
+    summary: Dict[str, int] = {}
+    speeds, tokens = verify_served_round(state, ref, good, served, summary, rng=random.Random(0))
+    assert summary['unsampled'] == 2 and len(speeds['hk1']) == 10
+    assert tokens == {'hk1': 12 * 8, 'hk2': 8}  # hk2: one completion paid, the wrong one and the miss are not
+    assert state.audits.verdict('hk2', good.release_id).quarantined_until > 0  # ... and the strike stands
+
+    class Flaky:
+        """A reference that cannot be reached: every verdict neutral."""
+
+        model_id = good.model_id
+        max_tokens = good.max_tokens
+
+        def case_for(self, messages, max_tokens=None):
+            raise ConnectionError('reference down')
+
+    state = ServingState()
+    _, tokens = verify_served_round(state, Flaky(), good, [_served(1, good)], {})  # type: ignore[arg-type]
+    assert tokens == {'hk1': 8}
+
+
+def test_emission_pool_is_the_only_ceiling(monkeypatch):
+    """Below the cap every token is paid at the full rate; above it the pool is split by token share."""
+    from gittensor.classes import ServingPricing
+    from gittensor.validator import emission_allocation as ea
+
+    monkeypatch.setattr(ea, 'SERVING_GPU_HOUR_USD', 0.70)
+    monkeypatch.setattr(ea, 'SERVING_EMISSION_SHARE_CAP', 0.17)
+    monkeypatch.setattr(ea, 'OSS_EMISSION_SHARE', 0.83)
+    pricing = ServingPricing(alpha_per_hour_to_miners=100.0, alpha_usd=0.7)  # one card-hour = 1% of emissions
+    uids = {0, 1, 2}
+    below = ea.blend_emission_pools({}, {}, uids, None, {1: 1.5, 2: 0.5}, pricing)  # 1.5M + 0.5M tokens/h
+    assert below[1] == pytest.approx(0.015) and below[2] == pytest.approx(0.005)  # full rate, no per-hotkey cap
+    above = ea.blend_emission_pools({}, {}, uids, None, {1: 30.0, 2: 10.0}, pricing)  # 40 card-hours > 17 cap
+    assert above[1] == pytest.approx(0.17 * 0.75) and above[2] == pytest.approx(0.17 * 0.25)
+    assert above[0] == pytest.approx(0.83)  # nothing of the serving cap recycles once it binds
 
 
 def test_serving_share_prices_gpu_hours_inside_the_cap(monkeypatch):
@@ -1830,8 +1941,9 @@ def test_attest_cohort_is_random_half_plus_unproven_and_failed():
 def test_attest_round_gates_pay_and_persists(monkeypatch, tmp_path):
     import asyncio
 
-    """No verdict -> probation; a failing cohort member scores 0; a passing one keeps its speed credit; non-cohort
-    members keep their last verdict; duplicate GPU UUIDs fail both; status survives the store."""
+    """No verdict -> probation; a failing cohort member is not admitted; a passing one is; non-cohort members keep
+    their last verdict; two hotkeys behind one card are both admitted (they split its tokens); status survives
+    the store."""
     import random
     from types import SimpleNamespace
 
@@ -1853,21 +1965,22 @@ def test_attest_round_gates_pay_and_persists(monkeypatch, tmp_path):
     state = ServingState()
     candidates = [(1, 'hk1', axons['hk1']), (2, 'hk2', axons['hk2']), (3, 'hk3', axons['hk3'])]
     out = asyncio.run(att.attest_round(state, dendrite, candidates, release, rng=random.Random(0)))  # type: ignore[arg-type]
-    assert out == {'hk1': False, 'hk2': False, 'hk3': False}  # hk2 wrong digest; hk1/hk3 share GPU-1
+    assert out == {'hk1': True, 'hk2': False, 'hk3': True}  # hk2 wrong digest; nothing counts cards
     assert state.attest_status['hk2']['reason'] == 'digest mismatch'
-    assert 'duplicate GPU' in state.attest_status['hk1']['reason']
+    assert state.attest_status['hk1']['reason'] == 'ok' and 'capacity' not in state.attest_status['hk1']
 
-    replies[id(axons['hk3'])] = _attest_reply(uuid='GPU-3')
+    replies[id(axons['hk2'])] = _attest_reply(uuid='GPU-2')
     out = asyncio.run(att.attest_round(state, dendrite, candidates, release, rng=random.Random(0)))  # type: ignore[arg-type]
-    assert out['hk1'] and out['hk3'] and not out['hk2']  # all three were re-challenged (none had passed)
+    assert out == {'hk1': True, 'hk2': True, 'hk3': True}  # the failure was re-challenged; the others carried
     store = ServingStore(tmp_path / 'serving.db')
     store.save(state)
     again = store.load(ServingState())
-    assert again.attest_status['hk1']['uuid'] == 'GPU-1' and again.attest_status['hk2']['passed'] is False
+    assert again.attest_status['hk1']['uuid'] == 'GPU-1' and again.attest_status['hk2']['passed'] is True
 
     monkeypatch.setattr(att, 'reference_challenge', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('ref down')))
+    replies[id(axons['hk2'])] = _attest_reply(uuid='GPU-2', digest='wrong')
     neutral = asyncio.run(att.attest_round(state, dendrite, candidates, release))  # type: ignore[arg-type]
-    assert neutral == {'hk1': True, 'hk2': False, 'hk3': True}  # reference down: nothing changes
+    assert neutral == {'hk1': True, 'hk2': True, 'hk3': True}  # reference down: nothing changes
 
 
 def test_audit_round_requires_attestation_when_a_reference_is_configured(monkeypatch):
@@ -1889,7 +2002,7 @@ def test_audit_round_requires_attestation_when_a_reference_is_configured(monkeyp
     for uid in (1, 2):
         state.enqueue_served(_served(uid, release))
     scores = _round(state, dendrite, [(1, 'hk1', good), (2, 'hk2', bad)], release, monkeypatch)
-    assert scores == {'hk1': 1.0, 'hk2': 0.0}
+    assert scores == {'hk1': pytest.approx(_pay(8, release)), 'hk2': 0.0}
     snap = state.snapshot()
     assert snap['ready_uids'] == [1] and snap['probation_uids'] == [2]  # failed attest: not READY, not struck
     w = state.audits.verdict('hk2', release.model_id)
@@ -1985,34 +2098,35 @@ def _card(uuid: str, digest: str = 'd', wall_ms: float = 1500.0, filled: int = 8
     return dev
 
 
-def test_attest_judges_every_card_and_counts_capacity():
-    """One hotkey, N cards: each card is judged alone; capacity = passing cards; the reason names the first failure;
-    a card without the model resident earns nothing."""
+def test_attest_judges_every_card_and_admits_on_any():
+    """One hotkey, N cards: each card is judged alone; the hotkey passes with any passing card; the reason names the
+    first failure; a card without the model resident is not a serving card."""
     from gittensor.synapses import AttestSynapse
     from gittensor.validator.serving.attest import judge
 
     release = _attest_release()
     two = judge(AttestSynapse(seed=1, devices=[_card('GPU-a'), _card('GPU-b')]), 'd', 1400.0, release)
-    assert two.passed and two.capacity == 2 and two.uuids == ['GPU-a', 'GPU-b'] and two.reason == 'ok (2 cards)'
+    assert two.passed and two.uuids == ['GPU-a', 'GPU-b'] and two.reason == 'ok (2 cards)'
     one_bad = judge(
         AttestSynapse(seed=1, devices=[_card('GPU-a'), _card('GPU-b', wall_ms=9_000.0)]), 'd', 1400.0, release
     )
-    assert one_bad.passed and one_bad.capacity == 1 and one_bad.uuids == ['GPU-a']
+    assert one_bad.passed and one_bad.uuids == ['GPU-a']
     assert one_bad.reason.startswith('1/2 cards ok (too slow')
     none = judge(
         AttestSynapse(seed=1, devices=[_card('GPU-a', digest='x'), _card('GPU-b', digest='x')]), 'd', 1400.0, release
     )
-    assert not none.passed and none.capacity == 0 and none.reason == 'digest mismatch'
+    assert not none.passed and none.uuids == [] and none.reason == 'digest mismatch'
     loaded = judge(AttestSynapse(seed=1, devices=[_card('GPU-a', free_before=9e9)]), 'd', 1400.0, release)
     assert loaded.passed
     bare = judge(AttestSynapse(seed=1, devices=[_card('GPU-a', free_before=33e9)]), 'd', 1400.0, release)
     assert not bare.passed and bare.reason.startswith('model not resident')
     status = two.as_status(0.0, 1)
-    assert status['capacity'] == 2 and status['uuids'] == ['GPU-a', 'GPU-b'] and len(status['cards']) == 2
+    assert status['uuids'] == ['GPU-a', 'GPU-b'] and len(status['cards']) == 2 and 'capacity' not in status
 
 
-def test_attest_round_pays_per_card_and_dedupes_across_cards(monkeypatch):
-    """A two-card hotkey scores credit x 2; a second hotkey reporting one of those cards fails both."""
+def test_pay_follows_served_tokens_not_attested_cards(monkeypatch):
+    """A two-card hotkey and a one-card hotkey that served the same tokens are paid the same; the card count is
+    telemetry. Attestation admits, and a failed attest zeroes the round's pay however much was served."""
     import asyncio
     import random
     from types import SimpleNamespace
@@ -2035,24 +2149,11 @@ def test_attest_round_pays_per_card_and_dedupes_across_cards(monkeypatch):
     state = ServingState()
     candidates = [(1, 'hk1', axons['hk1']), (2, 'hk2', axons['hk2'])]
     out = asyncio.run(att.attest_round(state, dendrite, candidates, release, rng=random.Random(0)))  # type: ignore[arg-type]
-    assert out == {'hk1': 2, 'hk2': 1}
-    assert att.status_capacity(state.attest_status['hk1']) == 2
-    assert att.status_capacity({'passed': True, 'uuid': 'GPU-old'}) == 1  # status persisted before capacity existed
+    assert out == {'hk1': True, 'hk2': True}
+    assert att.status_passed(state.attest_status['hk1']) and state.attest_status['hk1']['uuids'] == ['GPU-a', 'GPU-b']
+    assert att.status_passed({'passed': True, 'uuid': 'GPU-old'})  # a status persisted before this change
 
-    # hk1 holds GPU-b from the round it passed with it: a newcomer naming that UUID loses the card, hk1 keeps it
-    replies[id(axons['hk2'])] = AttestSynapse(seed=1, devices=[_card('GPU-b')])  # hk1's second card
-    state.attest_status = {}
-    out = asyncio.run(att.attest_round(state, dendrite, candidates, release, rng=random.Random(0)))  # type: ignore[arg-type]
-    assert out == {'hk1': 2, 'hk2': 0}
-    assert state.attest_status['hk2']['reason'] == 'duplicate GPU GPU-b (held by another hotkey)'
-    assert state.uuid_owner['GPU-b'][0] == 'hk1'
-    # the same collision with no holder on record (both new this round) is the sharing case: both lose it
-    fresh = ServingState()
-    out = asyncio.run(att.attest_round(fresh, dendrite, candidates, release, rng=random.Random(0)))  # type: ignore[arg-type]
-    assert out == {'hk1': 1, 'hk2': 0}  # hk1 keeps GPU-a, loses GPU-b; hk2 had only GPU-b
-    assert 'GPU-b' not in fresh.uuid_owner and fresh.uuid_owner['GPU-a'][0] == 'hk1'
-
-    # the audit round multiplies the speed credit by the attested cards
+    # the audit round pays the tokens the gateway saw served; the cards behind a hotkey do not enter
     good = _echo_release()
     good.attest_reference_url = 'http://ref:8081'
     good.vram_model_reserved_bytes = 24e9
@@ -2076,9 +2177,31 @@ def test_attest_round_pays_per_card_and_dedupes_across_cards(monkeypatch):
             attest_rng=random.Random(0),
         )
     )
-    assert scores['hk1'] == pytest.approx(2.0) and scores['hk2'] == pytest.approx(1.0)
+    assert scores['hk1'] == scores['hk2'] == pytest.approx(_pay(3 * 8, good))
     tele = state.snapshot()['last_round']['windows']
-    assert tele[1]['capacity'] == 2.0 and tele[1]['gpu_uuids'] == ['GPU-a', 'GPU-b'] and tele[2]['capacity'] == 1.0
+    assert tele[1]['gpu_uuids'] == ['GPU-a', 'GPU-b'] and tele[2]['gpu_uuids'] == ['GPU-c']
+    assert tele[1]['tokens'] == tele[2]['tokens'] == 24 and tele[1]['attested'] and tele[2]['attested']
+
+    # a hotkey that fails attestation is paid nothing for the round, whatever it served, and is not READY
+    for _ in range(3):
+        state.enqueue_served(_served(1, good))
+        state.enqueue_served(_served(2, good))
+    replies[id(axons['hk2'])] = AttestSynapse(seed=1, devices=[_card('GPU-c', digest='x')])
+    state.attest_status = {}
+    scores = asyncio.run(
+        fwd.audit_round(
+            state,
+            echo_dendrite,  # type: ignore[arg-type]
+            [(1, 'hk1', axons['hk1']), (2, 'hk2', axons['hk2'])],  # type: ignore[arg-type]
+            loadout=SimpleNamespace(releases=[good]),
+            attest_rng=random.Random(0),
+            round_s=ROUND_S,
+        )
+    )
+    assert scores == {'hk1': pytest.approx(_pay(24, good)), 'hk2': 0.0}
+    assert state.snapshot()['ready_uids'] == [1] and state.snapshot()['probation_uids'] == [2]
+    tele = state.snapshot()['last_round']['windows']
+    assert tele[2]['tokens'] == 24 and not tele[2]['attested'] and tele[2]['status'] == 'probation'
 
 
 def test_attest_cards_answer_their_own_index_and_the_round_trip_bounds_the_count():
@@ -2095,7 +2218,7 @@ def test_attest_cards_answer_their_own_index_and_the_round_trip_bounds_the_count
         1400.0,
         release,
     )
-    assert faked.capacity == 1 and faked.reason.startswith('1/2 cards ok (digest mismatch')
+    assert faked.uuids == ['GPU-a'] and faked.reason.startswith('1/2 cards ok (digest mismatch')
     honest = judge(
         AttestSynapse(seed=1, devices=[_card('GPU-a', digest='d0'), _card('GPU-b', digest='d1')]),
         per_index,
@@ -2103,15 +2226,15 @@ def test_attest_cards_answer_their_own_index_and_the_round_trip_bounds_the_count
         release,
         elapsed_ms=1500.0,
     )
-    assert honest.capacity == 2
+    assert honest.uuids == ['GPU-a', 'GPU-b']
     beyond = judge(
         AttestSynapse(seed=1, devices=[_card(f'GPU-{i}', digest=f'd{i}') for i in range(4)]), per_index, 1400.0, release
     )
-    assert beyond.capacity == 3 and 'no reference digest' in beyond.reason
+    assert len(beyond.uuids) == 3 and 'no reference digest' in beyond.reason
     slow = judge(
         AttestSynapse(seed=1, devices=[_card('GPU-a', digest='d0')]), per_index, 1400.0, release, elapsed_ms=9_000.0
     )
-    assert not slow.passed and slow.capacity == 0 and 'round trip' in slow.reason
+    assert not slow.passed and slow.uuids == [] and 'round trip' in slow.reason
     capped = judge(
         AttestSynapse(seed=1, devices=[_card(f'GPU-{i}', digest='d') for i in range(20)]),
         'd',
@@ -2119,12 +2242,12 @@ def test_attest_cards_answer_their_own_index_and_the_round_trip_bounds_the_count
         release,
         max_cards=3,
     )
-    assert capped.capacity == 3
+    assert len(capped.cards) == 3
 
 
 def test_attest_malformed_report_is_a_failed_card_not_a_crash():
     from gittensor.synapses import AttestSynapse
-    from gittensor.validator.serving.attest import judge, status_capacity
+    from gittensor.validator.serving.attest import judge, status_passed
 
     release = _attest_release()
     bad = judge(
@@ -2135,10 +2258,10 @@ def test_attest_malformed_report_is_a_failed_card_not_a_crash():
         AttestSynapse(seed=1, devices=[{'uuid': 'GPU-a', 'digest': 'd', 'vram_total': [1]}]), 'd', 1400.0, release
     )
     assert not nested.passed and nested.reason.startswith('malformed device report')
-    # a verdict the reference has not renewed for longer than the memory window pays nothing
-    stale = {'passed': True, 'capacity': 2, 'round': 1}
-    assert status_capacity(stale, round_no=13) == 2 and status_capacity(stale, round_no=14) == 0
-    assert status_capacity(stale) == 2
+    # a verdict the reference has not renewed for longer than the memory window admits nothing
+    stale = {'passed': True, 'round': 1}
+    assert status_passed(stale, round_no=13) and not status_passed(stale, round_no=14)
+    assert status_passed(stale) and not status_passed({'passed': False, 'round': 13}, round_no=13)
 
 
 def test_attest_fault_is_neutral_and_the_round_counter_persists(monkeypatch, tmp_path):
@@ -2157,14 +2280,14 @@ def test_attest_fault_is_neutral_and_the_round_counter_persists(monkeypatch, tmp
 
     dendrite = SimpleNamespace(call=call)
     state = ServingState()
-    assert asyncio.run(att.attest_round(state, dendrite, [(1, 'hk1', axon)], release)) == {'hk1': 1}  # type: ignore[arg-type]
+    assert asyncio.run(att.attest_round(state, dendrite, [(1, 'hk1', axon)], release)) == {'hk1': True}  # type: ignore[arg-type]
     monkeypatch.setattr(att, 'judge', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('boom')))
-    assert asyncio.run(att.attest_round(state, dendrite, [(1, 'hk1', axon)], release)) == {'hk1': 1}  # type: ignore[arg-type]
-    assert state.attest_round == 2 and state.uuid_owner['GPU-1'] == ('hk1', 1)
+    assert asyncio.run(att.attest_round(state, dendrite, [(1, 'hk1', axon)], release)) == {'hk1': True}  # type: ignore[arg-type]
+    assert state.attest_round == 2
     store = ServingStore(tmp_path / 'serving.db')
     store.save(state)
     again = store.load(ServingState())
-    assert again.attest_round == 2 and again.uuid_owner == {'GPU-1': ('hk1', 1)}
+    assert again.attest_round == 2 and again.attest_status['hk1']['uuid'] == 'GPU-1'
 
 
 def test_reference_challenge_sends_the_bearer(monkeypatch):
@@ -2460,14 +2583,14 @@ def test_seed_ready_from_store_republishes_without_settling():
             state.audits.record(hk, release.release_id, 1.0)
     state.audits.strike('hk2', release.release_id)  # quarantined: neither READY nor probation
     state.last_credit.update({'hk1': 0.9, 'hk2': 0.9})  # hk4 passed its window but has no measured credit
-    state.attest_status['hk1'] = {'passed': True, 'capacity': 2, 'round': 0}
-    state.attest_status['hk4'] = {'passed': True, 'capacity': 1, 'round': 0}
+    state.attest_status['hk1'] = {'passed': True, 'round': 0}
+    state.attest_status['hk4'] = {'passed': True, 'round': 0}
     state.last_round_ts = time.time() - 60.0
 
     fwd.seed_ready_from_store(validator, state, loadout=loadout)  # type: ignore[arg-type]
     ready = state.ready_miners()
     assert [(m.uid, m.release_id) for m in ready] == [(1, release.release_id)]
-    assert ready[0].score == pytest.approx(1.8)  # the last measured credit times the attested cards
+    assert ready[0].score == pytest.approx(0.9)  # routed at the last measured credit
     assert state.snapshot()['probation_uids'] == [3, 4]
     assert state.settled_scores() == {}  # a seed pays nothing
 

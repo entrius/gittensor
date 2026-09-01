@@ -41,9 +41,10 @@ def blend_emission_pools(
     is carved off the top and split evenly among those maintainers; the
     remainder scores normally. Repos with no listed maintainers are unaffected.
 
-    ``serving_scores`` are settled card-equivalents per UID; ``serving_share``
-    prices them at ``SERVING_GPU_HOUR_USD`` inside ``SERVING_EMISSION_SHARE_CAP``
-    and the pool is split pro-rata. Whatever the fleet does not earn recycles.
+    ``serving_scores`` are settled card-equivalents per UID (served output tokens
+    over what one card decodes in the hour); ``serving_share`` prices them at
+    ``SERVING_GPU_HOUR_USD`` inside ``SERVING_EMISSION_SHARE_CAP`` and the pool is
+    split pro-rata by token share. Whatever the fleet does not earn recycles.
     """
     sorted_uids = sorted(miner_uids)
     uid_index = {uid: idx for idx, uid in enumerate(sorted_uids)}
@@ -63,7 +64,7 @@ def blend_emission_pools(
         for uid, reward in allocation.issue_discovery_rewards.items():
             rewards[uid_index[uid]] += reward
 
-    # Serving pool: priced per verified GPU-hour inside the cap; unclaimed recycles.
+    # Serving pool: served tokens priced as card-hours inside the cap; unclaimed recycles.
     if SERVING_EMISSION_SHARE_CAP > 0:
         card_equiv = sum(serving_scores.values()) if serving_scores else 0.0
         share = serving_share(card_equiv, serving_pricing, allow_unpriced_cap)
@@ -203,11 +204,11 @@ def _repo_has_scorers(
 
 
 def serving_share(card_equiv: float, pricing: Optional[ServingPricing], allow_unpriced_cap: bool = False) -> float:
-    """Emission share that pays ``card_equiv`` verified cards ``SERVING_GPU_HOUR_USD`` each, capped.
+    """Emission share that pays ``card_equiv`` card-hours of served tokens ``SERVING_GPU_HOUR_USD`` each, capped.
 
     Without usable pricing the pool pays nothing and recycles, unless ``allow_unpriced_cap`` — a network with no
     price to read (testnet) — where the whole cap is paid pro-rata. Paying the cap on a priced network would hand
-    one verified card 3.5% of emissions the moment a price read failed.
+    one verified card the whole cap the moment a price read failed.
     """
     if card_equiv <= 0:
         return 0.0

@@ -160,17 +160,18 @@ jobs:
           path: conformance-${{ env.REF }}/
           if-no-files-found: warn
 
-      - name: Bump runtime_pin, runtime_image and the release's speed facts
+      - name: Bump runtime_pin and runtime_image; fill speed facts only where the release has none
         run: |
           jq --arg pin "gittensor-ai-lab/sparkinfer@$REF" --arg image "entrius/sparkinfer:$TAG@$DIGEST" --arg run "$GITHUB_RUN_ID" \
             --slurpfile speed "conformance-$REF/speed.json" \
             '.releases[0].runtime_pin = $pin
              | .releases[0].runtime_image = $image
-             | .releases[0].speed = ((.releases[0].speed // {}) + {
-                 single_stream_decode_tps: $speed[0].single_stream_decode_tps,
-                 aggregate_decode_tps: $speed[0].aggregate_decode_tps,
-                 decode_per_request: $speed[0].decode_per_request,
-                 measured_on: ($pin + " on a rented RTX 5090, actions run " + $run)
+             | (.releases[0].speed // {}) as $cur
+             | .releases[0].speed = ($cur + {
+                 single_stream_decode_tps: ($cur.single_stream_decode_tps // $speed[0].single_stream_decode_tps),
+                 aggregate_decode_tps: ($cur.aggregate_decode_tps // $speed[0].aggregate_decode_tps),
+                 decode_per_request: ($cur.decode_per_request // $speed[0].decode_per_request),
+                 measured_on: ($cur.measured_on // ($pin + " on a rented RTX 5090, actions run " + $run))
                })
              | .releases[0].attest = ((.releases[0].attest // {}) + {
                  iters: ($speed[0].attest.attest_iters // 3),
@@ -193,8 +194,10 @@ jobs:
             `entrius/sparkinfer:${{ env.REF }}` passed `scripts/check_serving_runtime.py` on a rented RTX 5090
             (run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} — report in the
             `serving-conformance-${{ env.REF }}` artifact). This bumps `runtime_pin`, pins `runtime_image` to the pushed
-            image's digest, and writes the release's
-            blessing-time speed facts (`speed.decode_per_request`, the per-request decode curve served traffic is
-            priced against) and attestation facts (`attest.*`). Update the sha named in the comments at
+            image's digest, and writes the attestation facts (`attest.reference_wall_ms`). Speed facts
+            (`speed.aggregate_decode_tps` sets the per-token pay rate; `speed.decode_per_request` is the curve served
+            traffic is priced against) are filled only where the release has none: a CI host measured over the
+            network reads 10-25% under an on-box blessing, so re-blessing throughput is a deliberate human edit — the
+            run's measurement is in the artifact's `speed.json`. Update the sha named in the comments at
             `gittensor/constants.py` and `gittensor/serving/audit.py` if the blessing rules changed.
           add-paths: gittensor/validator/weights/serving_loadout.json

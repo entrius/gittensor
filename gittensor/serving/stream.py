@@ -184,10 +184,12 @@ async def consume_stream(
         except StopAsyncIteration:
             break
         except asyncio.TimeoutError:
-            try:
-                await stream.aclose()
-            except Exception:
-                pass
+            aclose = getattr(stream, 'aclose', None)
+            if aclose is not None:
+                try:
+                    await aclose()
+                except Exception:
+                    pass
             raise TimeoutError(f'no first byte from the axon within {first_byte_s}s')
         waiting_first = False
         if isinstance(chunk, (bytes, bytearray)):

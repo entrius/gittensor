@@ -145,7 +145,9 @@ jobs:
       - name: Rent, boot, check, tear down
         env:
           CONFORMANCE_RENT_WAIT_MIN: "20"
-        run: scripts/serving_conformance_on_lium.sh "$TAG" "conformance-$REF"
+        run: |
+          ssh-keygen -t ed25519 -N '' -q -f "$RUNNER_TEMP/lium_ci"
+          LIUM_SSH_KEY_PATH="$RUNNER_TEMP/lium_ci" scripts/serving_conformance_on_lium.sh "$TAG" "conformance-$REF"
 
       - name: Upload the report
         if: always()
@@ -163,6 +165,7 @@ jobs:
              | .releases[0].runtime_image = $image
              | .releases[0].speed = ((.releases[0].speed // {}) + {
                  single_stream_decode_tps: $speed[0].single_stream_decode_tps,
+                 aggregate_decode_tps: $speed[0].aggregate_decode_tps,
                  decode_per_request: $speed[0].decode_per_request,
                  measured_on: ($pin + " on a rented RTX 5090, actions run " + $run)
                })

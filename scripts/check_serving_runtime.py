@@ -340,6 +340,9 @@ def speed_profile(base_url: str, model_id: str, max_tokens: int, timeout: float,
     }
 
 
+MODEL_RESIDENT_MIN_BYTES = 8_000_000_000
+
+
 def check_attest(rep: Report, base_url: str, timeout: float, attest_url: Optional[str] = None) -> Dict:
     """A1: the attest container beside the runtime (entrius/gt-attest, :8081 on the runtime's host unless
     ``attest_url`` says otherwise) answers a seeded challenge with a deterministic digest inside 3 s idle — the
@@ -365,11 +368,17 @@ def check_attest(rep: Report, base_url: str, timeout: float, attest_url: Optiona
     again = requests.post(f'{attest_url}/v1/attest', json={'seed': 12345, 'iters': 3, 'fill': True}, timeout=timeout)
     same = again.ok and (again.json().get('devices') or [again.json()])[0].get('digest') == dev.get('digest')
     rep.add('A1 digest deterministic for a seed', MUST, bool(same))
-    facts.update(
-        attest_ref_wall_ms=round(wall, 1),
-        attest_iters=3,
-        vram_model_reserved_bytes=int(dev.get('vram_total') or 0) - int(dev.get('vram_free_before') or 0),
-    )
+    facts.update(attest_ref_wall_ms=round(wall, 1), attest_iters=3)
+    # What the model holds on a card is only measurable on a card that holds it. The conformance attest pod is a
+    # bare gt-attest image, so its reservation is the attest server's own few hundred MB; writing that into the
+    # release would make every honest miner "under-filled" (expected free ~= the whole card).
+    reserved = int(dev.get('vram_total') or 0) - int(dev.get('vram_free_before') or 0)
+    if reserved >= MODEL_RESIDENT_MIN_BYTES:
+        facts['vram_model_reserved_bytes'] = reserved
+    else:
+        print(
+            f'      attest card holds {reserved / 1e9:.1f} GB, no model resident: vram_model_reserved_bytes not measured'
+        )
     return facts
 
 

@@ -104,7 +104,6 @@ SSH_URL=$(pod_url "$POD" 22); SSH_HP=${SSH_URL#http://}; SSH_HOST=${SSH_HP%%:*};
 [ -n "$SSH_HOST" ] && [ -n "$SSH_PORT" ] || { echo "runtime pod has no public ssh port"; lium ps; exit 2; }
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=15
           -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -p "$SSH_PORT")
-[ -n "${LIUM_SSH_KEY_PATH:-}" ] && SSH_OPTS+=(-i "$LIUM_SSH_KEY_PATH")
 TUNNEL="http://127.0.0.1:18080"
 for ((i = 0; i < 12; i++)); do
   ssh "${SSH_OPTS[@]}" -N -L 18080:127.0.0.1:8080 "root@$SSH_HOST" 2>/dev/null &

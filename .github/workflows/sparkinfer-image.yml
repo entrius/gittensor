@@ -145,9 +145,12 @@ jobs:
       - name: Rent, boot, check, tear down
         env:
           CONFORMANCE_RENT_WAIT_MIN: "20"
+        # lium registers ~/.ssh/id_ed25519 with every pod it rents (the SDK reads only that path); the checker's
+        # ssh tunnel into the runtime pod uses the same key.
         run: |
-          ssh-keygen -t ed25519 -N '' -q -f "$RUNNER_TEMP/lium_ci"
-          LIUM_SSH_KEY_PATH="$RUNNER_TEMP/lium_ci" scripts/serving_conformance_on_lium.sh "$TAG" "conformance-$REF"
+          mkdir -p -m 700 ~/.ssh
+          [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -N '' -q -f ~/.ssh/id_ed25519
+          scripts/serving_conformance_on_lium.sh "$TAG" "conformance-$REF"
 
       - name: Upload the report
         if: always()

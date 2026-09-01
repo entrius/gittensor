@@ -201,16 +201,18 @@ INSERT_SERVING_ROUND = """
 INSERT INTO serving_rounds (
     validator_hotkey, round_ts, served, gateway, baseline, passes, misses, strikes, neutral,
     ready, probation, quarantined, card_equivalents, pool_share, alpha_per_hour, alpha_usd,
-    gpu_hour_usd, pool_cap, model_id, release_id, runtime_pin, model_sha256, model_file, runtime_image, attest_image
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    gpu_hour_usd, pool_cap, model_id, release_id, runtime_pin, model_sha256, model_file, runtime_image, attest_image,
+    tokens, usd_per_m_tokens
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (validator_hotkey, round_ts) DO NOTHING
 """
 
 BULK_INSERT_SERVING_MINER_ROUNDS = """
 INSERT INTO serving_miner_rounds (
     validator_hotkey, round_ts, uid, hotkey, model_id, release_id, status, window_mean, window_n, window_passed,
-    quarantined_until, served, credit, ttft_ms, decode_tps, capacity, round_score, settled_score, last_miss_reason
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    quarantined_until, served, credit, ttft_ms, decode_tps, capacity, round_score, settled_score, last_miss_reason,
+    tokens
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (validator_hotkey, round_ts, uid, hotkey) DO NOTHING
 """
 

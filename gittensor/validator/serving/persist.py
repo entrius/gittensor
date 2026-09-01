@@ -21,6 +21,7 @@ from gittensor.constants import SERVING_DB_RETENTION_DAYS, SERVING_EMISSION_SHAR
 from gittensor.serving.loadout import ServingRelease
 from gittensor.serving.state import ServingState
 from gittensor.validator.emission_allocation import serving_share
+from gittensor.validator.serving.scoring import token_rate_usd
 from gittensor.validator.storage.database import create_database_connection
 from gittensor.validator.storage.queries import (
     BULK_INSERT_SERVING_MINER_ROUNDS,
@@ -43,7 +44,8 @@ def round_rows(
 
     ``card_equivalents`` and ``pool_share`` are what the next OSS round will pay on: settled scores (served tokens
     in card-hours) summed, priced through ``serving_share`` exactly as ``blend_emission_pools`` does. The economics
-    ($/card-hour, cap) and the enforced release (pin, digest) ride along so readers never hard-code them.
+    ($/card-hour, cap, $/M output tokens), the paid token volume and the enforced release (pin, digest) ride along
+    so readers never hard-code them.
     """
     windows: Dict[int, dict] = last_round.get('windows', {})
     card_equiv = sum(settled.values())
@@ -74,6 +76,8 @@ def round_rows(
         release.model_file if release else None,
         release.runtime_image if release else None,
         release.attest_image if release else None,
+        sum(int(w.get('tokens', 0)) for w in windows.values()),
+        token_rate_usd(release) * 1e6 if release else None,
     )
     miners = []
     for uid, w in windows.items():
@@ -99,6 +103,7 @@ def round_rows(
                 float(w.get('score', 0.0)),
                 float(settled.get(str(w.get('hotkey', '')), 0.0)),
                 (str(w.get('last_miss', '') or '')[:500]) or None,
+                int(w.get('tokens', 0)),
             )
         )
     return summary, miners

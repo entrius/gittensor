@@ -32,7 +32,13 @@ trap cleanup EXIT
 # a bare .id there indexes a string and kills the run — and only ever when a matching card IS listed.
 # Prints the cheapest free 1x$GPU executor id not in $1 (space-separated ids already taken).
 free_node() {
-  lium ls --format json 2>/dev/null | jq -r --arg gpu "RTX$GPU" --arg taken " $1 " \
+  local listing
+  listing=$(lium ls --format json 2>/dev/null || true)
+  if ! printf '%s\n' "$listing" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    echo "lium ls returned no JSON listing this minute, retrying: ${listing:0:120}" >&2
+    return 0
+  fi
+  printf '%s\n' "$listing" | jq -r --arg gpu "RTX$GPU" --arg taken " $1 " \
     '[.[] | select(type == "object") | . as $n
        | select(($n.id | type) == "string" and $n.gpu_type == $gpu and $n.gpu_count == 1
                 and ($n.vram_gb // 0) >= 30 and ($n.download_mbps // 0) >= 150

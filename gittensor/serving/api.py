@@ -141,13 +141,18 @@ def build_app(
             release = loadout.get(str(wanted)) if wanted else primary
         except KeyError:
             raise HTTPException(status_code=404, detail=f'model {wanted!r} is not served; see /v1/models')
+        raw_max = body.get('max_tokens', body.get('max_completion_tokens'))
         try:
-            max_tokens = int(body.get('max_tokens') or body.get('max_completion_tokens') or release.max_tokens)
+            max_tokens = int(raw_max) if raw_max is not None else release.max_tokens
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail='max_tokens must be an integer')
-        max_tokens = max(1, min(max_tokens, SERVING_MAX_TOKENS))
+        if max_tokens <= 0:
+            raise HTTPException(status_code=400, detail='max_tokens must be positive')
+        max_tokens = min(max_tokens, SERVING_MAX_TOKENS)
         want_logprobs = bool(body.get('logprobs', False))
         want_stream = bool(body.get('stream', False))
+        stream_options = body.get('stream_options')
+        include_usage = isinstance(stream_options, dict) and bool(stream_options.get('include_usage'))
 
         request_id = f'chatcmpl-{uuid.uuid4().hex[:24]}'
         created = int(time.time())
@@ -266,7 +271,11 @@ def build_app(
                     event = first
                     try:
                         while event is not _END:
-                            yield SSE_DONE if event is None else sse_event(reshape(event))  # type: ignore[arg-type]
+                            if event is None:
+                                yield SSE_DONE
+                            # OpenAI emits the choices-less usage chunk only when stream_options asks for it.
+                            elif include_usage or event.get('choices') or 'usage' not in event:  # type: ignore[union-attr]
+                                yield sse_event(reshape(event))  # type: ignore[arg-type]
                             event = await queue.get()
                     finally:
                         finish(await outcome())

@@ -335,6 +335,8 @@ async def baseline_round(
             response = await consume_stream(
                 dendrite, axon, synapse, release.request_timeout, first_byte_s=SERVING_BASELINE_FIRST_BYTE_S
             )
+        except asyncio.CancelledError as e:  # a cancelled probe is this hotkey's miss, never the thread's death
+            response, err = None, repr(e)
         except Exception as e:
             response, err = None, repr(e)
         else:

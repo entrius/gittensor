@@ -1588,6 +1588,30 @@ def test_consume_stream_first_byte_bound_cuts_silence_not_slowness():
     assert out.completion
 
 
+def test_first_byte_timeout_never_leaks_cancellation():
+    """The audit thread died in soak 11 when the first-byte cancel surfaced as a bare CancelledError."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from gittensor.serving.stream import consume_stream
+    from gittensor.synapses import InferenceSynapse
+
+    good = _echo_release()
+    axon = SimpleNamespace(is_serving=True)
+    syn = InferenceSynapse(messages=MSGS, model_id=good.model_id, max_tokens=4, logprobs=True)
+
+    class Stubborn:
+        async def call_stream(self, **kw):
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                raise asyncio.CancelledError('fresh cancel from stream internals')
+            yield kw['synapse']
+
+    with pytest.raises(TimeoutError, match='first byte'):
+        asyncio.run(consume_stream(Stubborn(), axon, syn, 60.0, first_byte_s=0.05))  # type: ignore[arg-type]
+
+
 def test_latency_credit_uses_time_to_first_token_not_total_latency(monkeypatch):
     """A long answer that streamed promptly earns full credit; a slow first token does not."""
     from types import SimpleNamespace

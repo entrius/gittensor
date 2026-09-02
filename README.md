@@ -57,7 +57,7 @@ See full guide **[here](https://docs.gittensor.io/miner.html)**
 ### Compute miners (serving)
 
 Gittensor also pays verified GPU time: an RTX 5090 running the blessed inference release earns **$0.70 per
-verified GPU-hour** (paid in alpha, inside a 3.5% emission cap). Validators verify the traffic they route to you
+verified GPU-hour** (paid in alpha, inside a 5% emission cap). Validators verify the traffic they route to you
 against their own reference GPU — there is no separate audit prompt set — so a new miner sits in *probation*
 until its rolling window passes, then goes READY. One card = one payout; extra hotkeys on the same card share it.
 

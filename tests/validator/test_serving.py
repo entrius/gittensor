@@ -419,6 +419,36 @@ def test_gateway_429_when_every_ready_miner_refuses_busy(monkeypatch):
     assert len(drained) == 2 and all(not q.ok and 'busy' in q.detail for q in drained)
 
 
+def test_gateway_stream_usage_chunk_is_opt_in(monkeypatch):
+    """OpenAI emits the choices-less usage chunk only under stream_options.include_usage."""
+    state = ServingState(_rng=random.Random(7))
+    state.publish_round([_ready(1)], {})
+    client = _gateway_client(state, monkeypatch)
+    headers = {'Authorization': 'Bearer k1'}
+
+    def stream(body):
+        r = client.post('/v1/chat/completions', headers=headers, json=body)
+        assert r.status_code == 200 and 'data: [DONE]' in r.text
+        return [json.loads(line[6:]) for line in r.text.splitlines() if line.startswith('data: {')]
+
+    plain = stream({'messages': MSGS, 'stream': True})
+    assert plain and all(c['choices'] for c in plain)
+    opted = stream({'messages': MSGS, 'stream': True, 'stream_options': {'include_usage': True}})
+    assert any(not c['choices'] and 'usage' in c for c in opted)
+
+
+def test_gateway_rejects_nonpositive_max_tokens(monkeypatch):
+    state = ServingState(_rng=random.Random(7))
+    state.publish_round([_ready(1)], {})
+    client = _gateway_client(state, monkeypatch)
+    headers = {'Authorization': 'Bearer k1'}
+    for bad in (0, -3):
+        r = client.post('/v1/chat/completions', headers=headers, json={'messages': MSGS, 'max_tokens': bad})
+        assert r.status_code == 400 and 'positive' in r.json()['detail']
+    ok = client.post('/v1/chat/completions', headers=headers, json={'messages': MSGS})
+    assert ok.status_code == 200  # absent still defaults to the release's max_tokens
+
+
 def test_gateway_stream_retries_busy_before_committing_to_the_stream(monkeypatch):
     """A busy refusal streams nothing, so the retry happens before the client sees any bytes."""
     state = ServingState(_rng=random.Random(7))
@@ -465,7 +495,7 @@ def test_gateway_streams_sse(monkeypatch):
     with client.stream(
         'POST',
         '/v1/chat/completions',
-        json={'messages': MSGS, 'max_tokens': 4, 'stream': True},
+        json={'messages': MSGS, 'max_tokens': 4, 'stream': True, 'stream_options': {'include_usage': True}},
         headers={'Authorization': 'Bearer k1'},
     ) as r:
         assert r.status_code == 200

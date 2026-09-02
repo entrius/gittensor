@@ -1598,6 +1598,30 @@ def test_consume_stream_first_byte_bound_cuts_silence_not_slowness():
     assert out.completion
 
 
+def test_first_byte_timeout_never_leaks_cancellation():
+    """The audit thread died in soak 11 when the first-byte cancel surfaced as a bare CancelledError."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from gittensor.serving.stream import consume_stream
+    from gittensor.synapses import InferenceSynapse
+
+    good = _echo_release()
+    axon = SimpleNamespace(is_serving=True)
+    syn = InferenceSynapse(messages=MSGS, model_id=good.model_id, max_tokens=4, logprobs=True)
+
+    class Stubborn:
+        async def call_stream(self, **kw):
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                raise asyncio.CancelledError('fresh cancel from stream internals')
+            yield kw['synapse']
+
+    with pytest.raises(TimeoutError, match='first byte'):
+        asyncio.run(consume_stream(Stubborn(), axon, syn, 60.0, first_byte_s=0.05))  # type: ignore[arg-type]
+
+
 def test_latency_credit_uses_time_to_first_token_not_total_latency(monkeypatch):
     """A long answer that streamed promptly earns full credit; a slow first token does not."""
     from types import SimpleNamespace
@@ -1982,7 +2006,8 @@ def test_serving_miner_blacklists_non_validators(monkeypatch):
             block=720,
         ),
         audit_budget={},
-        backend_slots=asyncio.Semaphore(1),
+        slot_count=99,
+        slot_claims={},
     )
 
     def call(hotkey, max_tokens=64):
@@ -2615,7 +2640,8 @@ def test_miner_refuses_a_request_routed_for_another_release():
     miner = SimpleNamespace(
         release=ServingRelease(model_id='qwen', backend='echo', release_id='qwen-fast'),
         metagraph=SimpleNamespace(hotkeys=['vali'], S=[2_000_000.0]),
-        backend_slots=asyncio.Semaphore(1),
+        slot_count=99,
+        slot_claims={},
     )
     syn = InferenceSynapse(messages=MSGS, model_id='qwen', release_id='qwen-slow', max_tokens=4)
     syn.dendrite = bt.TerminalInfo(hotkey='vali')
@@ -2638,7 +2664,8 @@ def test_miner_refuses_busy_before_charging_budget_and_attest_bypasses_it():
         metagraph=SimpleNamespace(
             hotkeys=['auditor'], S=[100.0], validator_permit=[True], validator_trust=[1.0], block=720
         ),
-        backend_slots=asyncio.Semaphore(0),
+        slot_count=0,
+        slot_claims={},
         audit_budget={},
         attest_inflight=set(),
     )
@@ -2650,9 +2677,64 @@ def test_miner_refuses_busy_before_charging_budget_and_attest_bypasses_it():
     att = AttestSynapse(seed=1)
     att.dendrite = bt.TerminalInfo(hotkey='auditor')
     assert not asyncio.run(blacklist_attest(miner, att))[0]  # type: ignore[arg-type]
-    miner.backend_slots = asyncio.Semaphore(1)
+    miner.slot_count = 1
     assert not asyncio.run(blacklist_inference(miner, syn))[0]  # type: ignore[arg-type]
     assert miner.audit_budget['auditor'][1] == 4
+    assert len(miner.slot_claims) == 1  # the admitted request holds its slot from the moment of admission
+
+
+def test_burst_admissions_never_exceed_slots():
+    """40 simultaneous admission checks against 16 slots admit exactly 16 — the race #1743 shipped with: a gate
+    that samples slots already handed to running streams admits an entire burst before any stream has begun."""
+    from neurons.serving_miner import blacklist_inference
+
+    miner = SimpleNamespace(
+        release=ServingRelease(model_id='qwen', backend='echo', release_id='qwen-fast'),
+        metagraph=SimpleNamespace(hotkeys=['vali'], S=[2_000_000.0]),
+        slot_count=16,
+        slot_claims={},
+    )
+
+    async def burst():
+        syns = []
+        for _ in range(40):
+            syn = InferenceSynapse(messages=MSGS, model_id='qwen', max_tokens=4)
+            syn.dendrite = bt.TerminalInfo(hotkey='vali')
+            syns.append(syn)
+        return syns, await asyncio.gather(*(blacklist_inference(miner, s) for s in syns))  # type: ignore[arg-type]
+
+    syns, verdicts = asyncio.run(burst())
+    admitted = [v for v in verdicts if not v[0]]
+    refused = [v for v in verdicts if v[0]]
+    assert len(admitted) == 16 and len(refused) == 24
+    assert all('busy' in reason for _, reason in refused)
+    assert len(miner.slot_claims) == 16
+    del syns
+
+
+def test_slot_claims_expire_and_a_refused_caller_releases_one():
+    from neurons.serving_miner import blacklist_inference
+
+    miner = SimpleNamespace(
+        release=ServingRelease(model_id='qwen', backend='echo', release_id='qwen-fast'),
+        metagraph=SimpleNamespace(hotkeys=['vali'], S=[2_000_000.0]),
+        slot_count=1,
+        slot_claims={},
+    )
+    syn = InferenceSynapse(messages=MSGS, model_id='qwen', max_tokens=4)
+    syn.dendrite = bt.TerminalInfo(hotkey='stranger')
+    assert asyncio.run(blacklist_inference(miner, syn)) == (True, 'Unrecognized hotkey')  # type: ignore[arg-type]
+    assert miner.slot_claims == {}  # a caller-gate refusal does not hold the slot it briefly claimed
+
+    syn.dendrite = bt.TerminalInfo(hotkey='vali')
+    assert not asyncio.run(blacklist_inference(miner, syn))[0]  # type: ignore[arg-type]
+    assert len(miner.slot_claims) == 1
+    other = InferenceSynapse(messages=MSGS, model_id='qwen', max_tokens=4)
+    other.dendrite = bt.TerminalInfo(hotkey='vali')
+    blocked, reason = asyncio.run(blacklist_inference(miner, other))  # type: ignore[arg-type]
+    assert blocked and 'busy' in reason
+    miner.slot_claims[next(iter(miner.slot_claims))] = 0.0  # the handler never ran; the claim ages out
+    assert not asyncio.run(blacklist_inference(miner, other))[0]  # type: ignore[arg-type]
 
 
 def test_strikes_count_up_and_survive_a_restart(tmp_path):

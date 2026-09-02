@@ -1033,7 +1033,7 @@ def test_quarantine_escalates_with_strikes():
     assert w.strike('other', 'r', now=0.0) == 100.0
 
 
-def test_last_credit_survives_a_restart_and_tao_usd_is_the_repos(tmp_path, monkeypatch):
+def test_last_credit_survives_a_restart(tmp_path):
     from gittensor.serving.store import ServingStore
 
     state = ServingState()
@@ -1041,8 +1041,6 @@ def test_last_credit_survives_a_restart_and_tao_usd_is_the_repos(tmp_path, monke
     store = ServingStore(tmp_path / 'serving.db')
     store.save(state)
     assert store.load(ServingState()).last_credit == {'hk1': 0.75}
-    monkeypatch.setenv('SERVING_TAO_USD', '1')
-    assert load_serving_loadout().tao_usd != 1.0
 
 
 def test_stream_assembler_collects_token_ids():
@@ -1925,7 +1923,55 @@ def test_blend_pays_serving_by_price_and_recycles_the_rest(monkeypatch):
     assert sum(rewards) == pytest.approx(1.0)
 
 
-def test_serving_pricing_reads_chain_and_loadout(monkeypatch):
+def test_tao_usd_rate_caches_carries_and_falls_back(monkeypatch):
+    from gittensor.validator.serving import pricing as pr
+
+    calls = []
+    monkeypatch.setattr(pr, '_fetch_tao_usd', lambda: calls.append(1) or 220.5)
+    monkeypatch.setattr(pr, '_tao_usd_cache', None)
+    assert pr.tao_usd_rate(now=0.0) == 220.5
+    assert pr.tao_usd_rate(now=1.0) == 220.5 and len(calls) == 1  # cached inside the refresh window
+    monkeypatch.setattr(pr, '_fetch_tao_usd', lambda: None)
+    assert pr.tao_usd_rate(now=10_000.0) == 220.5  # refresh failed: the last fetched rate carries
+    assert pr.tao_usd_rate(now=10_001.0) == 220.5  # ... and is re-stamped, so no retry until the next window
+    monkeypatch.setattr(pr, '_tao_usd_cache', None)
+    assert pr.tao_usd_rate(now=20_000.0) == pr.SERVING_TAO_USD_FALLBACK  # nothing ever fetched
+
+
+def test_fetch_tao_usd_retries_then_gives_up(monkeypatch):
+    import requests as rq
+
+    from gittensor.validator.serving import pricing as pr
+
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {'bittensor': {'usd': 220.5}}
+
+    attempts = []
+
+    def flaky_get(url, timeout):
+        attempts.append(url)
+        if len(attempts) < 3:
+            raise rq.ConnectionError('down')
+        return _Resp()
+
+    monkeypatch.setattr(pr.requests, 'get', flaky_get)
+    assert pr._fetch_tao_usd() == 220.5 and len(attempts) == 3
+
+    down = []
+
+    def dead_get(url, timeout):
+        down.append(url)
+        raise rq.ConnectionError('down')
+
+    monkeypatch.setattr(pr.requests, 'get', dead_get)
+    assert pr._fetch_tao_usd() is None and len(down) == 3
+
+
+def test_serving_pricing_reads_chain_and_feed(monkeypatch):
     from types import SimpleNamespace
 
     from gittensor.validator.serving import pricing as pr
@@ -1935,12 +1981,12 @@ def test_serving_pricing_reads_chain_and_loadout(monkeypatch):
         subtensor=SimpleNamespace(subnet=lambda netuid: SimpleNamespace(price=0.004)),
     )
     monkeypatch.setattr(pr, '_last_usable', None)
-    monkeypatch.setattr(pr, 'load_serving_loadout', lambda: SimpleNamespace(tao_usd=250.0))
+    monkeypatch.setattr(pr, 'tao_usd_rate', lambda: 250.0)
     p = pr.serving_pricing(vali)  # type: ignore[arg-type]
     assert p is not None and p.alpha_per_hour_to_miners == pytest.approx(150.0 * 60 / 72) and p.alpha_usd == 1.0
 
     # A read that comes back unusable, or throws, reuses the last usable pricing rather than dropping pay.
-    monkeypatch.setattr(pr, 'load_serving_loadout', lambda: SimpleNamespace(tao_usd=None))
+    vali.subtensor = SimpleNamespace(subnet=lambda netuid: SimpleNamespace(price=0.0))
     assert pr.serving_pricing(vali) == p  # type: ignore[arg-type]
     vali.subtensor = SimpleNamespace(subnet=lambda netuid: (_ for _ in ()).throw(RuntimeError('rpc')))
     assert pr.serving_pricing(vali) == p  # type: ignore[arg-type]

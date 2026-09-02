@@ -3,18 +3,25 @@
 
 """What the serving pool has to pay with: alpha/hour flowing to miners and what one alpha is worth in USD.
 
-Both inputs are ones every validator observes identically — the metagraph emission column and the subnet's
-on-chain alpha/TAO price — plus the TAO/USD rate published in the loadout, so validators agree on the share.
+Two inputs every validator observes identically — the metagraph emission column and the subnet's on-chain
+alpha/TAO price — plus a live TAO/USD rate refetched from a public feed at most every
+``SERVING_TAO_USD_REFRESH_S``. Independent validators read the same feed inside the same window, so the
+share stays agreed to within spot noise; with the feed down the last fetched rate carries, and the
+cold-start fallback is deliberately high so an unpriceable TAO undersizes the pool instead of overpaying it.
 """
 
 import time
 from typing import TYPE_CHECKING, Optional, Tuple
 
 import bittensor as bt
+import requests
 
 from gittensor.classes import ServingPricing
-from gittensor.constants import SERVING_PRICING_MAX_AGE_S
-from gittensor.serving.loadout import load_serving_loadout
+from gittensor.constants import (
+    SERVING_PRICING_MAX_AGE_S,
+    SERVING_TAO_USD_FALLBACK,
+    SERVING_TAO_USD_REFRESH_S,
+)
 
 if TYPE_CHECKING:
     from neurons.validator import Validator
@@ -22,7 +29,44 @@ if TYPE_CHECKING:
 MINER_FRACTION_OF_NEURON_EMISSION = 0.5  # metagraph.E covers miners + validators (41% + 41%); miners get half
 MINUTES_PER_TEMPO = 72.0  # 360 blocks x 12 s
 
+TAO_USD_URL = 'https://api.coingecko.com/api/v3/simple/price?ids=bittensor&vs_currencies=usd'
+
 _last_usable: Optional[Tuple[float, ServingPricing]] = None  # (ts, pricing): carries pay across a price-read blip
+_tao_usd_cache: Optional[Tuple[float, float]] = None  # (checked_ts, rate): the last fetched TAO/USD
+
+
+def _fetch_tao_usd() -> Optional[float]:
+    for attempt in range(3):
+        try:
+            r = requests.get(TAO_USD_URL, timeout=5)
+            r.raise_for_status()
+            rate = float(r.json()['bittensor']['usd'])
+            if rate > 0:
+                return rate
+        except Exception as e:
+            bt.logging.warning(f'Serving: TAO/USD fetch {attempt + 1}/3 failed ({e!r})')
+    return None
+
+
+def tao_usd_rate(now: Optional[float] = None) -> float:
+    """Live TAO/USD for sizing the pool, refetched at most every ``SERVING_TAO_USD_REFRESH_S``.
+
+    A failed refresh (3 tries) keeps the last fetched rate until the next window; before anything has been
+    fetched the fallback prices TAO deliberately high, so failure undersizes the pool rather than overpaying.
+    """
+    global _tao_usd_cache
+    ts = now if now is not None else time.time()
+    if _tao_usd_cache is not None and ts - _tao_usd_cache[0] < SERVING_TAO_USD_REFRESH_S:
+        return _tao_usd_cache[1]
+    rate = _fetch_tao_usd()
+    if rate is None:
+        if _tao_usd_cache is None:
+            bt.logging.warning(f'Serving: no TAO/USD fetched yet; fallback ${SERVING_TAO_USD_FALLBACK:.0f}')
+            return SERVING_TAO_USD_FALLBACK
+        rate = _tao_usd_cache[1]
+        bt.logging.warning(f'Serving: TAO/USD refresh failed; keeping {rate:.2f} until the next window')
+    _tao_usd_cache = (ts, rate)
+    return rate
 
 
 def serving_pricing(self: 'Validator') -> Optional[ServingPricing]:
@@ -31,7 +75,7 @@ def serving_pricing(self: 'Validator') -> Optional[ServingPricing]:
         alpha_per_hour = alpha_per_tempo * 60.0 / MINUTES_PER_TEMPO
         info = self.subtensor.subnet(int(self.metagraph.netuid))
         alpha_tao = float(getattr(info, 'price', 0.0) or 0.0)
-        tao_usd = load_serving_loadout().tao_usd or 0.0
+        tao_usd = tao_usd_rate()
     except Exception as e:
         bt.logging.warning(f'Serving: pricing unavailable ({e!r})')
         return _recent_usable()

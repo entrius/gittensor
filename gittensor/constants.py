@@ -164,8 +164,8 @@ MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software,
 # rate = SERVING_GPU_HOUR_USD / (one card's aggregate decode tok/s x 3600), so a 5090 flat out for an hour (~1M
 # output tokens on the current runtime) earns exactly the card-hour and an idle one earns nothing. A round score is
 # those tokens in card-equivalents (tokens / (aggregate tok/s x round seconds)); the settled mean is priced at
-# SERVING_GPU_HOUR_USD, converted to an emission share through the on-chain alpha/TAO price and the TAO/USD rate
-# published in serving_loadout.json (`pricing`). No card count and no per-hotkey cap: served volume is the capacity
+# SERVING_GPU_HOUR_USD, converted to an emission share through the on-chain alpha/TAO price and a live TAO/USD
+# rate (see below). No card count and no per-hotkey cap: served volume is the capacity
 # proof, and a real 5090 cannot out-decode its silicon. The only ceiling is SERVING_EMISSION_SHARE_CAP — above it the
 # fleet dilutes pro-rata by token share; what it does not earn recycles to RECYCLE_UID, never to OSS. With no price
 # data (testnet) the cap is paid pro-rata. The pools may sum under 1.0: the unreserved remainder burns every round
@@ -175,11 +175,15 @@ SERVING_EMISSION_SHARE_CAP = 0.05
 # Output tok/s one card sustains under load on the blessed runtime, for a release without its own
 # `speed.aggregate_decode_tps` (sparkinfer 7498736 on a 5090: 279-282 at 16 concurrent, 2026-08-27).
 SERVING_AGGREGATE_DECODE_TPS_FALLBACK = 280.0
-# Pricing the cap needs the chain's alpha/TAO price and the published TAO/USD rate. A round that cannot read them
+# Pricing the cap needs the chain's alpha/TAO price and the live TAO/USD rate. A round that cannot read them
 # reuses the last usable pricing for up to SERVING_PRICING_MAX_AGE_S, so a chain hiccup does not move pay. With no
 # usable pricing at all the fleet is paid nothing: the alternative (the whole cap, split pro-rata) hands one verified
 # card the whole cap. A network with no price data to read - testnet - sets SERVING_PAY_CAP_WITHOUT_PRICING.
 SERVING_PRICING_MAX_AGE_S = 3600.0
+# TAO/USD is fetched live (validator/serving/pricing.py: 3 tries against a public feed, cached this long).
+# The fallback prices TAO deliberately HIGH: an unpriceable TAO must undersize the pool, never overpay it.
+SERVING_TAO_USD_REFRESH_S = 600.0
+SERVING_TAO_USD_FALLBACK = 400.0
 assert OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE_CAP <= 1.0 + EMISSION_SHARE_TOLERANCE, (
     'emission pools must not exceed 1.0'
 )

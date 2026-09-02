@@ -286,6 +286,10 @@ SERVING_BASELINE_PER_ROUND = 2
 # up within the hour. A completion resets it. A serving-miner registry replaces this heuristic later.
 SERVING_DORMANT_AFTER_ROUNDS = 3
 SERVING_DORMANT_RETRY_ROUNDS = 12
+# A dead axon sends nothing, ever; an honest miner streams its first token in well under a second even at full load
+# (the full-credit TTFT line is 500 ms). Baseline probes cut off silence at this bound instead of holding the full
+# request_timeout for every non-compute axon; total time and the gateway path are untouched.
+SERVING_BASELINE_FIRST_BYTE_S = 15.0
 SERVING_API_DEFAULT_PORT = 8790
 # Miner: a hotkey may query for inference only with at least this much stake on the subnet (alpha, metagraph.S). Set so
 # that only the reference-running validator clears it (2026-08-26: one hotkey holds >1M alpha, the next 0.27M); every

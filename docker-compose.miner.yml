@@ -9,7 +9,7 @@
 # by compose DNS; the loopback mapping is for your own curl checks and the conformance checker.
 services:
   runtime:
-    image: ${SPARKINFER_IMAGE:?runtime image from the Current release card on gittensor.io/compute}
+    image: ${RUNTIME_IMAGE:?runtime image from the Current release card on gittensor.io/compute}
     container_name: gt-miner-runtime
     restart: unless-stopped
     environment:

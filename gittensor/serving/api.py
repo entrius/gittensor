@@ -14,8 +14,10 @@ to probation (not yet READY) miners so new miners can earn a window; user keys
 only ever reach READY miners. Off unless keys are set. Binds loopback by
 default; put it behind the host reverse proxy / TLS like any other service.
 
-No queue: with no READY capacity it returns 429 so rejected demand stays
-visible.
+No queue, at either layer: a saturated miner refuses "busy" instead of
+queueing (runtime contract R6 at the axon), the gateway retries the next
+READY miner, and with no capacity left — none READY, or everyone tried
+refused — it returns 429 so rejected demand stays visible.
 
     OPENAI_BASE_URL=http://<host>:8790/v1 OPENAI_API_KEY=<key> ...
 """
@@ -32,9 +34,16 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from gittensor.constants import SERVING_MAX_PROMPT_CHARS, SERVING_MAX_TOKENS
+from gittensor.constants import SERVING_GATEWAY_BUSY_RETRIES, SERVING_MAX_PROMPT_CHARS, SERVING_MAX_TOKENS
 from gittensor.serving.loadout import ServingLoadout, ServingRelease
-from gittensor.serving.state import ReadyMiner, RequestRecord, ServedRequest, ServingState, finite_or_none
+from gittensor.serving.state import (
+    ReadyMiner,
+    RequestRecord,
+    ServedRequest,
+    ServingState,
+    finite_or_none,
+    is_busy_detail,
+)
 from gittensor.serving.stream import SSE_DONE, Event, consume_stream, sse_event
 from gittensor.synapses import InferenceSynapse
 
@@ -140,146 +149,175 @@ def build_app(
         want_logprobs = bool(body.get('logprobs', False))
         want_stream = bool(body.get('stream', False))
 
-        miner = state.acquire(release.release_id, probation=key in baseline)
-        if miner is None:
-            raise HTTPException(status_code=429, detail='no READY serving capacity')
-        inflight = state.inflight().get(miner.uid, 1)
-        state.charge_sent(miner.hotkey, max_tokens)
-
         request_id = f'chatcmpl-{uuid.uuid4().hex[:24]}'
         created = int(time.time())
-        start = time.monotonic()
+        tried: Set[int] = set()  # uids that refused this request busy; the retry must land elsewhere
 
-        def finish(result: Optional[InferenceSynapse]) -> bool:
-            state.release(miner.uid)
-            ok = result is not None and result.completion is not None
-            # The miner's stream end, not the moment the user finished reading it: a slow client must not read as a
-            # slow card.
-            latency_ms = finite_or_none(getattr(result, 'observed_latency_ms', None)) if result else None
-            if latency_ms is None:
-                latency_ms = (time.monotonic() - start) * 1000.0
-            state.enqueue_served(
-                ServedRequest(
-                    ts=time.time(),
-                    uid=miner.uid,
-                    hotkey=miner.hotkey,
-                    model_id=release.model_id,
-                    release_id=release.release_id,
-                    messages=messages,
-                    ok=ok and (result.served_model_id == release.model_id if result else False),
-                    latency_ms=latency_ms,
-                    completion=result.completion if result else None,
-                    tokens=list(result.tokens) if result and result.tokens else None,
-                    token_ids=list(result.token_ids) if result and result.token_ids else None,
-                    token_bytes=list(result.token_bytes) if result and result.token_bytes else None,
-                    token_logprobs=list(result.token_logprobs) if result and result.token_logprobs else None,
-                    detail=str(getattr(getattr(result, 'dendrite', None), 'status_message', None) or '')
-                    if not ok
-                    else '',
-                    source='gateway',
-                    ttft_ms=finite_or_none(getattr(result, 'observed_ttft_ms', None)) if result else None,
-                    inflight=inflight,
-                    max_tokens=max_tokens,
+        for _ in range(1 + SERVING_GATEWAY_BUSY_RETRIES):
+            picked = state.acquire(release.release_id, probation=key in baseline, exclude=tried)
+            if picked is None:
+                raise HTTPException(
+                    status_code=429, detail='all serving capacity busy' if tried else 'no READY serving capacity'
                 )
-            )
-            state.record(
-                RequestRecord(
-                    ts=time.time(),
-                    kind='gateway',
-                    uid=miner.uid,
-                    ok=ok,
-                    latency_ms=latency_ms,
-                    completion_tokens=(result.usage or {}).get('completion_tokens', 0) if result else 0,
-                    ttft_ms=result.ttft_ms if result else None,
-                    decode_tps=result.decode_tps if result else None,
-                    detail='' if ok else 'miner returned no completion',
+            miner = picked
+            inflight = state.inflight().get(miner.uid, 1)
+            state.charge_sent(miner.hotkey, max_tokens)
+            start = time.monotonic()
+
+            def finish(result: Optional[InferenceSynapse]) -> bool:
+                state.release(miner.uid)
+                ok = result is not None and result.completion is not None
+                # The miner's stream end, not the moment the user finished reading it: a slow client must not read
+                # as a slow card.
+                latency_ms = finite_or_none(getattr(result, 'observed_latency_ms', None)) if result else None
+                if latency_ms is None:
+                    latency_ms = (time.monotonic() - start) * 1000.0
+                state.enqueue_served(
+                    ServedRequest(
+                        ts=time.time(),
+                        uid=miner.uid,
+                        hotkey=miner.hotkey,
+                        model_id=release.model_id,
+                        release_id=release.release_id,
+                        messages=messages,
+                        ok=ok and (result.served_model_id == release.model_id if result else False),
+                        latency_ms=latency_ms,
+                        completion=result.completion if result else None,
+                        tokens=list(result.tokens) if result and result.tokens else None,
+                        token_ids=list(result.token_ids) if result and result.token_ids else None,
+                        token_bytes=list(result.token_bytes) if result and result.token_bytes else None,
+                        token_logprobs=list(result.token_logprobs) if result and result.token_logprobs else None,
+                        detail=str(getattr(getattr(result, 'dendrite', None), 'status_message', None) or '')
+                        if not ok
+                        else '',
+                        source='gateway',
+                        ttft_ms=finite_or_none(getattr(result, 'observed_ttft_ms', None)) if result else None,
+                        inflight=inflight,
+                        max_tokens=max_tokens,
+                    )
                 )
-            )
-            return ok
+                state.record(
+                    RequestRecord(
+                        ts=time.time(),
+                        kind='gateway',
+                        uid=miner.uid,
+                        ok=ok,
+                        latency_ms=latency_ms,
+                        completion_tokens=(result.usage or {}).get('completion_tokens', 0) if result else 0,
+                        ttft_ms=result.ttft_ms if result else None,
+                        decode_tps=result.decode_tps if result else None,
+                        detail='' if ok else 'miner returned no completion',
+                    )
+                )
+                return ok
 
-        def failed() -> JSONResponse:
-            return JSONResponse(
-                status_code=502, content={'error': {'message': 'serving miner failed', 'uid': miner.uid}}
-            )
+            def failed() -> JSONResponse:
+                return JSONResponse(
+                    status_code=502, content={'error': {'message': 'serving miner failed', 'uid': miner.uid}}
+                )
 
-        def reshape(event: dict) -> dict:
-            """Relay a miner chunk to the client under our request id, without logprobs unless asked for."""
-            out = dict(event)
-            out['id'] = request_id
-            if not want_logprobs:
-                out['choices'] = [{k: v for k, v in c.items() if k != 'logprobs'} for c in event.get('choices') or []]
-            if 'usage' in event:
-                out['gittensor'] = {'served_uid': miner.uid, 'latency_ms': round((time.monotonic() - start) * 1000, 1)}
-            return out
+            def reshape(event: dict) -> dict:
+                """Relay a miner chunk to the client under our request id, without logprobs unless asked for."""
+                out = dict(event)
+                out['id'] = request_id
+                if not want_logprobs:
+                    out['choices'] = [
+                        {k: v for k, v in c.items() if k != 'logprobs'} for c in event.get('choices') or []
+                    ]
+                if 'usage' in event:
+                    out['gittensor'] = {
+                        'served_uid': miner.uid,
+                        'latency_ms': round((time.monotonic() - start) * 1000, 1),
+                    }
+                return out
 
-        if want_stream:
-            queue: 'asyncio.Queue[object]' = asyncio.Queue()
+            if want_stream:
+                queue: 'asyncio.Queue[object]' = asyncio.Queue()
 
-            async def relay(event: Event) -> None:
-                await queue.put(event)
+                async def relay(event: Event, queue=queue) -> None:
+                    await queue.put(event)
 
-            async def run() -> Optional[InferenceSynapse]:
-                try:
-                    return await _dispatch(get_dendrite(), miner, messages, max_tokens, release, request_timeout, relay)
-                finally:
-                    await queue.put(_END)
+                async def run(miner=miner, relay=relay, queue=queue) -> Optional[InferenceSynapse]:
+                    try:
+                        return await _dispatch(
+                            get_dendrite(), miner, messages, max_tokens, release, request_timeout, relay
+                        )
+                    finally:
+                        await queue.put(_END)
 
-            task = asyncio.create_task(run())
+                task = asyncio.create_task(run())
 
-            async def outcome() -> Optional[InferenceSynapse]:
-                try:  # a stream the assembler could not fold is a miss, never a leaked in-flight slot
-                    return await task
-                except Exception:
-                    return None
+                async def outcome(task=task) -> Optional[InferenceSynapse]:
+                    try:  # a stream the assembler could not fold is a miss, never a leaked in-flight slot
+                        return await task
+                    except Exception:
+                        return None
 
-            first = await queue.get()
-            if first is _END or first is None:  # nothing streamed before the miner gave up
-                finish(await outcome())
+                first = await queue.get()
+                if first is _END or first is None:  # nothing streamed before the miner gave up
+                    result = await outcome()
+                    finish(result)
+                    if _busy_refused(result):  # refused at capacity, nothing sent to the client: try elsewhere
+                        tried.add(miner.uid)
+                        continue
+                    return failed()
+
+                async def body_iter():
+                    event = first
+                    try:
+                        while event is not _END:
+                            yield SSE_DONE if event is None else sse_event(reshape(event))  # type: ignore[arg-type]
+                            event = await queue.get()
+                    finally:
+                        finish(await outcome())
+
+                return StreamingResponse(body_iter(), media_type='text/event-stream')
+
+            try:
+                result = await _dispatch(get_dendrite(), miner, messages, max_tokens, release, request_timeout)
+            except Exception:
+                result = None
+            if _busy_refused(result):  # refused at capacity: try elsewhere
+                finish(result)
+                tried.add(miner.uid)
+                continue
+            if not finish(result) or result is None:
                 return failed()
 
-            async def body_iter():
-                event = first
-                try:
-                    while event is not _END:
-                        yield SSE_DONE if event is None else sse_event(reshape(event))  # type: ignore[arg-type]
-                        event = await queue.get()
-                finally:
-                    finish(await outcome())
-
-            return StreamingResponse(body_iter(), media_type='text/event-stream')
-
-        try:
-            result = await _dispatch(get_dendrite(), miner, messages, max_tokens, release, request_timeout)
-        except Exception:
-            result = None
-        if not finish(result) or result is None:
-            return failed()
-
-        choice: Dict = {
-            'index': 0,
-            'message': {'role': 'assistant', 'content': result.completion},
-            'finish_reason': result.finish_reason or 'stop',
-        }
-        if want_logprobs and result.tokens and result.token_logprobs:
-            choice['logprobs'] = {
-                'content': [{'token': t, 'logprob': lp} for t, lp in zip(result.tokens, result.token_logprobs)]
+            choice: Dict = {
+                'index': 0,
+                'message': {'role': 'assistant', 'content': result.completion},
+                'finish_reason': result.finish_reason or 'stop',
             }
-        return {
-            'id': request_id,
-            'object': 'chat.completion',
-            'created': created,
-            'model': result.served_model_id or release.model_id,
-            'choices': [choice],
-            'usage': result.usage or {},
-            'gittensor': {
-                'served_uid': miner.uid,
-                'latency_ms': round((time.monotonic() - start) * 1000.0, 1),
-                'ttft_ms': finite_or_none(result.ttft_ms),
-                'decode_tps': finite_or_none(result.decode_tps),
-            },
-        }
+            if want_logprobs and result.tokens and result.token_logprobs:
+                choice['logprobs'] = {
+                    'content': [{'token': t, 'logprob': lp} for t, lp in zip(result.tokens, result.token_logprobs)]
+                }
+            return {
+                'id': request_id,
+                'object': 'chat.completion',
+                'created': created,
+                'model': result.served_model_id or release.model_id,
+                'choices': [choice],
+                'usage': result.usage or {},
+                'gittensor': {
+                    'served_uid': miner.uid,
+                    'latency_ms': round((time.monotonic() - start) * 1000.0, 1),
+                    'ttft_ms': finite_or_none(result.ttft_ms),
+                    'decode_tps': finite_or_none(result.decode_tps),
+                },
+            }
+
+        raise HTTPException(status_code=429, detail='all serving capacity busy')
 
     return app
+
+
+def _busy_refused(result: Optional[InferenceSynapse]) -> bool:
+    """Did the miner refuse this dispatch at capacity? Nothing was served and the axon status says busy."""
+    if result is None or result.completion is not None:
+        return False
+    return is_busy_detail(str(getattr(getattr(result, 'dendrite', None), 'status_message', None) or ''))
 
 
 async def _dispatch(

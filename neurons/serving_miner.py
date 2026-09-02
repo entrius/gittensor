@@ -126,7 +126,9 @@ class ServingMiner(BaseNeuron):
 async def handle_inference(miner: ServingMiner, synapse: InferenceSynapse) -> BTStreamingResponse:
     """Stream the backend's completion for an audit or user request through the axon.
 
-    Backend errors end the stream without ``[DONE]``; the validator scores that as a miss.
+    Backend errors end the stream without ``[DONE]``; the validator scores that as a miss. Saturation never gets
+    this far: ``blacklist_inference`` refuses "busy" while every backend slot is taken, so the slot wait below only
+    absorbs the few requests that raced past the gate together.
     """
     max_tokens = max(1, min(int(synapse.max_tokens), SERVING_MAX_TOKENS))
     messages, logprobs = synapse.messages, synapse.logprobs
@@ -235,6 +237,18 @@ def reserve_audit_budget(miner: ServingMiner, hotkey: str, tokens: int) -> bool:
 
 
 async def blacklist_inference(miner: ServingMiner, synapse: InferenceSynapse) -> Tuple[bool, str]:
+    """The axon's inference gate: a saturated backend refuses up front ("busy") instead of queueing — the runtime
+    contract's R6 lifted to the axon — so the gateway reroutes and the refusal is judged neutral; queueing instead
+    would decay every caller's TTFT. Before the caller gate and its budget charge, so a refused request costs the
+    caller nothing. Attestation delegates to ``blacklist_caller`` and skips this: the sidecar has its own
+    serialisation and a full backend must still pass attest rounds.
+    """
+    if miner.backend_slots.locked():
+        return True, 'busy: all backend slots in use'
+    return await blacklist_caller(miner, synapse)
+
+
+async def blacklist_caller(miner: ServingMiner, synapse: InferenceSynapse) -> Tuple[bool, str]:
     """Who may query: hotkeys staked at least SERVING_MIN_CALLER_STAKE alpha without limit (the gateway validator),
     and any validator-permit holder inside a per-tempo completion-token budget (an independent auditor).
 
@@ -272,7 +286,7 @@ async def blacklist_inference(miner: ServingMiner, synapse: InferenceSynapse) ->
 # one challenge at a time per caller: the sidecar fills the card's free VRAM and serialises challenges, so an open
 # door here is a free way to stall a competitor's runtime and queue every real validator's challenge behind it.
 async def blacklist_attest(miner: ServingMiner, synapse: AttestSynapse) -> Tuple[bool, str]:
-    refused, reason = await blacklist_inference(miner, _as_budget_free(synapse))
+    refused, reason = await blacklist_caller(miner, _as_budget_free(synapse))
     if refused:
         return True, reason
     hotkey = synapse.dendrite.hotkey if synapse.dendrite and synapse.dendrite.hotkey else ''

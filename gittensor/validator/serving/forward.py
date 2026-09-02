@@ -67,7 +67,7 @@ from gittensor.constants import (
 from gittensor.serving.audit import AuditVerdict, Reference, reference_for, verify_served
 from gittensor.serving.baseline import baseline_max_tokens, make_baseline_prompt
 from gittensor.serving.loadout import ServingRelease, load_serving_loadout
-from gittensor.serving.state import ReadyMiner, RequestRecord, ServedRequest, ServingState
+from gittensor.serving.state import ReadyMiner, RequestRecord, ServedRequest, ServingState, is_busy_detail
 from gittensor.serving.store import ServingStore
 from gittensor.serving.stream import consume_stream
 from gittensor.synapses import InferenceSynapse
@@ -188,6 +188,12 @@ def verify_served_round(
     def judge(req: ServedRequest) -> Optional[AuditVerdict]:
         if not req.ok and 'budget' in req.detail.lower() and budget_refusal_plausible(state, req.hotkey, staked_caller):
             return None  # this validator over-sent by its own ledger; not the miner's fault
+        if not req.ok and is_busy_detail(req.detail):
+            # Refused at capacity: neutral, unconditionally — no ledger can corroborate load other validators put
+            # on the card, and the refusal already cost the miner the tokens it did not serve. Failures are always
+            # sampled, so tallying here counts every refusal exactly once (headroom telemetry, /v1/serving/status).
+            state.busy_refusal(req.hotkey, now=req.ts)
+            return None
         if not req.ok:
             if req.source == 'gateway' and reference_rejects(reference, req.messages):
                 return None  # an honest runtime refuses this prompt too (over context, bad shape): not the miner's
@@ -550,9 +556,11 @@ def seed_ready_from_store(validator: 'Validator', state: ServingState, loadout=N
 def update_dormancy(
     state: ServingState, serving: Sequence[Tuple[int, str, bt.AxonInfo]], served: Sequence[ServedRequest]
 ) -> None:
-    """A completion resets a hotkey's dormancy count; a round of requests with none bumps it. Unasked = unchanged."""
+    """A completion resets a hotkey's dormancy count; a round of requests with none bumps it. Unasked = unchanged.
+    A busy refusal is an answer — the axon is alive, just full — else a saturated probation miner would go dormant
+    on refused baseline probes and starve out of the probe stream."""
     asked = {req.hotkey for req in served}
-    answered = {req.hotkey for req in served if req.completion}
+    answered = {req.hotkey for req in served if req.completion or (not req.ok and is_busy_detail(req.detail))}
     for _, hotkey, _ in serving:
         if hotkey in answered:
             state.dormant_rounds[hotkey] = 0

@@ -7,8 +7,9 @@ Served traffic is the only audit, so every miner needs a few verified requests p
 showed up. These prompts only have to satisfy one thing: the reference can answer them (any text can be greedy
 decoded). They are template-shaped and a miner that wants to can recognise them; what stops it profiting from that
 is that a refusal or a wrong answer on any *other* request is judged the same way (a budget refusal is neutral only
-by the validator's own ledger; see ``forward.py``), so answering these and nothing else earns nothing extra. Mixing
-real user prompts into the baseline is not built.
+by the validator's own ledger, and a busy refusal, also neutral, earns nothing and tallies the card as full; see
+``forward.py``), so answering these and nothing else earns nothing extra. Mixing real user prompts into the
+baseline is not built.
 """
 
 import random

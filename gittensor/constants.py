@@ -306,6 +306,9 @@ SERVING_VALIDATOR_TOKENS_PER_TEMPO = 50_000
 SERVING_BUDGET_REFUSAL_RATIO = 0.8
 BLOCKS_PER_TEMPO = 360
 SERVING_BACKEND_CONCURRENCY = 16  # miner: concurrent backend generations (sparkinfer >= 12954e6 handles 24)
+# Gateway: extra miners tried after one refuses at capacity ("busy", runtime contract R6 lifted to the axon) before
+# the client gets a 429. Each busy leg is an immediate 403, so the tail cost is round trips, not generations.
+SERVING_GATEWAY_BUSY_RETRIES = 3
 SERVING_SEEN_NONCES = 10_000  # miner: replay guard size; covers many minutes of validator traffic
 SERVING_MAX_TOKENS = 1024  # hard cap per request (API and miner both enforce)
 # Gateway: total characters across a request's messages (~4 per token). A prompt past the release's context makes

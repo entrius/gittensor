@@ -67,3 +67,4 @@ _.ttl_get_block  # unused method (gittensor/utils/misc.py:91)
 _.get_help  # unused method (gittensor/cli/issue_commands/help.py:180)
 add_validator_args  # unused function (gittensor/utils/config.py:81)
 neuron_type  # class attr read by BaseNeuron.should_set_weights (neurons/serving_miner.py:47)
+_.busy_count  # busy-ledger reader, exercised in tests; snapshot computes its hour view inline under the same lock

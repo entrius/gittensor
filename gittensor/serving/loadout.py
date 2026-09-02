@@ -164,7 +164,6 @@ def _sidecar_url(base: Optional[str], port: int = 8081) -> Optional[str]:
 @dataclass
 class ServingLoadout:
     releases: List[ServingRelease]
-    tao_usd: Optional[float] = None  # published TAO/USD rate (`pricing.tao_usd`); sizes the serving emission share
 
     def __post_init__(self) -> None:
         if not self.releases:
@@ -201,10 +200,7 @@ def load_serving_loadout(path: Optional[Path] = None) -> ServingLoadout:
     with open(loadout_path) as f:
         raw = json.load(f)
     entries = raw['releases'] if isinstance(raw, dict) and 'releases' in raw else [raw]
-    pricing = raw.get('pricing') or {} if isinstance(raw, dict) else {}
-    # The rate is the repo's, not the operator's: validators must price the same card the same way.
-    tao_usd = float(pricing['tao_usd']) if pricing.get('tao_usd') else None
-    loadout = ServingLoadout(releases=[ServingRelease.from_dict(entry) for entry in entries], tao_usd=tao_usd)
+    loadout = ServingLoadout(releases=[ServingRelease.from_dict(entry) for entry in entries])
 
     base_override = os.getenv('SERVING_BASE_URL')
     if base_override:

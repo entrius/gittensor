@@ -269,6 +269,26 @@ def test_acquire_filters_by_release():
     assert picked is not None and picked.uid == 1
 
 
+def test_acquire_excludes_uids_that_already_refused_busy():
+    state = ServingState(_rng=random.Random(7))
+    state.publish_round([_ready(1), _ready(2)], {})
+    picked = state.acquire(exclude={1})
+    assert picked is not None and picked.uid == 2
+    assert state.acquire(exclude={1, 2}) is None
+    state = ServingState()
+    state.publish_round([], {}, probation=[_ready(3)])
+    assert state.acquire(probation=True, exclude={3}) is None
+
+
+def test_busy_ledger_counts_within_window_and_shows_in_snapshot():
+    state = ServingState()
+    state.busy_refusal('hk1', now=time.time() - 10)
+    state.busy_refusal('hk1', now=time.time() - 7200)  # outside the snapshot's trailing hour
+    assert state.busy_count('hk1', 3600.0) == 1
+    assert state.busy_count('hk1', 8000.0) == 2
+    assert state.snapshot()['busy'] == {'hk1': 1}
+
+
 # --- gateway ----------------------------------------------------------------
 
 
@@ -318,6 +338,95 @@ def test_gateway_429_without_ready_miners(monkeypatch):
     client = _gateway_client(ServingState(), monkeypatch)
     r = client.post('/v1/chat/completions', json={'messages': MSGS}, headers={'Authorization': 'Bearer k1'})
     assert r.status_code == 429
+
+
+class _BusyResponse:
+    """What _dispatch returns when the miner's blacklist refused busy: a 403, nothing streamed."""
+
+    completion = None
+    tokens = None
+    token_ids = None
+    token_bytes = None
+    token_logprobs = None
+    usage = None
+    ttft_ms = None
+    decode_tps = None
+    served_model_id = None
+    finish_reason = None
+    dendrite = SimpleNamespace(status_message='Forbidden. Key is blacklisted: busy: all backend slots in use.')
+
+
+def _busy_then_serve_client(state: ServingState, monkeypatch, busy_first: int = 1):
+    """A gateway whose first ``busy_first`` dispatches refuse busy and the rest serve; returns (client, calls)."""
+    calls: list = []
+
+    async def fake_dispatch(dendrite, miner, messages, max_tokens, lo, timeout, on_event=None):
+        calls.append(miner.uid)
+        if len(calls) <= busy_first:
+            return _BusyResponse()
+        result = expected_completion(messages, max_tokens, lo.model_id)
+        if on_event is not None:  # replay the chunk sequence a miner would stream
+            from gittensor.serving.stream import SSEParser, result_to_sse
+
+            parser = SSEParser()
+            for chunk in result_to_sse(result, 'chatcmpl-miner', 0, logprobs=True):
+                for event in parser.feed(chunk):
+                    await on_event(event)
+        return _FakeResponse(result, lo.model_id)
+
+    monkeypatch.setattr('gittensor.serving.api._dispatch', fake_dispatch)
+    app = build_app(state, ServingLoadout(releases=[_echo_release()]), parse_api_keys('k1'), lambda: None, 5)
+    return TestClient(app), calls
+
+
+def test_gateway_retries_a_busy_miner_and_serves_from_the_next(monkeypatch):
+    """One miner refusing busy costs the request nothing: the gateway releases it and serves from the other."""
+    state = ServingState(_rng=random.Random(7))
+    state.publish_round([_ready(1), _ready(2)], {})
+    client, calls = _busy_then_serve_client(state, monkeypatch)
+    r = client.post(
+        '/v1/chat/completions', json={'messages': MSGS, 'max_tokens': 4}, headers={'Authorization': 'Bearer k1'}
+    )
+    assert r.status_code == 200
+    assert set(calls) == {1, 2} and r.json()['gittensor']['served_uid'] == calls[1]
+    assert state.inflight() == {1: 0, 2: 0}  # the busy leg released its slot
+    refused, served = state.drain_served()
+    assert not refused.ok and 'busy' in refused.detail and served.ok
+
+
+def test_gateway_429_when_every_ready_miner_refuses_busy(monkeypatch):
+    """Saturation surfaces as a clean 429, never as an invisible queue: rejected demand stays visible."""
+    state = ServingState(_rng=random.Random(7))
+    state.publish_round([_ready(1), _ready(2)], {})
+    client, calls = _busy_then_serve_client(state, monkeypatch, busy_first=99)
+    r = client.post(
+        '/v1/chat/completions', json={'messages': MSGS, 'max_tokens': 4}, headers={'Authorization': 'Bearer k1'}
+    )
+    assert r.status_code == 429 and r.json()['detail'] == 'all serving capacity busy'
+    assert set(calls) == {1, 2}  # both tried once; the exclude set stops a re-pick
+    assert state.inflight() == {1: 0, 2: 0}
+    drained = state.drain_served()
+    assert len(drained) == 2 and all(not q.ok and 'busy' in q.detail for q in drained)
+
+
+def test_gateway_stream_retries_busy_before_committing_to_the_stream(monkeypatch):
+    """A busy refusal streams nothing, so the retry happens before the client sees any bytes."""
+    state = ServingState(_rng=random.Random(7))
+    state.publish_round([_ready(1), _ready(2)], {})
+    client, calls = _busy_then_serve_client(state, monkeypatch)
+    with client.stream(
+        'POST',
+        '/v1/chat/completions',
+        json={'messages': MSGS, 'max_tokens': 4, 'stream': True},
+        headers={'Authorization': 'Bearer k1'},
+    ) as r:
+        assert r.status_code == 200
+        raw = b''.join(r.iter_bytes())
+    from gittensor.serving.stream import SSEParser
+
+    events = SSEParser().feed(raw)
+    assert events[-1] is None and set(calls) == {1, 2}  # a full stream, served by the miner that had room
+    assert state.inflight() == {1: 0, 2: 0}
 
 
 def test_gateway_chat_completion_roundtrip(monkeypatch):
@@ -1239,6 +1348,48 @@ def test_budget_refusal_is_neutral_only_by_the_validators_own_ledger(monkeypatch
     assert state.audits.verdict('hk1', good.model_id).mean == 0.5
 
 
+def test_busy_refusal_is_neutral_and_tallied_never_a_strike(monkeypatch):
+    """A miner refusing at capacity takes no window hit and earns nothing for the refused request; the refusal is
+    tallied as headroom telemetry at the request's own timestamp. Unconditional — no ledger can corroborate the
+    load other validators put on the card, and the refused tokens are already the penalty."""
+    from types import SimpleNamespace
+
+    good = _echo_release()
+    axon = SimpleNamespace(is_serving=True)
+    dendrite, _ = _dendrite_echoing(good)
+
+    def refused():
+        r = _served(1, good, ok=False)
+        r.detail = 'Forbidden. Key is blacklisted: busy: all backend slots in use.'
+        return r
+
+    state = ServingState(settlement_rounds=1)
+    state.enqueue_served(_served(1, good))
+    state.enqueue_served(refused())
+    _round(state, dendrite, [(1, 'hk1', axon)], good, monkeypatch)
+    w = state.audits.verdict('hk1', good.model_id)
+    assert w.n_audits == 1 and w.mean == 1.0  # the refusal never entered the window
+    assert state.busy_count('hk1', 3600.0, now=1.0) == 1  # tallied once, at the request's ts (0.0)
+    assert state.dormant_rounds.get('hk1', 0) == 0
+
+
+def test_busy_refusals_keep_a_hotkey_out_of_dormancy():
+    """A whole round of busy refusals is an alive-but-full card, not a dead axon; anything else starves a saturated
+    probation miner out of the probe stream."""
+    from types import SimpleNamespace
+
+    good = _echo_release()
+    fwd = fwd_module()
+    state = ServingState()
+    busy = _served(1, good, ok=False)
+    busy.detail = 'Forbidden. Key is blacklisted: busy: all backend slots in use.'
+    dead = _served(2, good, ok=False)
+    dead.detail = 'timeout'
+    serving = [(1, 'hk1', SimpleNamespace(is_serving=True)), (2, 'hk2', SimpleNamespace(is_serving=True))]
+    fwd.update_dormancy(state, serving, [busy, dead])  # type: ignore[arg-type]
+    assert state.dormant_rounds.get('hk1', 0) == 0 and state.dormant_rounds.get('hk2') == 1
+
+
 def test_sent_token_ledger_is_kept_at_dispatch(monkeypatch):
     """Gateway and baseline requests both charge the validator's own ledger with the max_tokens they asked for."""
     from gittensor.validator.serving.forward import baseline_round
@@ -1821,6 +1972,7 @@ def test_serving_miner_blacklists_non_validators(monkeypatch):
             block=720,
         ),
         audit_budget={},
+        backend_slots=asyncio.Semaphore(1),
     )
 
     def call(hotkey, max_tokens=64):
@@ -2453,6 +2605,7 @@ def test_miner_refuses_a_request_routed_for_another_release():
     miner = SimpleNamespace(
         release=ServingRelease(model_id='qwen', backend='echo', release_id='qwen-fast'),
         metagraph=SimpleNamespace(hotkeys=['vali'], S=[2_000_000.0]),
+        backend_slots=asyncio.Semaphore(1),
     )
     syn = InferenceSynapse(messages=MSGS, model_id='qwen', release_id='qwen-slow', max_tokens=4)
     syn.dendrite = bt.TerminalInfo(hotkey='vali')
@@ -2462,6 +2615,34 @@ def test_miner_refuses_a_request_routed_for_another_release():
     assert not asyncio.run(blacklist_inference(miner, syn))[0]  # type: ignore[arg-type]
     syn.release_id = ''  # a caller that does not name a release is served as before
     assert not asyncio.run(blacklist_inference(miner, syn))[0]  # type: ignore[arg-type]
+
+
+def test_miner_refuses_busy_before_charging_budget_and_attest_bypasses_it():
+    """Every backend slot taken -> "busy" up front (R6 at the axon), before the budget charge; a freed slot serves
+    and charges as before. Attestation skips the gate: a full card must still pass attest rounds."""
+    from gittensor.synapses import AttestSynapse
+    from neurons.serving_miner import blacklist_attest, blacklist_inference
+
+    miner = SimpleNamespace(
+        release=ServingRelease(model_id='qwen', backend='echo', release_id='qwen-fast'),
+        metagraph=SimpleNamespace(
+            hotkeys=['auditor'], S=[100.0], validator_permit=[True], validator_trust=[1.0], block=720
+        ),
+        backend_slots=asyncio.Semaphore(0),
+        audit_budget={},
+        attest_inflight=set(),
+    )
+    syn = InferenceSynapse(messages=MSGS, model_id='qwen', max_tokens=4)
+    syn.dendrite = bt.TerminalInfo(hotkey='auditor')
+    blocked, reason = asyncio.run(blacklist_inference(miner, syn))  # type: ignore[arg-type]
+    assert blocked and 'busy' in reason
+    assert miner.audit_budget == {}
+    att = AttestSynapse(seed=1)
+    att.dendrite = bt.TerminalInfo(hotkey='auditor')
+    assert not asyncio.run(blacklist_attest(miner, att))[0]  # type: ignore[arg-type]
+    miner.backend_slots = asyncio.Semaphore(1)
+    assert not asyncio.run(blacklist_inference(miner, syn))[0]  # type: ignore[arg-type]
+    assert miner.audit_budget['auditor'][1] == 4
 
 
 def test_strikes_count_up_and_survive_a_restart(tmp_path):

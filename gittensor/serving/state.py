@@ -13,7 +13,9 @@ earn a window without a real user ever hitting an unverified card. Per-round
 pay scores (served tokens in card-equivalents) are settled over the trailing
 ``SERVING_SETTLEMENT_ROUNDS`` rounds; a READY miner's ``score`` is its routing
 weight (speed credit), separate from pay. Both threads also append to one
-request log (telemetry).
+request log (telemetry). A miner that refuses a request at capacity ("busy")
+is retried elsewhere by the gateway and tallied here as headroom telemetry —
+never a strike; its refused tokens are unpaid, which is the whole penalty.
 """
 
 import math
@@ -22,7 +24,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Deque, Dict, List, Optional, Sequence, Tuple
+from typing import Deque, Dict, List, Optional, Sequence, Set, Tuple
 
 import bittensor as bt
 
@@ -89,6 +91,13 @@ def finite_or_none(value: Optional[float]) -> Optional[float]:
     return float(value) if value is not None and math.isfinite(value) else None
 
 
+def is_busy_detail(detail: Optional[str]) -> bool:
+    """A miner's saturation refusal ("busy: all backend slots in use") as it lands in an axon status message.
+    'budget' is excluded so the budget refusal keeps its own, ledger-gated path."""
+    text = (detail or '').lower()
+    return 'busy' in text and 'budget' not in text
+
+
 @dataclass
 class ServingState:
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -103,6 +112,7 @@ class ServingState:
     attest_status: Dict[str, dict] = field(default_factory=dict)  # audit thread only: hotkey -> last attest verdict
     last_credit: Dict[str, float] = field(default_factory=dict)  # audit thread only: hotkey -> last measured credit
     _sent_tokens: Dict[str, Deque[Tuple[float, int]]] = field(default_factory=dict)  # hotkey -> (ts, max_tokens)
+    _busy: Dict[str, Deque[float]] = field(default_factory=dict)  # hotkey -> ts of each busy refusal
     attest_round: int = 0
     last_round: dict = field(default_factory=dict)  # audit thread's summary of the last round, for /v1/serving/status
     _rng: random.Random = field(default_factory=random.Random, repr=False)
@@ -183,6 +193,20 @@ class ServingState:
         with self._lock:
             return sum(n for ts, n in self._sent_tokens.get(hotkey, ()) if ts >= since)
 
+    def busy_refusal(self, hotkey: str, now: Optional[float] = None) -> None:
+        """A miner refused a request at capacity. Headroom telemetry, never a strike: the refusal already cost the
+        miner the tokens it did not serve."""
+        with self._lock:
+            self._busy.setdefault(hotkey, deque(maxlen=SERVING_REQUEST_LOG_SIZE)).append(
+                now if now is not None else time.time()
+            )
+
+    def busy_count(self, hotkey: str, window_s: float, now: Optional[float] = None) -> int:
+        """Busy refusals recorded for ``hotkey`` in the trailing ``window_s`` seconds."""
+        since = (now if now is not None else time.time()) - window_s
+        with self._lock:
+            return sum(1 for ts in self._busy.get(hotkey, ()) if ts >= since)
+
     def drain_served(self) -> List[ServedRequest]:
         """Audit thread: take every request served since the last round."""
         with self._lock:
@@ -197,7 +221,9 @@ class ServingState:
         with self._lock:
             return list(self._ready.values()) if self._fresh() else []
 
-    def acquire(self, release_id: Optional[str] = None, probation: bool = False) -> Optional[ReadyMiner]:
+    def acquire(
+        self, release_id: Optional[str] = None, probation: bool = False, exclude: Optional[Set[int]] = None
+    ) -> Optional[ReadyMiner]:
         """Pick a READY miner (for ``release_id`` if given) with the fewest in-flight requests.
 
         Among those, the choice is random, weighted by score: a better miner is sent more, but not everything.
@@ -207,8 +233,10 @@ class ServingState:
 
         With ``probation`` (baseline traffic) an idle probation miner is preferred, at most one request in flight
         each, so unverified miners get exactly the traffic they need to earn a window and no more.
+        ``exclude`` skips uids that already refused this request busy, so a retry lands elsewhere.
         Returns None when there is no capacity or the last audit round is older than the READY TTL.
         """
+        exclude = exclude or set()
         with self._lock:
             if not self._fresh():
                 return None
@@ -216,13 +244,19 @@ class ServingState:
                 idle = [
                     u
                     for u, m in self._probation.items()
-                    if (release_id is None or m.release_id == release_id) and self._inflight.get(u, 0) == 0
+                    if u not in exclude
+                    and (release_id is None or m.release_id == release_id)
+                    and self._inflight.get(u, 0) == 0
                 ]
                 if idle:
                     uid = min(idle)
                     self._inflight[uid] = 1
                     return self._probation[uid]
-            candidates = [u for u, m in self._ready.items() if release_id is None or m.release_id == release_id]
+            candidates = [
+                u
+                for u, m in self._ready.items()
+                if u not in exclude and (release_id is None or m.release_id == release_id)
+            ]
             if not candidates:
                 return None
             fewest = min(self._inflight.get(u, 0) for u in candidates)
@@ -260,7 +294,10 @@ class ServingState:
     def snapshot(self) -> dict:
         with self._lock:
             log = list(self._log)
+            since = time.time() - 3600.0  # busy refusals shown over the trailing hour, like settlement
+            busy = {hk: n for hk, q in self._busy.items() if (n := sum(1 for ts in q if ts >= since))}
             return {
+                'busy': busy,
                 'ready_uids': sorted(self._ready),
                 'probation_uids': sorted(self._probation),
                 'pending_verification': len(self._served),

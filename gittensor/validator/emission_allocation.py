@@ -52,6 +52,9 @@ def blend_emission_pools(
 
     total_configured_share = sum(config.emission_share for config in master_repositories.values())
     recycle_share = max(0.0, 1.0 - total_configured_share) * OSS_EMISSION_SHARE
+    # The slice reserved for neither pool burns explicitly: weights are normalized on chain, so leaving it
+    # unallocated would silently redistribute it pro-rata instead.
+    recycle_share += max(0.0, 1.0 - OSS_EMISSION_SHARE - SERVING_EMISSION_SHARE_CAP)
 
     for allocation in calculate_repo_emission_breakdown(
         miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo

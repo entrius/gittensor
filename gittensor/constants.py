@@ -168,9 +168,10 @@ MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software,
 # published in serving_loadout.json (`pricing`). No card count and no per-hotkey cap: served volume is the capacity
 # proof, and a real 5090 cannot out-decode its silicon. The only ceiling is SERVING_EMISSION_SHARE_CAP — above it the
 # fleet dilutes pro-rata by token share; what it does not earn recycles to RECYCLE_UID, never to OSS. With no price
-# data (testnet) the cap is paid pro-rata. Move OSS_EMISSION_SHARE in the same commit so the pools sum to 1.0.
+# data (testnet) the cap is paid pro-rata. The pools may sum under 1.0: the unreserved remainder burns every round
+# (blend_emission_pools recycles it to RECYCLE_UID), so shrinking this cap never inflates OSS.
 SERVING_GPU_HOUR_USD = 0.70
-SERVING_EMISSION_SHARE_CAP = 0.10
+SERVING_EMISSION_SHARE_CAP = 0.05
 # Output tok/s one card sustains under load on the blessed runtime, for a release without its own
 # `speed.aggregate_decode_tps` (sparkinfer 7498736 on a 5090: 279-282 at 16 concurrent, 2026-08-27).
 SERVING_AGGREGATE_DECODE_TPS_FALLBACK = 280.0
@@ -179,8 +180,8 @@ SERVING_AGGREGATE_DECODE_TPS_FALLBACK = 280.0
 # usable pricing at all the fleet is paid nothing: the alternative (the whole cap, split pro-rata) hands one verified
 # card the whole cap. A network with no price data to read - testnet - sets SERVING_PAY_CAP_WITHOUT_PRICING.
 SERVING_PRICING_MAX_AGE_S = 3600.0
-assert abs(OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE_CAP - 1.0) < EMISSION_SHARE_TOLERANCE, (
-    'emission pools must sum to 1.0'
+assert OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE_CAP <= 1.0 + EMISSION_SHARE_TOLERANCE, (
+    'emission pools must not exceed 1.0'
 )
 # Settlement is over the trailing hour: a miner's serving score is the mean of its last SERVING_SETTLEMENT_ROUNDS
 # round scores (missing rounds count 0), so the hour's served tokens are what is priced. Shorten it to move pay

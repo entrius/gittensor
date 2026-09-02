@@ -1034,10 +1034,21 @@ def test_stream_assembler_collects_token_ids():
     assert plain.apply(InferenceSynapse(messages=MSGS, model_id=release.model_id)).token_ids is None
 
 
-def test_emission_pools_sum_to_one():
-    from gittensor.constants import EMISSION_SHARE_TOLERANCE, OSS_EMISSION_SHARE, SERVING_EMISSION_SHARE_CAP
+def test_emission_pools_fit_in_one_and_the_slack_burns():
+    from gittensor.constants import (
+        EMISSION_SHARE_TOLERANCE,
+        OSS_EMISSION_SHARE,
+        RECYCLE_UID,
+        SERVING_EMISSION_SHARE_CAP,
+    )
+    from gittensor.validator.emission_allocation import blend_emission_pools
 
-    assert abs(OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE_CAP - 1.0) < EMISSION_SHARE_TOLERANCE
+    assert OSS_EMISSION_SHARE + SERVING_EMISSION_SHARE_CAP <= 1.0 + EMISSION_SHARE_TOLERANCE
+    # An empty round burns the whole emission: OSS slack, the unfunded serving cap, and the slice reserved for
+    # neither pool all land on RECYCLE_UID, so on-chain normalization has nothing to redistribute.
+    rewards = blend_emission_pools({}, {}, {RECYCLE_UID, 1}, None, {}, None)
+    assert rewards[sorted({RECYCLE_UID, 1}).index(RECYCLE_UID)] == pytest.approx(1.0)
+    assert sum(rewards) == pytest.approx(1.0)
 
 
 def test_verify_rejects_malformed_reference():

@@ -17,7 +17,7 @@ services:
       # already baked into the image; repeated here so nobody turns it off by accident (contract D1)
       SPARKINFER_DETERMINISTIC: "1"
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${RUNTIME_PORT:-8080}:8080"
     volumes:
       - sparkmodels:/opt/sparkinfer/models
     deploy:
@@ -33,7 +33,7 @@ services:
     container_name: gt-miner-attest
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8081:8081"
+      - "127.0.0.1:${ATTEST_PORT:-8081}:8081"
     deploy:
       resources:
         reservations:
@@ -54,8 +54,8 @@ services:
       HOTKEY_NAME: ${HOTKEY_NAME:?the registered hotkey}
       PORT: ${PORT:?axon port, reachable from the internet}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      SERVING_BASE_URL: http://runtime:8080
-      SERVING_ATTEST_URL: http://attest:8081
+      SERVING_BASE_URL: ${SERVING_BASE_URL:-http://runtime:8080}
+      SERVING_ATTEST_URL: ${SERVING_ATTEST_URL:-http://attest:8081}
       SERVING_RELEASE: ${SERVING_RELEASE:-}
     ports:
       - "${PORT:-8099}:${PORT:-8099}"

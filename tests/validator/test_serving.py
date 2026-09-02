@@ -100,6 +100,16 @@ def test_reference_url_env_override_and_release_lookup(monkeypatch):
     assert isinstance(reference_for(loadout.primary), EchoReference)
 
 
+def test_base_url_env_override_points_miner_at_compose_services(monkeypatch):
+    monkeypatch.setenv('SERVING_LOADOUT_PATH', str(ECHO_LOADOUT_PATH))
+    monkeypatch.setenv('SERVING_BASE_URL', 'http://runtime:8080')
+    loadout = load_serving_loadout()
+    assert loadout.primary.base_url == 'http://runtime:8080'
+    assert loadout.primary.attest_url == 'http://runtime:8081'
+    monkeypatch.setenv('SERVING_ATTEST_URL', 'http://attest:8081')
+    assert load_serving_loadout().primary.attest_url == 'http://attest:8081'
+
+
 def test_live_reference_wins_over_bank(monkeypatch):
     from gittensor.serving import audit
 

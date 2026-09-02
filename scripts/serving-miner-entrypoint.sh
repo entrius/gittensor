@@ -15,6 +15,12 @@ if [ -z "$SUBTENSOR_NETWORK" ]; then echo "SUBTENSOR_NETWORK is required" && exi
 if [ -z "$PORT" ]; then echo "PORT is required" && exit 1; fi
 if [ -z "$LOG_LEVEL" ]; then echo "LOG_LEVEL is required" && exit 1; fi
 
+HOTKEY_FILE="/root/.bittensor/wallets/${WALLET_NAME}/hotkeys/${HOTKEY_NAME}"
+if [ $# -eq 0 ] && [ ! -f "$HOTKEY_FILE" ]; then
+  echo "hotkey not found at ${HOTKEY_FILE}: mount your wallet dir (WALLET_PATH) and check WALLET_NAME/HOTKEY_NAME"
+  exit 1
+fi
+
 exec python neurons/serving_miner.py \
   --netuid ${NETUID} \
   --wallet.name ${WALLET_NAME} \

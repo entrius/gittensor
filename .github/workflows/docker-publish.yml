@@ -1,10 +1,15 @@
 name: Build and Push Docker Image
 
+# Publishes the neuron image (root Dockerfile) and the conformance checker built from it
+# (docker/checker.Dockerfile), so a miner pulls a known-good build instead of cloning the repo:
+# main -> entrius/gittensor:latest + entrius/gt-checker:latest, test -> the :test tags.
+
 on:
   workflow_dispatch:
   push:
     branches:
       - main
+      - test
 
 jobs:
   build-and-push:
@@ -13,16 +18,33 @@ jobs:
       - name: Check out the repo
         uses: actions/checkout@v4
 
+      - name: Resolve the tag from the branch
+        id: tag
+        run: |
+          REF="${{ github.ref_name }}"
+          echo "tag=$([ "$REF" = main ] && echo latest || echo "$REF")" >> "$GITHUB_OUTPUT"
+
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Build and push the neuron image
+        id: neuron
         uses: docker/build-push-action@v5
         with:
           context: .
           file: Dockerfile
           push: true
-          tags: entrius/gittensor:latest,entrius/gittensor:${{ github.sha }}
+          tags: entrius/gittensor:${{ steps.tag.outputs.tag }},entrius/gittensor:${{ github.sha }}
+
+      - name: Build and push the conformance checker
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/checker.Dockerfile
+          push: true
+          build-args: |
+            BASE_IMAGE=entrius/gittensor@${{ steps.neuron.outputs.digest }}
+          tags: entrius/gt-checker:${{ steps.tag.outputs.tag }}

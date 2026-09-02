@@ -1,0 +1,74 @@
+# The whole serving miner box (see the Compute Miner guide): the blessed runtime, the attestation sidecar
+# and the miner neuron. Fill .env from miner.env.example — the image tags and model sha come from the
+# "Current release" card on gittensor.io/compute, never from a doc page — then:
+#
+#   docker compose -f docker-compose.miner.yml up -d
+#
+# Needs an RTX 5090 with the NVIDIA container toolkit; without one the runtime and attest services fail to
+# start (the neuron alone earns nothing). Runtime and attest stay on host loopback — the neuron reaches them
+# by compose DNS; the loopback mapping is for your own curl checks and the conformance checker.
+services:
+  runtime:
+    image: ${SPARKINFER_IMAGE:?runtime image from the Current release card on gittensor.io/compute}
+    container_name: gt-miner-runtime
+    restart: unless-stopped
+    environment:
+      MODEL_SHA256: ${MODEL_SHA256:?model sha256 from the Current release card on gittensor.io/compute}
+      # already baked into the image; repeated here so nobody turns it off by accident (contract D1)
+      SPARKINFER_DETERMINISTIC: "1"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - sparkmodels:/opt/sparkinfer/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  attest:
+    image: ${ATTEST_IMAGE:?attest image from the Current release card on gittensor.io/compute}
+    container_name: gt-miner-attest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8081"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  miner:
+    image: ${GITTENSOR_IMAGE:-entrius/gittensor:latest}
+    container_name: gt-miner
+    restart: unless-stopped
+    entrypoint: /app/scripts/serving-miner-entrypoint.sh
+    environment:
+      SUBTENSOR_NETWORK: ${SUBTENSOR_NETWORK:?finney for mainnet, test for testnet}
+      NETUID: ${NETUID:?74 for mainnet, 422 for testnet}
+      WALLET_NAME: ${WALLET_NAME:?the wallet whose hotkey you registered}
+      HOTKEY_NAME: ${HOTKEY_NAME:?the registered hotkey}
+      PORT: ${PORT:?axon port, reachable from the internet}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SERVING_BASE_URL: http://runtime:8080
+      SERVING_ATTEST_URL: http://attest:8081
+      SERVING_RELEASE: ${SERVING_RELEASE:-}
+    ports:
+      - "${PORT:-8099}:${PORT:-8099}"
+    volumes:
+      - ${WALLET_PATH:-~/.bittensor/wallets}:/root/.bittensor/wallets:ro
+    depends_on:
+      - runtime
+      - attest
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  sparkmodels:

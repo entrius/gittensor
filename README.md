@@ -61,18 +61,19 @@ verified GPU-hour** (paid in alpha, inside a 3.5% emission cap). Validators veri
 against their own reference GPU — there is no separate audit prompt set — so a new miner sits in *probation*
 until its rolling window passes, then goes READY. One card = one payout; extra hotkeys on the same card share it.
 
+No clone, no build — every image is published on Docker Hub:
+
 ```bash
-# 1. Runtime: the pinned sparkinfer build + SHA-pinned model. Current tag + sha: gittensor.io/compute ("Current
-#    release", copy-paste command) or gittensor/validator/weights/serving_loadout.json
-docker run -d --name sparkinfer --gpus all -p 8080:8080 -v sparkmodels:/opt/sparkinfer/models \
-  -e MODEL_SHA256=<model_sha256 from the loadout> -e SPARKINFER_DETERMINISTIC=1 entrius/sparkinfer:<runtime_pin>
+# 1. The whole box (runtime + attest + neuron) from one compose file. Fill .env from the
+#    "Current release" card on gittensor.io/compute (images + model sha) plus wallet/network/port.
+curl -O https://raw.githubusercontent.com/entrius/gittensor/main/docker-compose.miner.yml
+curl -o .env https://raw.githubusercontent.com/entrius/gittensor/main/miner.env.example
+nano .env
+docker compose -f docker-compose.miner.yml up -d
 
-# 2. Prove it is conformant before you serve
-uv run python scripts/check_serving_runtime.py --base-url http://127.0.0.1:8080 --model-id qwen3.6-35b-a3b
-
-# 3. Miner neuron (env from .env.example: NETUID, WALLET_NAME, HOTKEY_NAME, SUBTENSOR_NETWORK, PORT, ...)
-docker run -d --env-file .env --network host -v ~/.bittensor/wallets:/root/.bittensor/wallets:ro \
-  --entrypoint /app/scripts/serving-miner-entrypoint.sh gittensor-miner
+# 2. Prove the box is conformant before you serve (model id from the same card)
+docker run --rm --network host entrius/gt-checker \
+  --base-url http://127.0.0.1:8080 --model-id qwen3.6-35b-a3b --attest-url http://127.0.0.1:8081
 ```
 
 Your status (READY / probation / quarantined, window, throughput, estimated payout, last miss reason) is on

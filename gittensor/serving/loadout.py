@@ -14,7 +14,9 @@ The loadout is a repo-pinned JSON file (same distribution rail as
 master_repositories.json) that miner and validator both load, so both sides
 agree on the releases by construction. ``SERVING_LOADOUT_PATH`` overrides the
 file (``serving_loadout.echo.json`` for a GPU-free localnet);
-``SERVING_REFERENCE_URL`` (+ ``SERVING_REFERENCE_API_KEY``) points the
+``SERVING_BASE_URL`` (+ ``SERVING_ATTEST_URL``) points the primary
+release's miner side at its runtime and attest containers (compose service
+DNS); ``SERVING_REFERENCE_URL`` (+ ``SERVING_REFERENCE_API_KEY``) points the
 primary release at a reference runtime — on the validator's own GPU or any
 reachable conformant copy, e.g. a rented 5090. Replacing this loader with a validator-signed,
 traffic-driven schedule (Gepetto-lite) is the planned upgrade path.
@@ -203,6 +205,14 @@ def load_serving_loadout(path: Optional[Path] = None) -> ServingLoadout:
     # The rate is the repo's, not the operator's: validators must price the same card the same way.
     tao_usd = float(pricing['tao_usd']) if pricing.get('tao_usd') else None
     loadout = ServingLoadout(releases=[ServingRelease.from_dict(entry) for entry in entries], tao_usd=tao_usd)
+
+    base_override = os.getenv('SERVING_BASE_URL')
+    if base_override:
+        loadout.primary.base_url = base_override
+        loadout.primary.attest_url = _sidecar_url(base_override)
+    attest_override = os.getenv('SERVING_ATTEST_URL')
+    if attest_override:
+        loadout.primary.attest_url = attest_override
 
     reference_override = os.getenv('SERVING_REFERENCE_URL')
     if reference_override:

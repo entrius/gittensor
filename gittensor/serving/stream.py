@@ -178,19 +178,34 @@ async def consume_stream(
     stream = dendrite.call_stream(target_axon=axon, synapse=synapse, timeout=timeout, deserialize=False).__aiter__()
     waiting_first = first_byte_s is not None
     while True:
-        step = stream.__anext__()
-        try:
-            chunk = await (asyncio.wait_for(step, first_byte_s) if waiting_first else step)
-        except StopAsyncIteration:
-            break
-        except asyncio.TimeoutError:
-            aclose = getattr(stream, 'aclose', None)
-            if aclose is not None:
+        if waiting_first:
+            # Not wait_for: its cancellation can surface as a bare CancelledError (BaseException) from the
+            # dendrite's stream machinery, and one escaping probe kills the whole audit thread. Cancel explicitly,
+            # absorb whatever the cancelled step raises, and report the timeout as an ordinary TimeoutError.
+            step_task = asyncio.ensure_future(stream.__anext__())
+            done, _ = await asyncio.wait({step_task}, timeout=first_byte_s)
+            if not done:
+                step_task.cancel()
                 try:
-                    await aclose()
-                except Exception:
+                    await step_task
+                except BaseException:
                     pass
-            raise TimeoutError(f'no first byte from the axon within {first_byte_s}s')
+                aclose = getattr(stream, 'aclose', None)
+                if aclose is not None:
+                    try:
+                        await aclose()
+                    except BaseException:
+                        pass
+                raise TimeoutError(f'no first byte from the axon within {first_byte_s}s')
+            try:
+                chunk = step_task.result()
+            except StopAsyncIteration:
+                break
+        else:
+            try:
+                chunk = await stream.__anext__()
+            except StopAsyncIteration:
+                break
         waiting_first = False
         if isinstance(chunk, (bytes, bytearray)):
             for event in parser.feed(bytes(chunk)):

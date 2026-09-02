@@ -60,6 +60,11 @@ from neurons.base.neuron import BaseNeuron
 
 BTStreamingResponse = StreamingSynapse.BTStreamingResponse
 
+# A slot claim made at admission that the handler never picks up (verify failed, connection died) frees itself
+# after this grace; a claimed stream frees itself request_timeout + slack after it began, however it ended.
+SLOT_CLAIM_GRACE_S = 10.0
+SLOT_CLAIM_STREAM_SLACK_S = 30.0
+
 
 class ServingMiner(BaseNeuron):
     """Serves one release over an axon and answers inference challenges."""
@@ -87,9 +92,8 @@ class ServingMiner(BaseNeuron):
             verify_fn=partial(verify_attest, self),
         )
         # One card's worth by default; a multi-GPU box fronting N instances sets SERVING_BACKEND_CONCURRENCY=N x 16.
-        self.backend_slots = asyncio.Semaphore(
-            int(os.getenv('SERVING_BACKEND_CONCURRENCY', SERVING_BACKEND_CONCURRENCY))
-        )
+        self.slot_count = int(os.getenv('SERVING_BACKEND_CONCURRENCY', SERVING_BACKEND_CONCURRENCY))
+        self.slot_claims: Dict[int, float] = {}  # id(synapse) -> monotonic expiry
         self.seen_nonces: 'OrderedDict[str, None]' = OrderedDict()
         self.audit_budget: Dict[str, Tuple[int, int]] = {}  # validator hotkey -> (tempo, completion tokens used)
         self.attest_inflight: Set[str] = set()  # validator hotkeys with a challenge running on the sidecar now
@@ -127,11 +131,13 @@ async def handle_inference(miner: ServingMiner, synapse: InferenceSynapse) -> BT
     """Stream the backend's completion for an audit or user request through the axon.
 
     Backend errors end the stream without ``[DONE]``; the validator scores that as a miss. Saturation never gets
-    this far: ``blacklist_inference`` refuses "busy" while every backend slot is taken, so the slot wait below only
-    absorbs the few requests that raced past the gate together.
+    this far: ``blacklist_inference`` claimed a slot atomically at admission, so nothing here waits — the claim is
+    extended for the stream's lifetime and released when it ends, however it ends.
     """
     max_tokens = max(1, min(int(synapse.max_tokens), SERVING_MAX_TOKENS))
     messages, logprobs = synapse.messages, synapse.logprobs
+    claim = id(synapse)
+    miner.slot_claims[claim] = time.monotonic() + miner.release.request_timeout + SLOT_CLAIM_STREAM_SLACK_S
 
     async def token_streamer(send) -> None:
         loop = asyncio.get_running_loop()
@@ -146,11 +152,13 @@ async def handle_inference(miner: ServingMiner, synapse: InferenceSynapse) -> BT
             finally:
                 loop.call_soon_threadsafe(queue.put_nowait, None)
 
-        async with miner.backend_slots:
+        try:
             producer = loop.run_in_executor(None, produce)
             while (chunk := await queue.get()) is not None:
                 await send({'type': 'http.response.body', 'body': chunk, 'more_body': True})
             await producer
+        finally:
+            miner.slot_claims.pop(claim, None)
 
     return synapse.create_streaming_response(token_streamer)
 
@@ -242,10 +250,28 @@ async def blacklist_inference(miner: ServingMiner, synapse: InferenceSynapse) ->
     would decay every caller's TTFT. Before the caller gate and its budget charge, so a refused request costs the
     caller nothing. Attestation delegates to ``blacklist_caller`` and skips this: the sidecar has its own
     serialisation and a full backend must still pass attest rounds.
+
+    Admission and accounting are one atomic step: ``claim_slot`` counts this request against the slots the moment
+    it is admitted, with no await in between, so a burst cannot race past a capacity check that only samples
+    slots already handed to running streams. A claim the handler never picks up expires on its own.
     """
-    if miner.backend_slots.locked():
+    if not claim_slot(miner, synapse):
         return True, 'busy: all backend slots in use'
-    return await blacklist_caller(miner, synapse)
+    blocked, reason = await blacklist_caller(miner, synapse)
+    if blocked:
+        miner.slot_claims.pop(id(synapse), None)
+    return blocked, reason
+
+
+def claim_slot(miner: ServingMiner, synapse: InferenceSynapse) -> bool:
+    now = time.monotonic()
+    for key, expiry in list(miner.slot_claims.items()):
+        if expiry <= now:
+            del miner.slot_claims[key]
+    if len(miner.slot_claims) >= miner.slot_count:
+        return False
+    miner.slot_claims[id(synapse)] = now + SLOT_CLAIM_GRACE_S
+    return True
 
 
 async def blacklist_caller(miner: ServingMiner, synapse: InferenceSynapse) -> Tuple[bool, str]:

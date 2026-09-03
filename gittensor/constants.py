@@ -217,6 +217,9 @@ SERVING_ATTEST_MAX_CARDS = 8
 SERVING_ATTEST_MODEL_RESIDENT_RATIO = 0.8
 SERVING_VRAM_MODEL_RESERVED_BYTES = 24e9  # what sparkinfer holds with the model loaded (7498736 on a 5090: 23.7 GB)
 SERVING_VERIFY_WORKERS = 8  # concurrent /v1/score calls to the reference per round
+# A reference 429 is R6 backpressure (a conformant runtime refuses at capacity instead of queueing) — a fact about
+# the reference's load, never about the miner's answer. Retried with backoff this many times, then neutral.
+SERVING_VERIFY_BUSY_RETRIES = 3
 # Latency credit on the validator-observed time to first streamed token (network + queue + prefill). An honest
 # 5090 reports TTFT ~26 ms on-box (2026-08-27 conformance) and a 64-token answer in ~165 ms (2026-08-22/24); add
 # validator<->miner RTT and an honest miner anywhere on earth lands well under FULL. Credit is flat to FULL and

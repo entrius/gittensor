@@ -993,7 +993,9 @@ def test_runtime_rejected_prompt_is_checked_against_the_reference(monkeypatch):
         verify_served_round(state, reference, good, [failed], summary)
         return summary.get('neutral', 0), summary.get('miss', 0)
 
+    monkeypatch.setattr('gittensor.validator.serving.forward.time.sleep', lambda s: None)
     assert run(Reference(400)) == (1, 0)
+    assert run(Reference(429)) == (1, 0)  # saturated reference rules neither way: the miss is excused
     assert run(Reference(500)) == (0, 1)
     assert run(Reference(None)) == (0, 1)
     assert run(Reference(400), source='baseline') == (0, 1)
@@ -1518,6 +1520,48 @@ def test_reference_rejection_is_the_miners_miss_and_a_reference_fault_is_neutral
     summary = {}
     verify_served_round(state, Rejecting(503), good, [_served(1, good)], summary)  # type: ignore[arg-type]
     assert summary.get('neutral') == 1 and state.audits.verdict('hk1', good.model_id).n_audits == 0
+    state = ServingState()
+    summary = {}
+    _, tokens = verify_served_round(state, Rejecting(429), good, [_served(1, good)], summary)  # type: ignore[arg-type]
+    assert summary.get('neutral') == 1 and summary.get('miss', 0) == 0
+    assert state.audits.verdict('hk1', good.model_id).n_audits == 0  # no window damage from reference saturation
+    assert tokens.get('hk1', 0) > 0  # the gateway saw the tokens served; an unverifiable round still pays them
+
+
+def test_reference_429_is_retried_until_a_slot_frees(monkeypatch):
+    """R6 backpressure: the reference refusing at capacity is retried with backoff, and the verdict that lands
+    once a slot frees is the real one — a burst never turns the ready set's audits into misses."""
+    from types import SimpleNamespace
+
+    import requests
+
+    from gittensor.constants import SERVING_VERIFY_BUSY_RETRIES
+    from gittensor.validator.serving.forward import verify_served_round
+
+    good = _echo_release()
+
+    class Saturated(EchoReference):
+        def __init__(self, busy_calls):
+            super().__init__(good)
+            self.busy_calls = busy_calls
+            self.slept = []
+
+        def score_served(self, messages, completion, token_ids=None):
+            if self.busy_calls > 0:
+                self.busy_calls -= 1
+                err = requests.HTTPError('too many requests')
+                err.response = SimpleNamespace(status_code=429)
+                raise err
+            return super().score_served(messages, completion, token_ids=token_ids)
+
+    ref = Saturated(SERVING_VERIFY_BUSY_RETRIES)
+    monkeypatch.setattr('gittensor.validator.serving.forward.time.sleep', ref.slept.append)
+    state = ServingState()
+    summary = {}
+    verify_served_round(state, ref, good, [_served(1, good)], summary)
+    assert summary.get('pass') == 1 and summary.get('neutral', 0) == 0
+    assert state.audits.verdict('hk1', good.model_id).n_audits == 1
+    assert len(ref.slept) == SERVING_VERIFY_BUSY_RETRIES and ref.slept == sorted(ref.slept)  # backoff grows
 
 
 def fwd_module():

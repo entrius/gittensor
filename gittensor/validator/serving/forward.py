@@ -62,6 +62,7 @@ from gittensor.constants import (
     SERVING_MIN_CALLER_STAKE,
     SERVING_STRIKE_MIN_FLEET_PASS,
     SERVING_VALIDATOR_TOKENS_PER_TEMPO,
+    SERVING_VERIFY_BUSY_RETRIES,
     SERVING_VERIFY_WORKERS,
 )
 from gittensor.serving.audit import AuditVerdict, Reference, reference_for, verify_served
@@ -125,17 +126,25 @@ def reference_agrees_with_fleet(
 
 def reference_rejects(reference: Reference, messages: List[Dict[str, str]]) -> bool:
     """Would the validator's own reference refuse this prompt (HTTP 4xx on a one-token greedy)? Only a live
-    reference can be asked; anything else, or any other failure, is 'no', so the miss stands."""
+    reference can be asked; anything else, or any other failure, is 'no', so the miss stands. A saturated
+    reference (429, R6 backpressure) can rule neither way: retried, then the miss is excused as neutral."""
     case_for = getattr(reference, 'case_for', None)
     if case_for is None:
         return False
-    try:
-        case_for(messages, 1)
-    except requests.HTTPError as e:
-        status = getattr(getattr(e, 'response', None), 'status_code', 0) or 0
-        return 400 <= status < 500
-    except Exception:
-        return False
+    for attempt in range(1 + SERVING_VERIFY_BUSY_RETRIES):
+        try:
+            case_for(messages, 1)
+            return False
+        except requests.HTTPError as e:
+            status = getattr(getattr(e, 'response', None), 'status_code', 0) or 0
+            if status == 429:
+                if attempt < SERVING_VERIFY_BUSY_RETRIES:
+                    time.sleep(2.0 * (attempt + 1))
+                    continue
+                return True
+            return 400 <= status < 500
+        except Exception:
+            return False
     return False
 
 
@@ -198,7 +207,9 @@ def verify_served_round(
             if req.source == 'gateway' and reference_rejects(reference, req.messages):
                 return None  # an honest runtime refuses this prompt too (over context, bad shape): not the miner's
             return AuditVerdict(False, 0.0, float('inf'), req.detail or 'no completion')
-        for attempt in range(2):  # a connection blip to the reference is retried once before going neutral
+        # A connection blip to the reference is retried once, a saturated reference (429) with backoff until a
+        # slot frees; only after that does the verdict go neutral.
+        for attempt in range(1 + max(1, SERVING_VERIFY_BUSY_RETRIES)):
             try:
                 return verify_served(
                     reference,
@@ -213,6 +224,12 @@ def verify_served_round(
                 )
             except requests.HTTPError as e:
                 status = getattr(getattr(e, 'response', None), 'status_code', 0) or 0
+                if status == 429:  # R6 backpressure: the reference is full — its load, never the miner's answer
+                    if attempt < SERVING_VERIFY_BUSY_RETRIES:
+                        time.sleep(2.0 * (attempt + 1))
+                        continue
+                    bt.logging.warning(f'Serving: reference saturated (429); request by UID {req.uid} unverified')
+                    return None
                 if 400 <= status < 500:  # the reference refused what the miner sent: the miner's answer, not a blip
                     return AuditVerdict(False, 0.0, float('inf'), f'reference rejected the completion (HTTP {status})')
                 if attempt == 0:

@@ -16,10 +16,16 @@
       "speed": {
         "single_stream_decode_tps": 443.6,
         "aggregate_decode_tps": 280.0,
-        "measured_on": "gittensor-ai-lab/sparkinfer@7498736 on a rented RTX 5090 (Lium brave-fox-20), 2026-08-27: 16-concurrent x 64 tokens aggregate 279-282 tok/s (6: 255, 24: 268, 32: 275 \u2014 queues past 16, wall 3.7 s -> 7 s)",
+        "measured_on": "gittensor-ai-lab/sparkinfer@7498736 on a rented RTX 5090 (Lium brave-fox-20), 2026-08-27: 16-concurrent x 64 tokens aggregate 279-282 tok/s (6: 255, 24: 268, 32: 275 \u2014 queues past 16, wall 3.7 s -> 7 s). Per-request points 2-12 re-measured on-box on compute3 card 1 (RTX 5090), 2026-09-05, 64 tokens x 3 reps, median: single 408.2, aggregate flat 285-289 from 2 up (#1753)",
         "decode_per_request": {
           "1": 443.6,
-          "6": 46.0,
+          "2": 144.3,
+          "3": 96.7,
+          "4": 72.6,
+          "5": 58.5,
+          "6": 50.2,
+          "8": 37.8,
+          "12": 25.5,
           "16": 19.4,
           "24": 19.4,
           "32": 19.5

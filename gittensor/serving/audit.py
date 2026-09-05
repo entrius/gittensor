@@ -71,6 +71,7 @@ from gittensor.constants import (
     SERVING_QUARANTINE_ESCALATION,
     SERVING_QUARANTINE_MAX_STEPS,
     SERVING_QUARANTINE_S,
+    SERVING_STRIKE_FORGET_S,
 )
 from gittensor.serving.backends import Message, expected_completion
 from gittensor.serving.loadout import WEIGHTS_DIR, ServingRelease
@@ -162,7 +163,8 @@ class AuditWindow:
     quarantine_s: float = SERVING_QUARANTINE_S
     _values: Dict[Tuple[str, str], Deque[float]] = field(default_factory=dict)
     _quarantine: Dict[Tuple[str, str], float] = field(default_factory=dict)  # (hotkey, release) -> until ts
-    _strikes: Dict[Tuple[str, str], int] = field(default_factory=dict)  # (hotkey, release) -> wrong answers, ever
+    _strikes: Dict[Tuple[str, str], int] = field(default_factory=dict)  # (hotkey, release) -> strikes on the ladder
+    _last_strike: Dict[Tuple[str, str], float] = field(default_factory=dict)  # (hotkey, release) -> ts of the last
 
     def record(self, hotkey: str, release_id: str, value: float) -> None:
         key = (hotkey, release_id)
@@ -172,18 +174,28 @@ class AuditWindow:
 
     def strike(self, hotkey: str, release_id: str, now: Optional[float] = None) -> float:
         """A wrong answer: wipe the window and quarantine the (hotkey, release) until the returned timestamp. Each
-        strike on the same (hotkey, release) quarantines ``SERVING_QUARANTINE_ESCALATION`` times longer than the last,
-        up to ``SERVING_QUARANTINE_MAX_STEPS`` steps: a strike costs a fresh hotkey an hour, a repeat offender days."""
+        strike within ``SERVING_STRIKE_FORGET_S`` of the last quarantines ``SERVING_QUARANTINE_ESCALATION`` times
+        longer, up to ``SERVING_QUARANTINE_MAX_STEPS`` steps: a strike costs a fresh hotkey an hour, a repeat offender
+        most of a day. A strike after a clean week starts the ladder over."""
         key = (hotkey, release_id)
+        now = now if now is not None else time.time()
         self._values.pop(key, None)
-        self._strikes[key] = self._strikes.get(key, 0) + 1
+        self._strikes[key] = self.strikes(hotkey, release_id, now) + 1
+        self._last_strike[key] = now
         step = min(self._strikes[key] - 1, SERVING_QUARANTINE_MAX_STEPS)
-        until = (now if now is not None else time.time()) + self.quarantine_s * SERVING_QUARANTINE_ESCALATION**step
+        until = now + self.quarantine_s * SERVING_QUARANTINE_ESCALATION**step
         self._quarantine[key] = until
         return until
 
-    def strikes(self, hotkey: str, release_id: str) -> int:
-        return self._strikes.get((hotkey, release_id), 0)
+    def strikes(self, hotkey: str, release_id: str, now: Optional[float] = None) -> int:
+        """Strikes still on the ladder: none once the last one is ``SERVING_STRIKE_FORGET_S`` old."""
+        key = (hotkey, release_id)
+        n = self._strikes.get(key, 0)
+        if n and (now if now is not None else time.time()) - self._last_strike.get(key, 0.0) > SERVING_STRIKE_FORGET_S:
+            self._strikes.pop(key, None)
+            self._last_strike.pop(key, None)
+            return 0
+        return n
 
     def quarantined_until(self, hotkey: str, release_id: str, now: Optional[float] = None) -> float:
         until = self._quarantine.get((hotkey, release_id), 0.0)
@@ -194,7 +206,7 @@ class AuditWindow:
             'size': self.size,
             'values': [[hk, rid, list(xs)] for (hk, rid), xs in self._values.items()],
             'quarantine': [[hk, rid, until] for (hk, rid), until in self._quarantine.items()],
-            'strikes': [[hk, rid, n] for (hk, rid), n in self._strikes.items()],
+            'strikes': [[hk, rid, n, self._last_strike.get((hk, rid), 0.0)] for (hk, rid), n in self._strikes.items()],
         }
 
     @classmethod
@@ -205,13 +217,15 @@ class AuditWindow:
                 window.record(str(hk), str(rid), float(x))
         for hk, rid, until in raw.get('quarantine', []):
             window._quarantine[(str(hk), str(rid))] = float(until)
-        for hk, rid, n in raw.get('strikes', []):
+        for hk, rid, n, *last in raw.get('strikes', []):
             window._strikes[(str(hk), str(rid))] = int(n)
+            if last:
+                window._last_strike[(str(hk), str(rid))] = float(last[0])
         return window
 
     def verdict(self, hotkey: str, release_id: str, now: Optional[float] = None) -> WindowVerdict:
         until = self.quarantined_until(hotkey, release_id, now)
-        strikes = self.strikes(hotkey, release_id)
+        strikes = self.strikes(hotkey, release_id, now)
         xs = self._values.get((hotkey, release_id))
         if not xs:
             return WindowVerdict(False, 0, 0.0, float('inf'), until, strikes)

@@ -25,7 +25,6 @@ from typing import Dict, Optional, Sequence, Tuple
 from gittensor.classes import RequestSpeed
 from gittensor.constants import (
     SERVING_AGGREGATE_DECODE_TPS_FALLBACK,
-    SERVING_CHARS_PER_TOKEN_ESTIMATE,
     SERVING_DECODE_FLOOR_RATIO,
     SERVING_DECODE_MIN_TOKENS,
     SERVING_DECODE_PER_REQUEST_FALLBACK,
@@ -37,7 +36,7 @@ from gittensor.constants import (
     SERVING_PROMPT_TEMPLATE_TOKENS,
 )
 from gittensor.serving.loadout import ServingRelease
-from gittensor.serving.state import ServedRequest
+from gittensor.serving.state import ServedRequest, prompt_token_estimate  # noqa: F401  (re-exported for callers)
 
 
 def aggregate_decode_tps(release: ServingRelease) -> float:
@@ -133,12 +132,6 @@ def decode_credit(
         return 1.0
     ratio = observed_tps / expected_tps
     return 0.0 if ratio < floor_ratio else min(1.0, ratio / tolerance_ratio)
-
-
-def prompt_token_estimate(messages: Sequence[Dict[str, str]]) -> int:
-    """The validator's own count of a prompt's tokens when the reference reported none: ~4 characters each."""
-    chars = sum(len(m.get('content') or '') + len(m.get('role') or '') for m in messages)
-    return chars // SERVING_CHARS_PER_TOKEN_ESTIMATE
 
 
 def prefill_allowance_ms(prompt_tokens: int, release: ServingRelease) -> float:

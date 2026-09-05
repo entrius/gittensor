@@ -34,6 +34,7 @@ digests) or measured on the validator's own clock. Editing it earns nothing.
 
 import asyncio
 import os
+import re
 import time
 from collections import OrderedDict
 from functools import partial
@@ -47,6 +48,7 @@ from bittensor_wallet import Keypair
 
 from gittensor.constants import (
     BLOCKS_PER_TEMPO,
+    SERVING_ATTEST_PREFILL_DRAIN_S,
     SERVING_BACKEND_CONCURRENCY,
     SERVING_MAX_TOKENS,
     SERVING_MIN_CALLER_STAKE,
@@ -64,6 +66,15 @@ BTStreamingResponse = StreamingSynapse.BTStreamingResponse
 # after this grace; a claimed stream frees itself request_timeout + slack after it began, however it ended.
 SLOT_CLAIM_GRACE_S = 10.0
 SLOT_CLAIM_STREAM_SLACK_S = 30.0
+# A request counts as prefilling from admission until its first content delta. An entry older than this was never
+# picked up or is a runtime that stopped answering; it no longer holds an attestation back.
+PREFILL_STALE_S = 15.0
+# The admission hold an attestation puts up can never outlive the challenge by more than this, however the sidecar
+# call ends.
+ATTEST_HOLD_MAX_S = 10.0
+# The first stream chunk carrying text (content or reasoning): the runtime is past prefill and decoding. The role
+# chunk (``"content": null``) and a logprobs-only chunk (``"content": ""``) arrive before or without one.
+_FIRST_CONTENT = re.compile(rb'"(?:reasoning_)?content"\s*:\s*"[^"]')
 
 
 class ServingMiner(BaseNeuron):
@@ -97,6 +108,8 @@ class ServingMiner(BaseNeuron):
         self.seen_nonces: 'OrderedDict[str, None]' = OrderedDict()
         self.audit_budget: Dict[str, Tuple[int, int]] = {}  # validator hotkey -> (tempo, completion tokens used)
         self.attest_inflight: Set[str] = set()  # validator hotkeys with a challenge running on the sidecar now
+        self.prefilling: Dict[int, float] = {}  # id(synapse) -> monotonic admission; cleared at the first content
+        self.attest_hold_until: float = 0.0  # monotonic; inference admissions refuse "busy" while a challenge fills
         bt.logging.info(f'ServingMiner axon: {self.axon}')
 
     async def forward(self, synapse: bt.Synapse) -> bt.Synapse:
@@ -138,6 +151,7 @@ async def handle_inference(miner: ServingMiner, synapse: InferenceSynapse) -> BT
     messages, logprobs = synapse.messages, synapse.logprobs
     claim = id(synapse)
     miner.slot_claims[claim] = time.monotonic() + miner.release.request_timeout + SLOT_CLAIM_STREAM_SLACK_S
+    marks = prefill_marks(miner)
 
     async def token_streamer(send) -> None:
         loop = asyncio.get_running_loop()
@@ -146,6 +160,8 @@ async def handle_inference(miner: ServingMiner, synapse: InferenceSynapse) -> BT
         def produce() -> None:
             try:
                 for chunk in miner.backend.stream(messages, max_tokens, logprobs):
+                    if claim in marks and _FIRST_CONTENT.search(chunk):
+                        marks.pop(claim, None)  # decoding now: an attestation may fill the card
                     loop.call_soon_threadsafe(queue.put_nowait, chunk)
             except Exception as e:  # backend down/overloaded: the stream ends unfinished
                 bt.logging.warning(f'ServingMiner backend error: {e}')
@@ -159,12 +175,22 @@ async def handle_inference(miner: ServingMiner, synapse: InferenceSynapse) -> BT
             await producer
         finally:
             miner.slot_claims.pop(claim, None)
+            marks.pop(claim, None)
 
     return synapse.create_streaming_response(token_streamer)
 
 
 async def handle_attest(miner: ServingMiner, synapse: AttestSynapse) -> AttestSynapse:
-    """Run the validator's hardware challenge on this miner's runtime (attest sidecar, docker/attest)."""
+    """Run the validator's hardware challenge on this miner's runtime (attest sidecar, docker/attest).
+
+    The challenge fills the card's free VRAM for about a second. A prefill that starts inside that window cannot
+    get its scratch and the runtime drops to a fallback pass whose output the reference rejects — a strike for an
+    honest card, on the validator's own challenge (both mainnet cards were quarantined this way on 2026-09-04/05).
+    Decode is unaffected (its buffers are warm), so the fill is serialised against prefill only: new inference
+    admissions refuse "busy" (neutral to the validator, rerouted by the gateway) from here until the sidecar
+    answers, and the fill waits up to ``SERVING_ATTEST_PREFILL_DRAIN_S`` for admitted requests to reach their first
+    content delta. The wait is bounded so a slow prefill costs the challenge some round-trip slack, never the round.
+    """
     url = miner.release.attest_url
     if not url:
         synapse.error = 'no attest_url on the release'
@@ -183,18 +209,53 @@ async def handle_attest(miner: ServingMiner, synapse: AttestSynapse) -> AttestSy
         return r.json()
 
     miner.attest_inflight.add(caller)
+    miner.attest_hold_until = time.monotonic() + ATTEST_HOLD_MAX_S
     try:
+        await drain_prefill(miner)
         payload = await asyncio.get_running_loop().run_in_executor(None, call)
     except Exception as e:
         synapse.error = f'attest sidecar: {e!r}'[:300]
         return synapse
     finally:
         miner.attest_inflight.discard(caller)
+        if not miner.attest_inflight:  # another caller's challenge keeps the hold up
+            miner.attest_hold_until = 0.0
     devices = payload.get('devices') or [payload]
     synapse.devices = [dict(d) for d in devices]
     synapse.wall_ms = float(devices[0].get('wall_ms') or 0.0) if devices else None
     synapse.queued_ms = float(payload.get('queued_ms') or 0.0)
     return synapse
+
+
+def prefill_marks(miner: ServingMiner) -> Dict[int, float]:
+    marks = getattr(miner, 'prefilling', None)
+    if marks is None:
+        marks = miner.prefilling = {}
+    return marks
+
+
+def prefilling(miner: ServingMiner, now: Optional[float] = None) -> int:
+    """Admitted requests still before their first content delta, dropping marks nobody will clear."""
+    now = time.monotonic() if now is None else now
+    marks = prefill_marks(miner)
+    for key, started in list(marks.items()):
+        if now - started > PREFILL_STALE_S:
+            del marks[key]
+    return len(marks)
+
+
+async def drain_prefill(miner: ServingMiner, max_wait_s: float = SERVING_ATTEST_PREFILL_DRAIN_S) -> bool:
+    """Wait, at most ``max_wait_s``, until no admitted request is prefilling. True when the card is clear."""
+    deadline = time.monotonic() + max_wait_s
+    while prefilling(miner):
+        if time.monotonic() >= deadline:
+            return False
+        await asyncio.sleep(0.02)
+    return True
+
+
+def attest_holding(miner: ServingMiner, now: Optional[float] = None) -> bool:
+    return (time.monotonic() if now is None else now) < getattr(miner, 'attest_hold_until', 0.0)
 
 
 async def verify_inference(miner: ServingMiner, synapse: InferenceSynapse) -> None:
@@ -249,17 +310,21 @@ async def blacklist_inference(miner: ServingMiner, synapse: InferenceSynapse) ->
     contract's R6 lifted to the axon — so the gateway reroutes and the refusal is judged neutral; queueing instead
     would decay every caller's TTFT. Before the caller gate and its budget charge, so a refused request costs the
     caller nothing. Attestation delegates to ``blacklist_caller`` and skips this: the sidecar has its own
-    serialisation and a full backend must still pass attest rounds.
+    serialisation and a full backend must still pass attest rounds. The reverse holds too: while a challenge is
+    filling the card (``handle_attest``) every admission is refused busy, so no prefill lands on an empty card.
 
     Admission and accounting are one atomic step: ``claim_slot`` counts this request against the slots the moment
     it is admitted, with no await in between, so a burst cannot race past a capacity check that only samples
     slots already handed to running streams. A claim the handler never picks up expires on its own.
     """
+    if attest_holding(miner):
+        return True, 'busy: hardware attestation is filling the card'
     if not claim_slot(miner, synapse):
         return True, 'busy: all backend slots in use'
     blocked, reason = await blacklist_caller(miner, synapse)
     if blocked:
         miner.slot_claims.pop(id(synapse), None)
+        prefill_marks(miner).pop(id(synapse), None)
     return blocked, reason
 
 
@@ -271,6 +336,7 @@ def claim_slot(miner: ServingMiner, synapse: InferenceSynapse) -> bool:
     if len(miner.slot_claims) >= miner.slot_count:
         return False
     miner.slot_claims[id(synapse)] = now + SLOT_CLAIM_GRACE_S
+    prefill_marks(miner)[id(synapse)] = now  # prefilling from admission; an attestation must not fill over it
     return True
 
 

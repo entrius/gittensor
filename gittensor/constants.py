@@ -211,6 +211,11 @@ SERVING_ATTEST_MEMORY_ROUNDS = 12  # a verdict older than this admits nothing un
 # reference recomputes at most SERVING_ATTEST_MAX_CARDS of them per round.
 SERVING_ATTEST_RTT_SLACK_MS = 2_000.0
 SERVING_ATTEST_MAX_CARDS = 8
+# Miner: before its sidecar fills the card, an attestation waits up to this long for admitted requests to get past
+# prefill (first content delta), refusing new admissions "busy" meanwhile. A prefill that starts under the fill
+# finds no scratch and sparkinfer 7498736 drops to a fallback whose output the reference rejects — a strike for an
+# honest card (2026-09-04/05, both mainnet cards). Decode is unaffected. Bounded well inside the RTT slack above.
+SERVING_ATTEST_PREFILL_DRAIN_S = 1.5
 # A card passes only with the model resident: free VRAM before the fill must be at most total minus this fraction of
 # the reservation (a bare 5090 shows ~32 GB free, one holding the model ~8 GB). A spare card with nothing loaded is
 # not a serving card.

@@ -111,6 +111,10 @@ def build_app(
                     'model_id': release.model_id,
                     'runtime_pin': release.runtime_pin,
                     'model_sha256': release.model_sha256,
+                    # OpenRouter's fields: agent harnesses size their context compaction from these, so a client
+                    # that reads them never has to hit the 400 context_length_exceeded
+                    'context_length': release.context_tokens or SERVING_CONTEXT_TOKENS_FALLBACK,
+                    'max_output_tokens': SERVING_MAX_TOKENS,
                 }
                 for release in loadout.releases
             ],

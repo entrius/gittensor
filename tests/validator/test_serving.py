@@ -341,6 +341,9 @@ def test_gateway_requires_key(monkeypatch):
     assert client.get('/v1/models', headers={'Authorization': 'Bearer nope'}).status_code == 401
     r = client.get('/v1/models', headers={'Authorization': 'Bearer k2'})
     assert r.status_code == 200 and set(r.json()['data'][0]) >= {'id', 'runtime_pin', 'model_sha256'}
+    # OpenRouter's context fields: a harness reads these to size its compaction instead of hitting the 400
+    model = r.json()['data'][0]
+    assert model['context_length'] == 36_864 and model['max_output_tokens'] == 4096
     assert client.get('/health').status_code == 200
 
 

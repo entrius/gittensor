@@ -276,10 +276,16 @@ SERVING_AUDIT_SAMPLE_FRACTION = 0.2
 SERVING_AUDIT_SAMPLE_MIN = 10
 SERVING_QUARANTINE_S = 3600.0
 # Each further strike on the same (hotkey, release) quarantines ESCALATION times longer, up to MAX_STEPS steps
-# (1 h, 4 h, 16 h, 64 h): one wrong answer costs an hour, a pattern of them costs days, and rotating to a fresh
-# hotkey to reset it costs a registration plus a settlement window from zero.
+# (1 h, 4 h, 16 h): one wrong answer costs an hour, a pattern of them costs most of a day, and rotating to a fresh
+# hotkey to reset it costs a registration plus a settlement window from zero. The ladder was 1/4/16/64 h until
+# 2026-09-05, on the premise that no honest runtime produces a wrong answer; the attest-fill/prefill collision
+# (neurons/serving_miner.py, handle_attest) showed an honest way, so the tail is bounded to what a miner can sit
+# out within a day. What actually stops intermittent cheating is the wiped window: every strike restarts probation.
 SERVING_QUARANTINE_ESCALATION = 4.0
-SERVING_QUARANTINE_MAX_STEPS = 3
+SERVING_QUARANTINE_MAX_STEPS = 2
+# Strikes are forgotten after this long without another: the ladder is about a pattern, not a history. A hotkey
+# struck twice months apart starts its next quarantine at the bottom, a repeat offender inside the week does not.
+SERVING_STRIKE_FORGET_S = 7 * 86_400.0
 # A wrong answer is a strike only while the reference agrees with most of the fleet this round. When fewer than
 # this fraction of the hotkeys judged this round passed anything, the reference is the odd one out (a driver or
 # image drift on this validator's box) and the round's band failures are misses, not strikes — otherwise one

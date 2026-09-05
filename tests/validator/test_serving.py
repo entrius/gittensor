@@ -1025,14 +1025,23 @@ def test_strikes_need_the_fleet_to_agree_with_the_reference():
     assert summary.get('strike') == 1
 
 
-def test_quarantine_escalates_with_strikes():
+def test_quarantine_escalates_with_strikes_and_forgets_after_a_clean_week():
+    """1 h, 4 h, 16 h and it stays there (64 h was cut 2026-09-05: an honest runtime can strike, see handle_attest).
+    A strike after SERVING_STRIKE_FORGET_S without one starts the ladder over."""
+    from gittensor.constants import SERVING_STRIKE_FORGET_S
+
     w = AuditWindow(quarantine_s=100.0)
     assert w.strike('hk', 'r', now=0.0) == 100.0
     assert w.strike('hk', 'r', now=0.0) == 400.0
     assert w.strike('hk', 'r', now=0.0) == 1600.0
-    assert w.strike('hk', 'r', now=0.0) == 6400.0
-    assert w.strike('hk', 'r', now=0.0) == 6400.0
+    assert w.strike('hk', 'r', now=0.0) == 1600.0
+    assert w.strike('hk', 'r', now=0.0) == 1600.0
     assert w.strike('other', 'r', now=0.0) == 100.0
+    assert w.strikes('hk', 'r', now=SERVING_STRIKE_FORGET_S) == 5  # inside the week: the ladder stands
+    assert w.verdict('hk', 'r', now=SERVING_STRIKE_FORGET_S + 1.0).strikes == 0  # a clean week: forgotten
+    later = SERVING_STRIKE_FORGET_S + 1.0
+    assert w.strike('hk', 'r', now=later) == later + 100.0  # and the next strike costs an hour again
+    assert w.strike('hk', 'r', now=later + 10.0) == later + 10.0 + 400.0  # a repeat inside the week escalates
 
 
 def test_last_credit_survives_a_restart(tmp_path):
@@ -2877,14 +2886,32 @@ def test_strikes_count_up_and_survive_a_restart(tmp_path):
     w.strike('hk', 'r1', now=1000.0)
     w.strike('hk', 'r1', now=2000.0)
     w.strike('hk', 'r2', now=1000.0)
-    assert w.strikes('hk', 'r1') == 2 and w.strikes('hk', 'r2') == 1 and w.strikes('hk2', 'r1') == 0
+    now = 3000.0
+    assert w.strikes('hk', 'r1', now) == 2 and w.strikes('hk', 'r2', now) == 1 and w.strikes('hk2', 'r1', now) == 0
     assert w.verdict('hk', 'r1', now=3000.0).as_dict()['strikes'] == 2
 
     store = ServingStore(tmp_path / 'serving.db')
     store.save(ServingState(audits=w))
     again = store.load(ServingState(audits=AuditWindow(quarantine_s=100.0))).audits
-    assert again.strikes('hk', 'r1') == 2 and again.strikes('hk', 'r2') == 1
+    assert again.strikes('hk', 'r1', now) == 2 and again.strikes('hk', 'r2', now) == 1
     assert again.quarantined_until('hk', 'r1', now=2050.0) == 2400.0  # the second strike: 4x the first
+    assert again._last_strike[('hk', 'r1')] == 2000.0  # the forget clock survives the restart too
+    assert again.strikes('hk', 'r1') == 0  # ...so by wall-clock time (1970 + 2000 s) they are long forgotten
+
+
+def test_store_adds_the_last_strike_column_to_an_older_database(tmp_path):
+    import sqlite3
+
+    from gittensor.serving.store import ServingStore
+
+    path = tmp_path / 'serving.db'
+    with sqlite3.connect(path) as db:
+        db.execute('CREATE TABLE quarantine (hotkey TEXT, release_id TEXT, until REAL, strikes INTEGER DEFAULT 0)')
+        db.execute('CREATE TABLE audit_values (hotkey TEXT, release_id TEXT, seq INTEGER, value REAL)')
+        db.execute('INSERT INTO quarantine VALUES (?, ?, ?, ?)', ('hk', 'r', 0.0, 3))
+    loaded = ServingStore(path).load(ServingState(audits=AuditWindow(quarantine_s=100.0))).audits
+    assert loaded._strikes[('hk', 'r')] == 3 and loaded._last_strike[('hk', 'r')] == 0.0
+    assert loaded.strikes('hk', 'r') == 0  # a pre-upgrade strike carries no clock: forgotten on first look
 
 
 def test_store_migrates_a_model_id_keyed_database(tmp_path):

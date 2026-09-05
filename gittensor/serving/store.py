@@ -21,7 +21,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS audit_values (hotkey TEXT, release_id TEXT, seq INTEGER, value REAL,
     PRIMARY KEY (hotkey, release_id, seq));
 CREATE TABLE IF NOT EXISTS quarantine (hotkey TEXT, release_id TEXT, until REAL, strikes INTEGER DEFAULT 0,
-    PRIMARY KEY (hotkey, release_id));
+    last_strike REAL DEFAULT 0, PRIMARY KEY (hotkey, release_id));
 CREATE TABLE IF NOT EXISTS round_history (hotkey TEXT, seq INTEGER, score REAL, PRIMARY KEY (hotkey, seq));
 CREATE TABLE IF NOT EXISTS dormant (hotkey TEXT PRIMARY KEY, rounds INTEGER);
 CREATE TABLE IF NOT EXISTS attest (hotkey TEXT PRIMARY KEY, status TEXT);
@@ -47,6 +47,8 @@ class ServingStore:
                 db.execute(f'ALTER TABLE {table} RENAME COLUMN model_id TO release_id')
             if table == 'quarantine' and columns and 'strikes' not in columns:
                 db.execute('ALTER TABLE quarantine ADD COLUMN strikes INTEGER DEFAULT 0')
+            if table == 'quarantine' and columns and 'last_strike' not in columns:
+                db.execute('ALTER TABLE quarantine ADD COLUMN last_strike REAL DEFAULT 0')
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=10.0)
@@ -74,12 +76,12 @@ class ServingStore:
                 'INSERT INTO audit_values VALUES (?, ?, ?, ?)',
                 [(hk, rid, i, x) for hk, rid, xs in audits['values'] for i, x in enumerate(xs)],
             )
-            strikes = {(hk, rid): n for hk, rid, n in audits['strikes']}
+            strikes = {(hk, rid): (n, last) for hk, rid, n, last in audits['strikes']}
             keys = {(hk, rid) for hk, rid, _ in audits['quarantine']} | set(strikes)
             until = {(hk, rid): t for hk, rid, t in audits['quarantine']}
             db.executemany(
-                'INSERT INTO quarantine VALUES (?, ?, ?, ?)',
-                [(hk, rid, until.get((hk, rid), 0.0), strikes.get((hk, rid), 0)) for hk, rid in sorted(keys)],
+                'INSERT INTO quarantine VALUES (?, ?, ?, ?, ?)',
+                [(hk, rid, until.get((hk, rid), 0.0), *strikes.get((hk, rid), (0, 0.0))) for hk, rid in sorted(keys)],
             )
             db.executemany(
                 'INSERT INTO round_history VALUES (?, ?, ?)',
@@ -99,11 +101,13 @@ class ServingStore:
                 )
                 for hk, rid, x in values:
                     state.audits.record(hk, rid, x)
-                for hk, rid, until, strikes in db.execute('SELECT hotkey, release_id, until, strikes FROM quarantine'):
+                rows = db.execute('SELECT hotkey, release_id, until, strikes, last_strike FROM quarantine')
+                for hk, rid, until, strikes, last_strike in rows:
                     if float(until) > 0.0:
                         state.audits._quarantine[(hk, rid)] = float(until)
                     if int(strikes or 0) > 0:
                         state.audits._strikes[(hk, rid)] = int(strikes)
+                        state.audits._last_strike[(hk, rid)] = float(last_strike or 0.0)
                 for hk, x in db.execute('SELECT hotkey, score FROM round_history ORDER BY hotkey, seq'):
                     state._history.setdefault(hk, deque(maxlen=state.settlement_rounds)).append(float(x))
                 for hk, rounds in db.execute('SELECT hotkey, rounds FROM dormant'):

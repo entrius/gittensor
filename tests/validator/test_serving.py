@@ -5,7 +5,7 @@ import json
 import random
 import time
 from types import SimpleNamespace
-from typing import Dict
+from typing import Any, Dict
 
 import bittensor as bt
 import pytest
@@ -3068,7 +3068,7 @@ def test_seed_ready_from_store_republishes_without_settling():
     assert state.ready_miners() == []
 
 
-def _attest_miner(**over) -> SimpleNamespace:
+def _attest_miner(**over) -> Any:  # a ServingMiner stand-in; Any so the hooks accept it
     miner = SimpleNamespace(
         release=SimpleNamespace(attest_url='http://sidecar:8081', attest_api_key='', request_timeout=30.0),
         metagraph=SimpleNamespace(hotkeys=['vali'], S=[2_000_000.0], validator_permit=[True], validator_trust=[1.0]),
@@ -3094,7 +3094,7 @@ def test_attest_holds_admissions_and_waits_for_prefill_to_clear(monkeypatch):
     from neurons import serving_miner as sm
 
     miner = _attest_miner()
-    events: Dict[str, float] = {}
+    events: Dict[str, Any] = {}
 
     class _Resp:
         def raise_for_status(self):

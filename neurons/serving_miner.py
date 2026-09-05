@@ -69,9 +69,10 @@ SLOT_CLAIM_STREAM_SLACK_S = 30.0
 # A request counts as prefilling from admission until its first content delta. An entry older than this was never
 # picked up or is a runtime that stopped answering; it no longer holds an attestation back.
 PREFILL_STALE_S = 15.0
-# The admission hold an attestation puts up can never outlive the challenge by more than this, however the sidecar
-# call ends.
-ATTEST_HOLD_MAX_S = 10.0
+# The admission hold an attestation puts up is cleared when the sidecar answers; this is its safety cap if the
+# handler dies without clearing it. It matches the sidecar call's timeout: a challenge queued behind another on the
+# sidecar still fills the card when its turn comes, and admissions must stay refused until then.
+ATTEST_HOLD_MAX_S = 45.0
 # The first stream chunk carrying text (content or reasoning): the runtime is past prefill and decoding. The role
 # chunk (``"content": null``) and a logprobs-only chunk (``"content": ""``) arrive before or without one.
 _FIRST_CONTENT = re.compile(rb'"(?:reasoning_)?content"\s*:\s*"[^"]')
@@ -209,7 +210,7 @@ async def handle_attest(miner: ServingMiner, synapse: AttestSynapse) -> AttestSy
         return r.json()
 
     miner.attest_inflight.add(caller)
-    miner.attest_hold_until = time.monotonic() + ATTEST_HOLD_MAX_S
+    miner.attest_hold_until = time.monotonic() + max(5.0, float(synapse.timeout or ATTEST_HOLD_MAX_S))
     try:
         await drain_prefill(miner)
         payload = await asyncio.get_running_loop().run_in_executor(None, call)

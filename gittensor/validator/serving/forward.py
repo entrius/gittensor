@@ -17,7 +17,8 @@ published READY; serving axons that are not READY (and not quarantined) are
 published as *probation* so baseline traffic can give them a window.
 
     admitted    = window passes x speed credit > 0 x hardware attestation passes
-    round score = admitted x output tokens the gateway saw the miner serve, in card-equivalents
+    round score = admitted x card-time the gateway saw the miner serve (output tokens at the decode rate,
+                  prompt tokens at the prefill rate), in card-equivalents
 
 Pay is per token served, counted from the gateway's own served-request records
 (never the miner's word) and priced against the release's aggregate decode speed
@@ -74,7 +75,14 @@ from gittensor.serving.stream import consume_stream
 from gittensor.synapses import InferenceSynapse
 from gittensor.validator.serving.attest import attest_round, status_passed
 from gittensor.validator.serving.persist import ServingRoundStorage
-from gittensor.validator.serving.scoring import card_equivalents, paid_tokens, request_speed, token_rate_usd
+from gittensor.validator.serving.scoring import (
+    card_equivalents,
+    paid_prompt_tokens,
+    paid_tokens,
+    prompt_token_rate_usd,
+    request_speed,
+    token_rate_usd,
+)
 from gittensor.validator.utils.config import (
     SERVING_AUDIT_INTERVAL_S,
     SERVING_PAY_CAP_WITHOUT_PRICING,
@@ -169,6 +177,7 @@ def verify_served_round(
     last_miss: Optional[Dict[str, str]] = None,
     rng=None,
     staked_caller: bool = False,
+    prompt_tokens: Optional[Dict[str, int]] = None,
 ) -> Tuple[Dict[str, List[RequestSpeed]], Dict[str, int]]:
     """Verify this round's audit sample of the requests served for ``release`` into the window; return per-request
     speed per hotkey and the output tokens each hotkey is paid for.
@@ -176,16 +185,19 @@ def verify_served_round(
     Paid tokens are what the gateway saw served on user traffic: every unsampled completion, and every sampled one
     the reference did not fail. Baseline prompts anchor eligibility, not income. Reference calls run on a small
     thread pool; window updates stay on this thread. ``last_miss`` (hotkey -> reason) is filled with the most
-    recent miss or strike reason so the round report can show a miner why. ``staked_caller``: this validator clears
+    recent miss or strike reason so the round report can show a miner why. ``prompt_tokens`` (hotkey -> count) is
+    filled with the prompt tokens paid as prefill on the same requests. ``staked_caller``: this validator clears
     the miner's stake floor, so no miner has a budget to refuse it on.
     """
     summary = summary if summary is not None else {}
     last_miss = last_miss if last_miss is not None else {}
+    prompt_tokens = prompt_tokens if prompt_tokens is not None else {}
     tokens: Dict[str, int] = {}
 
     def pay(req: ServedRequest) -> None:
         if req.source == 'gateway' and req.ok:
             tokens[req.hotkey] = tokens.get(req.hotkey, 0) + paid_tokens(req)
+            prompt_tokens[req.hotkey] = prompt_tokens.get(req.hotkey, 0) + paid_prompt_tokens(req)
 
     mine, skipped = sample_for_audit([req for req in served if req.release_id == release.release_id], rng=rng)
     for req in skipped:
@@ -389,6 +401,9 @@ async def baseline_round(
                 ttft_ms=getattr(response, 'observed_ttft_ms', None) if ok else None,
                 inflight=inflight,
                 max_tokens=max_tokens,
+                prompt_tokens=int((getattr(response, 'usage', None) or {}).get('prompt_tokens') or 0)
+                if response is not None
+                else 0,
             )
         )
 
@@ -411,7 +426,8 @@ async def audit_round(
     round_s: float = SERVING_AUDIT_INTERVAL_S,
 ) -> Dict[str, float]:
     """Verify served traffic, settle windows, attest READY miners; publish READY/probation; return hotkey -> pay
-    score (served tokens in card-equivalents over ``round_s``, the wall clock the tokens were served in)."""
+    score (served output and prompt tokens in card-equivalents over ``round_s``, the wall clock they were served
+    in)."""
     loadout = loadout or load_serving_loadout()
     served = state.drain_served()
     if not serving:
@@ -440,8 +456,9 @@ async def audit_round(
                 'set SERVING_REFERENCE_URL to a conformant runtime'
             )
             continue
+        prompt: Dict[str, int] = {}
         speeds, tokens = verify_served_round(
-            state, reference, release, served, summary, last_miss, staked_caller=staked_caller
+            state, reference, release, served, summary, last_miss, staked_caller=staked_caller, prompt_tokens=prompt
         )
         passing: List[Tuple[int, str, bt.AxonInfo, float]] = []
         for uid, hotkey, axon in active:
@@ -462,13 +479,15 @@ async def audit_round(
                 'ttft_ms': _mean([sp.ttft_ms for sp in round_speeds if sp.ttft_ms is not None]),
                 'decode_tps': _mean([sp.decode_tps for sp in round_speeds if sp.decode_tps is not None]),
                 'tokens': tokens.get(hotkey, 0),
+                'prompt_tokens': prompt.get(hotkey, 0),
                 'attested': False,
                 'score': 0.0,
                 'last_miss': last_miss.get(hotkey, ''),
             }
             bt.logging.debug(
                 f'Serving: UID {uid} {release.release_id} window {window.as_dict()} '
-                f'served {len(round_speeds)} credit {credit:.3f} tokens {tokens.get(hotkey, 0)}'
+                f'served {len(round_speeds)} credit {credit:.3f} tokens {tokens.get(hotkey, 0)} '
+                f'prompt {prompt.get(hotkey, 0)}'
             )
             if window.passed and credit > 0.0:
                 passing.append((uid, hotkey, axon, credit))
@@ -482,11 +501,14 @@ async def audit_round(
         for uid, hotkey, _, credit in passing:
             ok = bool(attested.get(hotkey, False))
             # Pay is what the gateway saw served, nothing else: an admitted card with no traffic earns nothing.
-            score = card_equivalents(windows[uid]['tokens'], release, round_s) if ok else 0.0
+            score = (
+                card_equivalents(windows[uid]['tokens'], release, round_s, windows[uid]['prompt_tokens']) if ok else 0.0
+            )
             st = state.attest_status.get(hotkey, {})
             bt.logging.info(
                 f'Serving: UID {uid} {release.release_id} attested {"yes" if ok else "no"} '
-                f'speed credit {credit:.2f} tokens {windows[uid]["tokens"]} score {score:.4f} card-equivalents'
+                f'speed credit {credit:.2f} tokens {windows[uid]["tokens"]} prompt {windows[uid]["prompt_tokens"]} '
+                f'score {score:.4f} card-equivalents'
             )
             windows[uid].update(
                 attested=ok,
@@ -523,7 +545,9 @@ async def audit_round(
         f'strike {summary.get("strike", 0)} · neutral {summary.get("neutral", 0)} · READY {len(ready)} '
         f'{[m.uid for m in ready]} · probation {len(probation)} · quarantined {quarantined} · dormant {dormant} · '
         f'paid {sum(w["tokens"] for w in windows.values())} output tokens at '
-        f'${token_rate_usd(loadout.releases[0]) * 1e6:.3f}/M'
+        f'${token_rate_usd(loadout.releases[0]) * 1e6:.3f}/M + '
+        f'{sum(w.get("prompt_tokens", 0) for w in windows.values())} prompt tokens at '
+        f'${prompt_token_rate_usd(loadout.releases[0]) * 1e6:.4f}/M'
     )
     return scores
 

@@ -12,10 +12,12 @@ SERVING_LATENCY_ZERO_CREDIT_MS — and decode rate, completion tokens over
 validator itself had in flight to the miner (the release's blessing-time curve).
 Credit = ttft_credit × decode_credit; decode under SERVING_DECODE_FLOOR_RATIO ×
 expected is 0. The mean credit over a round's served requests is the miner's
-routing weight. Pay: the output tokens the gateway saw a hotkey serve in the
-round, in card-equivalents — ``tokens / (one card's aggregate decode tok/s ×
-round seconds)`` — so an hour flat out on one card is one card-hour
-(SERVING_GPU_HOUR_USD) and the per-token rate falls out of the release's speed.
+routing weight. Pay: the card-time the gateway saw a hotkey serve in the round,
+in card-equivalents — ``(output tokens / one card's aggregate decode tok/s +
+prompt tokens / one card's prefill tok/s) / round seconds`` — so an hour flat
+out on one card is one card-hour (SERVING_GPU_HOUR_USD) whether it spent it
+decoding or prefilling, and both per-token rates fall out of the release's speed.
+Prompt tokens are the miner-reported count, clamped to what the prompt could hold.
 """
 
 from typing import Dict, Optional, Sequence, Tuple
@@ -30,6 +32,8 @@ from gittensor.constants import (
     SERVING_GPU_HOUR_USD,
     SERVING_LATENCY_FULL_CREDIT_MS,
     SERVING_LATENCY_ZERO_CREDIT_MS,
+    SERVING_PREFILL_TPS_FALLBACK,
+    SERVING_PROMPT_TEMPLATE_TOKENS,
 )
 from gittensor.serving.loadout import ServingRelease
 from gittensor.serving.state import ServedRequest
@@ -45,17 +49,44 @@ def token_rate_usd(release: ServingRelease) -> float:
     return SERVING_GPU_HOUR_USD / (aggregate_decode_tps(release) * 3600.0)
 
 
-def card_equivalents(tokens: int, release: ServingRelease, seconds: float) -> float:
-    """Cards it takes to decode ``tokens`` output tokens in ``seconds`` on ``release``: 1.0 is one card flat out."""
-    if tokens <= 0 or seconds <= 0:
+def prefill_tps(release: ServingRelease) -> float:
+    """Prompt tok/s one honest card prefills on ``release``: the prompt-token rate's physical base."""
+    return release.prefill_tps or SERVING_PREFILL_TPS_FALLBACK
+
+
+def prompt_token_rate_usd(release: ServingRelease) -> float:
+    """USD per prompt token: the card-hour target spread over what one card prefills in an hour."""
+    return SERVING_GPU_HOUR_USD / (prefill_tps(release) * 3600.0)
+
+
+def card_equivalents(tokens: int, release: ServingRelease, seconds: float, prompt_tokens: int = 0) -> float:
+    """Cards it takes to decode ``tokens`` output tokens and prefill ``prompt_tokens`` in ``seconds`` on
+    ``release``: 1.0 is one card flat out. Both are card-time on the same card, so the two per-token rates fall
+    out of one card-hour and shifting work between prompt and completion never changes what it is worth."""
+    if seconds <= 0:
         return 0.0
-    return tokens / (aggregate_decode_tps(release) * seconds)
+    decode_s = max(tokens, 0) / aggregate_decode_tps(release)
+    prefill_s = max(prompt_tokens, 0) / prefill_tps(release)
+    return (decode_s + prefill_s) / seconds
 
 
 def paid_tokens(req: ServedRequest) -> int:
     """Output tokens the gateway saw ``req`` serve, never more than it asked for."""
     n = len(req.tokens or [])
     return min(n, req.max_tokens) if req.max_tokens > 0 else n
+
+
+def prompt_token_ceiling(messages: Sequence[Dict[str, str]]) -> int:
+    """The most prompt tokens ``messages`` can honestly tokenize to: one per character plus the chat template."""
+    chars = sum(len(m.get('content') or '') + len(m.get('role') or '') for m in messages)
+    return chars + SERVING_PROMPT_TEMPLATE_TOKENS * len(messages)
+
+
+def paid_prompt_tokens(req: ServedRequest) -> int:
+    """Prompt tokens ``req`` is paid prefill for: what the miner's runtime reported, never more than the prompt
+    could hold. The count is miner-reported (the gateway does not tokenize), so the clamp bounds a lie to a few x
+    of a rate that is already ~1/85 of an output token's."""
+    return max(0, min(int(req.prompt_tokens or 0), prompt_token_ceiling(req.messages)))
 
 
 def latency_credit(elapsed_ms: float, full_ms: Optional[float] = None, zero_ms: Optional[float] = None) -> float:

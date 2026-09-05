@@ -160,10 +160,12 @@ MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software,
 # =============================================================================
 # Serving (sub-subnet B beta)
 # =============================================================================
-# Serving miners are paid per output token the gateway saw them serve, at a rate derived from the card-hour target:
-# rate = SERVING_GPU_HOUR_USD / (one card's aggregate decode tok/s x 3600), so a 5090 flat out for an hour (~1M
-# output tokens on the current runtime) earns exactly the card-hour and an idle one earns nothing. A round score is
-# those tokens in card-equivalents (tokens / (aggregate tok/s x round seconds)); the settled mean is priced at
+# Serving miners are paid for the card-time the gateway saw them serve: output tokens at the decode rate and
+# prompt tokens (prefill) at the prefill rate, both derived from the card-hour target:
+# rate = SERVING_GPU_HOUR_USD / (one card's aggregate tok/s x 3600), so a 5090 flat out for an hour (~1M output
+# tokens on the current runtime, or ~86M prompt tokens) earns exactly the card-hour and an idle one earns nothing. A
+# round score is that card-time in card-equivalents ((tokens / decode tok/s + prompt tokens / prefill tok/s) /
+# round seconds); the settled mean is priced at
 # SERVING_GPU_HOUR_USD, converted to an emission share through the on-chain alpha/TAO price and a live TAO/USD
 # rate (see below). No card count and no per-hotkey cap: served volume is the capacity
 # proof, and a real 5090 cannot out-decode its silicon. The only ceiling is SERVING_EMISSION_SHARE_CAP — above it the
@@ -175,6 +177,17 @@ SERVING_EMISSION_SHARE_CAP = 0.05
 # Output tok/s one card sustains under load on the blessed runtime, for a release without its own
 # `speed.aggregate_decode_tps` (sparkinfer 7498736 on a 5090: 279-282 at 16 concurrent, 2026-08-27).
 SERVING_AGGREGATE_DECODE_TPS_FALLBACK = 280.0
+# Prompt tok/s one card prefills on the blessed runtime, for a release without its own `speed.prefill_tps`. Prefill
+# is paid as card-time exactly like decode, so a 30k-token prompt with a 150-token answer pays for the ~1.3 s of
+# prefill it cost the card and not only the 0.5 s of decode; at this rate a prompt token is worth ~1/85 of an output
+# token, which is also why claiming prompt tokens is not worth lying about. Derived from the 2026-08-28 5090 TTFT
+# readings behind SERVING_MAX_PROMPT_CHARS (8.9k prompt tokens in 403 ms, 35.6k in 1453 ms; RTT included, so this
+# understates the card). Re-measure with scripts/check_serving_runtime.py --speed-json (`prefill_tps`) and carry it
+# on the release.
+SERVING_PREFILL_TPS_FALLBACK = 24_000.0
+# The prompt token count is what the miner's runtime reported (usage.prompt_tokens). Pay is clamped to what the
+# prompt could honestly tokenize to: one token per character plus this many chat-template tokens per message.
+SERVING_PROMPT_TEMPLATE_TOKENS = 16
 # Pricing the cap needs the chain's alpha/TAO price and the live TAO/USD rate. A round that cannot read them
 # reuses the last usable pricing for up to SERVING_PRICING_MAX_AGE_S, so a chain hiccup does not move pay. With no
 # usable pricing at all the fleet is paid nothing: the alternative (the whole cap, split pro-rata) hands one verified

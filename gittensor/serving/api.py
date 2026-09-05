@@ -199,6 +199,7 @@ def build_app(
                         ttft_ms=finite_or_none(getattr(result, 'observed_ttft_ms', None)) if result else None,
                         inflight=inflight,
                         max_tokens=max_tokens,
+                        prompt_tokens=int((result.usage or {}).get('prompt_tokens') or 0) if result else 0,
                     )
                 )
                 state.record(

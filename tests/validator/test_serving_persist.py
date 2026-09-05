@@ -38,6 +38,7 @@ ROUND = {
             'ttft_ms': 48.3,
             'decode_tps': 190.0,
             'tokens': 84_000,
+            'prompt_tokens': 2_400_000,
             'attested': True,
             'score': 1.0,
             'last_miss': '',
@@ -56,6 +57,7 @@ ROUND = {
             'ttft_ms': None,
             'decode_tps': None,
             'tokens': 0,
+            'prompt_tokens': 0,
             'attested': False,
             'score': 0.0,
             'last_miss': 'tokenization mismatch (3 vs 4)',
@@ -83,14 +85,16 @@ def test_round_rows_shape_and_pricing():
     assert summary[14:16] == (100.0, 1.0)
     assert summary[16:18] == (0.70, SERVING_EMISSION_SHARE_CAP)  # economics ride along so das never hard-codes them
     assert summary[18:25] == (None,) * 7
-    assert summary[25:] == (84_000, None)  # paid tokens across the fleet; no release -> no per-token rate
+    # paid output and prompt tokens across the fleet; no release -> no per-token rates
+    assert summary[25:] == (84_000, None, 2_400_000, None)
     assert len(miners) == 2
     ready = next(m for m in miners if m[2] == 16)
     assert ready[5] == 'qwen' and ready[6] == 'ready'  # release_id defaults to model_id
     assert ready[13] == 48.3 and ready[14] == 190.0 and ready[17] == 0.5 and ready[18] is None
     assert ready[15] == 1.0 and ready[19] == 84_000  # capacity carries admission only; tokens is what was paid
+    assert ready[20] == 2_400_000  # ... and prompt_tokens the prefill paid on the same requests
     quarantined = next(m for m in miners if m[2] == 27)
-    assert quarantined[6] == 'quarantined' and quarantined[15] == 0.0 and quarantined[19] == 0
+    assert quarantined[6] == 'quarantined' and quarantined[15] == 0.0 and quarantined[19:21] == (0, 0)
     assert quarantined[10] == dt.datetime.fromtimestamp(1_800_000_000.0, dt.timezone.utc)
     assert quarantined[18].startswith('tokenization mismatch')
 
@@ -118,6 +122,7 @@ def test_round_rows_carry_the_enforced_release():
         'entrius/gt-attest:v1',
     )
     assert summary[26] == pytest.approx(0.694, abs=0.001)  # $/M output tokens at the fallback 280 tok/s
+    assert summary[28] == pytest.approx(0.0081, abs=0.0001)  # $/M prompt tokens at the fallback 24k tok/s prefill
 
 
 def test_default_loadout_keeps_model_file():

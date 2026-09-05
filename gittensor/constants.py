@@ -242,12 +242,17 @@ SERVING_VERIFY_BUSY_RETRIES = 3
 # 5090 reports TTFT ~26 ms on-box (2026-08-27 conformance) and a 64-token answer in ~165 ms (2026-08-22/24); add
 # validator<->miner RTT and an honest miner anywhere on earth lands well under FULL. Credit is flat to FULL and
 # falls linearly to 0 at ZERO, so a miner proxying to a GPU in another region or queueing requests loses credit
-# in proportion. Generation length does not enter (mini-soak 2026-08-27: total latency of 64-512-token answers
+# in proportion. The prompt's own prefill is allowed for first: the time one honest card needs to prefill it
+# (prompt tokens / the release's prefill tok/s, ~1.5 s at 36k tokens) is subtracted from the observed TTFT before
+# the bands apply, so a long agentic prompt is not read as a slow card. The prompt token count is the reference's
+# own (from teacher-forced scoring) — never the miner's — with ~SERVING_CHARS_PER_TOKEN_ESTIMATE characters per
+# token as the fallback. Generation length does not enter (mini-soak 2026-08-27: total latency of 64-512-token answers
 # scored a perfect miner at 0.24). Same-region proxying is NOT visible here; that is the one-GPU-many-hotkeys
 # case, which pay-per-token makes pointless (the hotkeys split one card's tokens) and the decode floor catches
 # under load.
 SERVING_LATENCY_FULL_CREDIT_MS = 500.0
 SERVING_LATENCY_ZERO_CREDIT_MS = 1_500.0
+SERVING_CHARS_PER_TOKEN_ESTIMATE = 4  # the validator's own prompt-size estimate when the reference reports no count
 # Decode speed on served traffic. Each served request with at least SERVING_DECODE_MIN_TOKENS completion tokens
 # yields a validator-observed decode rate, tokens / (total - TTFT); it is compared with what one honest card does on
 # this runtime at the number of requests THIS validator had in flight to the miner (the release's blessing-time

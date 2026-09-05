@@ -302,10 +302,13 @@ def verify_served_round(
         else:
             state.audits.record(req.hotkey, release.release_id, verdict.value)
             bump('pass' if verdict.passed else 'miss')
-        # Speed is priced on served traffic: time to first token and decode rate against the blessing's curve at
-        # the load this validator had in flight to the miner (gittensor/validator/serving/scoring.py).
+        # Speed is priced on served traffic: time to first token (less the prompt's own prefill, sized by the
+        # reference's token count) and decode rate against the blessing's curve at the load this validator had in
+        # flight to the miner (gittensor/validator/serving/scoring.py).
         speeds.setdefault(req.hotkey, []).append(
-            request_speed(req, release) if verdict.passed else RequestSpeed(credit=0.0)
+            request_speed(req, release, prompt_tokens=verdict.prompt_tokens)
+            if verdict.passed
+            else RequestSpeed(credit=0.0)
         )
         state.record(
             RequestRecord(

@@ -293,14 +293,71 @@ def _stream_once(base_url: str, model_id: str, messages, max_tokens: int, timeou
     return tokens, ttft if ttft is not None else float('inf'), time.monotonic() - started
 
 
+def _prefill_once(base_url: str, model_id: str, messages, timeout: float) -> Tuple[int, float]:
+    """One streamed 1-token greedy request: (prompt tokens the runtime reported, client-observed TTFT s)."""
+    from gittensor.serving.stream import SSEParser
+
+    body = {
+        'model': model_id,
+        'messages': messages,
+        'max_tokens': 1,
+        'temperature': 0,
+        'stream': True,
+        'stream_options': {'include_usage': True},
+    }
+    parser = SSEParser()
+    started = time.monotonic()
+    ttft = None
+    prompt_tokens = 0
+    with requests.post(
+        f'{base_url}/v1/chat/completions', headers=auth_headers(API_KEY), json=body, stream=True, timeout=timeout
+    ) as r:
+        r.raise_for_status()
+        for chunk in r.iter_content(chunk_size=None):
+            if ttft is None:
+                ttft = time.monotonic() - started
+            for event in parser.feed(chunk):
+                if event and isinstance(event.get('usage'), dict):
+                    prompt_tokens = int(event['usage'].get('prompt_tokens') or prompt_tokens)
+    return prompt_tokens, ttft if ttft is not None else float('inf')
+
+
+def prefill_profile(base_url: str, model_id: str, timeout: float, reps: int = 3, chars: int = 32_000) -> Dict:
+    """Prompt tok/s one honest card prefills: what the release carries as ``speed.prefill_tps``.
+
+    TTFT on a ~``chars``-character prompt minus TTFT on a short one, over the extra prompt tokens the runtime
+    reported: this client's RTT, the queue and the single decode step cancel, leaving the prefill pass. Measured one
+    request at a time, so it is the card's rate, not a batched one. The validator pays prompt tokens at
+    SERVING_GPU_HOUR_USD over an hour of this.
+    """
+    short = make_prompts(reps, seed=29)
+    filler = 'The quick brown fox jumps over the lazy dog while the validator audits every served request. '
+    long_text = (filler * (chars // len(filler) + 1))[:chars]
+    rates = []
+    long_tokens = 0
+    for messages in short:
+        _prefill_once(base_url, model_id, messages, timeout)  # warm
+        short_tokens, short_ttft = _prefill_once(base_url, model_id, messages, timeout)
+        long_messages = [{'role': 'user', 'content': f'{long_text}\n\n{messages[-1]["content"]}'}]
+        long_tokens, long_ttft = _prefill_once(base_url, model_id, long_messages, timeout)
+        extra_tokens, extra_s = long_tokens - short_tokens, long_ttft - short_ttft
+        if extra_tokens > 0 and extra_s > 0:
+            rates.append(extra_tokens / extra_s)
+    return {
+        'prefill_tps': round(statistics.median(rates), 1) if rates else None,
+        'prefill_prompt_tokens': long_tokens,
+        'prefill_reps': len(rates),
+    }
+
+
 def speed_profile(base_url: str, model_id: str, max_tokens: int, timeout: float, burst: int, reps: int = 3) -> Dict:
     """Blessing-time speed facts for one honest card on this runtime, measured the way the validator measures.
 
     ``single_stream``: one request at a time. ``aggregate_decode_tps``: ``burst`` concurrent requests, aggregate
     verified tokens per second of decode time (batch wall-clock minus the first TTFT) — what one card serves flat
-    out, so the per-token rate the validator pays at is SERVING_GPU_HOUR_USD over an hour of it. Client TTFT
-    includes this client's RTT, so decode rates are RTT-free; the TTFT rows are informational unless the client is
-    on-box.
+    out, so the per-token rate the validator pays at is SERVING_GPU_HOUR_USD over an hour of it. ``prefill_tps``:
+    see ``prefill_profile``. Client TTFT includes this client's RTT, so decode rates are RTT-free; the TTFT rows
+    are informational unless the client is on-box.
     """
     prompts = make_prompts(burst * reps, seed=23)
     single = []
@@ -342,6 +399,8 @@ def speed_profile(base_url: str, model_id: str, max_tokens: int, timeout: float,
         # concurrent requests -> per-request decode tok/s of one honest card: the validator prices a served request
         # against this curve at the load it had in flight to the miner
         'decode_per_request': {str(k): v for k, v in sorted(curve.items())},
+        # what the release carries as speed.prefill_tps: prompt tok/s one card prefills; prompt tokens are paid at it
+        **prefill_profile(base_url, model_id, timeout, reps),
     }
 
 
@@ -404,7 +463,8 @@ def main() -> int:
     ap.add_argument(
         '--speed-json',
         default=None,
-        help='also measure the speed profile (single-stream and probe-shaped decode tok/s) and write it here',
+        help='also measure the speed profile (single-stream and probe-shaped decode tok/s, prefill tok/s) and '
+        'write it here',
     )
     ap.add_argument(
         '--speed-burst', type=int, default=16, help='concurrent requests in the saturation burst (blessed concurrency)'

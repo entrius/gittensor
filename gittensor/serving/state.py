@@ -63,6 +63,9 @@ class ServedRequest:
     inflight: int = 1  # this validator's requests in flight to the miner when this one was dispatched (incl. itself)
     release_id: str = ''  # the release this request was routed for; audited against that release's reference
     max_tokens: int = 0  # what was asked for; a completion longer than this is not the runtime's
+    prompt_tokens: int = (
+        0  # prompt tokens the miner's runtime reported (usage.prompt_tokens); paid as prefill card-time
+    )
 
     def __post_init__(self) -> None:
         if not self.release_id:

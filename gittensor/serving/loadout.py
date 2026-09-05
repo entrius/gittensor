@@ -65,6 +65,7 @@ class ServingRelease:
     # each release self-prices. None -> the constants' defaults.
     decode_per_request: Optional[Dict[int, float]] = None  # concurrent requests -> per-request decode tok/s, one card
     aggregate_decode_tps: Optional[float] = None  # output tok/s one card sustains under load: the per-token rate's base
+    prefill_tps: Optional[float] = None  # prompt tok/s one card prefills: the per-prompt-token rate's base
     # Attestation (docker/attest, image entrius/gt-attest — one container per box, beside the runtime). Miner side:
     # attest_url = that container (default: base_url host, port 8081). Validator side: attest_reference_url = the one
     # beside the reference (default: reference_url host, port 8081).
@@ -129,6 +130,7 @@ class ServingRelease:
             request_timeout=float(raw.get('request_timeout', 60.0)),
             decode_per_request={int(k): float(v) for k, v in (speed.get('decode_per_request') or {}).items()} or None,
             aggregate_decode_tps=_optional_float(speed.get('aggregate_decode_tps')),
+            prefill_tps=_optional_float(speed.get('prefill_tps')),
             attest_image=attest.get('image'),
             attest_url=attest.get('url') or _sidecar_url(raw.get('base_url')),
             attest_api_key=attest.get('api_key') or os.getenv('SERVING_ATTEST_API_KEY') or None,

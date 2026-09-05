@@ -1854,12 +1854,21 @@ def test_release_speed_curve_parses(tmp_path):
 def test_token_pay_is_derived_from_the_release_speed(tmp_path):
     """Only the card-hour target is hand-set: the per-token rate is that target over what one card decodes in an
     hour, so a card flat out earns exactly the card-hour, 1.5 cards' worth of tokens earns 1.5, an idle card 0."""
-    from gittensor.constants import SERVING_AGGREGATE_DECODE_TPS_FALLBACK, SERVING_GPU_HOUR_USD
+    from gittensor.constants import (
+        SERVING_AGGREGATE_DECODE_TPS_FALLBACK,
+        SERVING_GPU_HOUR_USD,
+        SERVING_PREFILL_TPS_FALLBACK,
+        SERVING_PROMPT_TEMPLATE_TOKENS,
+    )
     from gittensor.serving.loadout import load_serving_loadout
     from gittensor.validator.serving.scoring import (
         aggregate_decode_tps,
         card_equivalents,
+        paid_prompt_tokens,
         paid_tokens,
+        prefill_tps,
+        prompt_token_ceiling,
+        prompt_token_rate_usd,
         token_rate_usd,
     )
 
@@ -1875,10 +1884,13 @@ def test_token_pay_is_derived_from_the_release_speed(tmp_path):
     assert token_rate_usd(release) * hour == pytest.approx(SERVING_GPU_HOUR_USD)
     bare = _echo_release()
     assert aggregate_decode_tps(bare) == SERVING_AGGREGATE_DECODE_TPS_FALLBACK
-    raw = {'releases': [{'model_id': 'm', 'backend': 'echo', 'speed': {'aggregate_decode_tps': 400}}]}
+    raw = {
+        'releases': [{'model_id': 'm', 'backend': 'echo', 'speed': {'aggregate_decode_tps': 400, 'prefill_tps': 30000}}]
+    }
     path = tmp_path / 'loadout.json'
     path.write_text(json.dumps(raw))
     assert aggregate_decode_tps(load_serving_loadout(path).primary) == 400.0
+    assert prefill_tps(load_serving_loadout(path).primary) == 30000.0
     assert load_serving_loadout().primary.aggregate_decode_tps  # the shipped release self-prices
     # the gateway pays what it asked for at most: a runtime that streams past max_tokens is not paid for it
     req = _served(1, release)
@@ -1887,6 +1899,32 @@ def test_token_pay_is_derived_from_the_release_speed(tmp_path):
     assert paid_tokens(req) == 5
     req.tokens = None
     assert paid_tokens(req) == 0
+
+    # Prefill is the same card-time at the card's prefill rate: an hour of prompt tokens is one card-hour too, and
+    # a prompt-heavy request pays for the prefill it cost on top of its decode, not 1:1 with output.
+    release.prefill_tps = 24_000.0
+    assert prefill_tps(bare) == SERVING_PREFILL_TPS_FALLBACK
+    prefill_hour = int(24_000.0 * 3600)  # ~86M prompt tokens
+    assert card_equivalents(0, release, 3600.0, prefill_hour) == pytest.approx(1.0)
+    assert card_equivalents(hour, release, 3600.0, prefill_hour) == pytest.approx(2.0)
+    assert card_equivalents(150, release, 300.0, 30_000) == pytest.approx((150 / 280.0 + 30_000 / 24_000.0) / 300.0)
+    assert card_equivalents(150, release, 300.0, 30_000) > card_equivalents(150, release, 300.0)
+    assert card_equivalents(0, release, 300.0, 0) == 0.0 and card_equivalents(0, release, 0.0, 100) == 0.0
+    assert prompt_token_rate_usd(release) * 1e6 == pytest.approx(0.0081, abs=0.0001)  # $/M prompt: ~1/85 of output
+    assert token_rate_usd(release) / prompt_token_rate_usd(release) == pytest.approx(24_000.0 / 280.0)
+    # the count is miner-reported, so it is clamped to what the prompt could tokenize to: a runtime claiming a
+    # 100k-token prompt for 16 characters is paid one per character plus the template
+    req = _served(1, release)
+    req.prompt_tokens = 12
+    assert paid_prompt_tokens(req) == 12
+    req.prompt_tokens = 100_000
+    assert (
+        paid_prompt_tokens(req)
+        == prompt_token_ceiling(req.messages)
+        == 16 + len('user') + SERVING_PROMPT_TEMPLATE_TOKENS
+    )
+    req.prompt_tokens = -5
+    assert paid_prompt_tokens(req) == 0
 
 
 def test_pay_counts_gateway_tokens_the_reference_did_not_fail():
@@ -1903,11 +1941,15 @@ def test_pay_counts_gateway_tokens_the_reference_did_not_fail():
     baseline = _served(3, good)
     baseline.source = 'baseline'
     served.append(baseline)
+    for req in served:
+        req.prompt_tokens = 7  # the runtime's usage.prompt_tokens; every prompt here is 16 hex chars
     state = ServingState()
     summary: Dict[str, int] = {}
-    speeds, tokens = verify_served_round(state, ref, good, served, summary, rng=random.Random(0))
+    prompt: Dict[str, int] = {}
+    speeds, tokens = verify_served_round(state, ref, good, served, summary, rng=random.Random(0), prompt_tokens=prompt)
     assert summary['unsampled'] == 2 and len(speeds['hk1']) == 10
     assert tokens == {'hk1': 12 * 8, 'hk2': 8}  # hk2: one completion paid, the wrong one and the miss are not
+    assert prompt == {'hk1': 12 * 7, 'hk2': 7}  # prefill follows the same requests: nothing for the miss or baseline
     assert state.audits.verdict('hk2', good.release_id).quarantined_until > 0  # ... and the strike stands
 
     class Flaky:
@@ -1922,6 +1964,66 @@ def test_pay_counts_gateway_tokens_the_reference_did_not_fail():
     state = ServingState()
     _, tokens = verify_served_round(state, Flaky(), good, [_served(1, good)], {})  # type: ignore[arg-type]
     assert tokens == {'hk1': 8}
+
+
+def test_round_pays_prefill_as_card_time(monkeypatch):
+    """Two hotkeys serve the same completions; the one whose prompts were long is paid the prefill on top, at the
+    release's prefill rate, and the round report carries both token counts for the DB and the UI."""
+    from types import SimpleNamespace
+
+    from gittensor.validator.serving.scoring import card_equivalents
+
+    release = _echo_release()
+    release.prefill_tps = 24_000.0
+    dendrite, _ = _dendrite_echoing(release)
+    state = ServingState(settlement_rounds=1)
+    serving = [(1, 'hk1', SimpleNamespace(is_serving=True)), (2, 'hk2', SimpleNamespace(is_serving=True))]
+    for i in range(3):
+        state.enqueue_served(_served(1, release))
+        long = _served(2, release)  # the same honest echo completion, on a 4000-character prompt
+        long.messages = [{'role': 'user', 'content': f'{i}' + 'x' * 3999}]
+        ref = expected_completion(long.messages, release.max_tokens, release.model_id)
+        long.tokens, long.token_logprobs = list(ref.tokens or []), list(ref.token_logprobs or [])
+        long.completion = ' '.join(long.tokens)
+        long.prompt_tokens = 1000  # what the runtime reported; under the 4000 + template ceiling
+        state.enqueue_served(long)
+    scores = _round(state, dendrite, serving, release, monkeypatch)
+    assert scores['hk1'] == pytest.approx(card_equivalents(3 * 8, release, ROUND_S))
+    assert scores['hk2'] == pytest.approx(card_equivalents(3 * 8, release, ROUND_S, 3 * 1000))
+    assert scores['hk2'] > scores['hk1']
+    # 3000 prompt tokens at 24k tok/s is 0.125 s of card-time on top of 24 tokens' 0.086 s of decode
+    assert scores['hk2'] / scores['hk1'] == pytest.approx(1 + (3000 / 24_000.0) / (24 / 280.0))
+    windows = state.last_round['windows']
+    assert windows[1]['tokens'] == 24 and windows[1]['prompt_tokens'] == 0
+    assert windows[2]['tokens'] == 24 and windows[2]['prompt_tokens'] == 3000
+
+
+def test_round_rows_carry_prompt_tokens_and_both_rates():
+    """The persisted round carries the fleet's prompt tokens and the $/M prompt rate beside the output ones, and
+    each miner row its own prompt tokens — as many values as the INSERTs have placeholders."""
+    import datetime as dt
+
+    from gittensor.validator.serving.persist import round_rows
+    from gittensor.validator.storage.queries import BULK_INSERT_SERVING_MINER_ROUNDS, INSERT_SERVING_ROUND
+
+    release = _echo_release()
+    release.aggregate_decode_tps = 280.0
+    release.prefill_tps = 24_000.0
+    last_round = {
+        'served': 5,
+        'gateway': 4,
+        'baseline': 1,
+        'windows': {
+            1: {'hotkey': 'hk1', 'model_id': release.model_id, 'tokens': 800, 'prompt_tokens': 30_000, 'score': 0.1},
+            2: {'hotkey': 'hk2', 'model_id': release.model_id, 'tokens': 200, 'prompt_tokens': 0, 'score': 0.02},
+        },
+    }
+    summary, miners = round_rows('vali', dt.datetime.now(dt.timezone.utc), last_round, {}, None, release)
+    assert len(summary) == INSERT_SERVING_ROUND.count('%s')
+    assert all(len(row) == BULK_INSERT_SERVING_MINER_ROUNDS.count('%s') for row in miners)
+    assert summary[-4:-2] == (1000, pytest.approx(0.694, abs=0.001))  # output tokens, $/M output
+    assert summary[-2] == 30_000 and summary[-1] == pytest.approx(0.0081, abs=0.0001)  # prompt tokens, $/M prompt
+    assert sorted((row[2], row[-2], row[-1]) for row in miners) == [(1, 800, 30_000), (2, 200, 0)]
 
 
 def test_emission_pool_is_the_only_ceiling(monkeypatch):

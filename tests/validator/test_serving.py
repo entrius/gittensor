@@ -5,7 +5,7 @@ import json
 import random
 import time
 from types import SimpleNamespace
-from typing import Dict
+from typing import Any, Dict
 
 import bittensor as bt
 import pytest
@@ -1025,14 +1025,23 @@ def test_strikes_need_the_fleet_to_agree_with_the_reference():
     assert summary.get('strike') == 1
 
 
-def test_quarantine_escalates_with_strikes():
+def test_quarantine_escalates_with_strikes_and_forgets_after_a_clean_week():
+    """1 h, 4 h, 16 h and it stays there (64 h was cut 2026-09-05: an honest runtime can strike, see handle_attest).
+    A strike after SERVING_STRIKE_FORGET_S without one starts the ladder over."""
+    from gittensor.constants import SERVING_STRIKE_FORGET_S
+
     w = AuditWindow(quarantine_s=100.0)
     assert w.strike('hk', 'r', now=0.0) == 100.0
     assert w.strike('hk', 'r', now=0.0) == 400.0
     assert w.strike('hk', 'r', now=0.0) == 1600.0
-    assert w.strike('hk', 'r', now=0.0) == 6400.0
-    assert w.strike('hk', 'r', now=0.0) == 6400.0
+    assert w.strike('hk', 'r', now=0.0) == 1600.0
+    assert w.strike('hk', 'r', now=0.0) == 1600.0
     assert w.strike('other', 'r', now=0.0) == 100.0
+    assert w.strikes('hk', 'r', now=SERVING_STRIKE_FORGET_S) == 5  # inside the week: the ladder stands
+    assert w.verdict('hk', 'r', now=SERVING_STRIKE_FORGET_S + 1.0).strikes == 0  # a clean week: forgotten
+    later = SERVING_STRIKE_FORGET_S + 1.0
+    assert w.strike('hk', 'r', now=later) == later + 100.0  # and the next strike costs an hour again
+    assert w.strike('hk', 'r', now=later + 10.0) == later + 10.0 + 400.0  # a repeat inside the week escalates
 
 
 def test_last_credit_survives_a_restart(tmp_path):
@@ -1779,7 +1788,9 @@ def test_decode_speed_prices_served_requests_against_the_blessing_curve():
     curve = {1: 440.0, 6: 46.0, 16: 19.0}
     assert expected_decode_tps(curve, 1) == 440.0 and expected_decode_tps(curve, 0) == 440.0
     assert expected_decode_tps(curve, 16) == 19.0 and expected_decode_tps(curve, 40) == 19.0
-    assert expected_decode_tps(curve, 11) == pytest.approx(32.5)  # linear between 6 and 16
+    # between points the aggregate (per-request x n) is interpolated, then divided by n: 6 -> 276, 16 -> 304 tok/s
+    assert expected_decode_tps(curve, 11) == pytest.approx((276.0 + (304.0 - 276.0) * 0.5) / 11)
+    assert expected_decode_tps(curve, 3) == pytest.approx((440.0 + (276.0 - 440.0) * 0.4) / 3)  # 124.8, not 282.4
     assert expected_decode_tps(None, 6) == 46.0  # constants' fallback curve
     assert decode_credit(440.0, 440.0) == 1.0 and decode_credit(600.0, 440.0) == 1.0  # never more than one card
     assert decode_credit(352.0, 440.0) == 1.0  # 0.8x: inside the tolerance for WAN-observed decode
@@ -2979,14 +2990,32 @@ def test_strikes_count_up_and_survive_a_restart(tmp_path):
     w.strike('hk', 'r1', now=1000.0)
     w.strike('hk', 'r1', now=2000.0)
     w.strike('hk', 'r2', now=1000.0)
-    assert w.strikes('hk', 'r1') == 2 and w.strikes('hk', 'r2') == 1 and w.strikes('hk2', 'r1') == 0
+    now = 3000.0
+    assert w.strikes('hk', 'r1', now) == 2 and w.strikes('hk', 'r2', now) == 1 and w.strikes('hk2', 'r1', now) == 0
     assert w.verdict('hk', 'r1', now=3000.0).as_dict()['strikes'] == 2
 
     store = ServingStore(tmp_path / 'serving.db')
     store.save(ServingState(audits=w))
     again = store.load(ServingState(audits=AuditWindow(quarantine_s=100.0))).audits
-    assert again.strikes('hk', 'r1') == 2 and again.strikes('hk', 'r2') == 1
+    assert again.strikes('hk', 'r1', now) == 2 and again.strikes('hk', 'r2', now) == 1
     assert again.quarantined_until('hk', 'r1', now=2050.0) == 2400.0  # the second strike: 4x the first
+    assert again._last_strike[('hk', 'r1')] == 2000.0  # the forget clock survives the restart too
+    assert again.strikes('hk', 'r1') == 0  # ...so by wall-clock time (1970 + 2000 s) they are long forgotten
+
+
+def test_store_adds_the_last_strike_column_to_an_older_database(tmp_path):
+    import sqlite3
+
+    from gittensor.serving.store import ServingStore
+
+    path = tmp_path / 'serving.db'
+    with sqlite3.connect(path) as db:
+        db.execute('CREATE TABLE quarantine (hotkey TEXT, release_id TEXT, until REAL, strikes INTEGER DEFAULT 0)')
+        db.execute('CREATE TABLE audit_values (hotkey TEXT, release_id TEXT, seq INTEGER, value REAL)')
+        db.execute('INSERT INTO quarantine VALUES (?, ?, ?, ?)', ('hk', 'r', 0.0, 3))
+    loaded = ServingStore(path).load(ServingState(audits=AuditWindow(quarantine_s=100.0))).audits
+    assert loaded._strikes[('hk', 'r')] == 3 and loaded._last_strike[('hk', 'r')] == 0.0
+    assert loaded.strikes('hk', 'r') == 0  # a pre-upgrade strike carries no clock: forgotten on first look
 
 
 def test_store_migrates_a_model_id_keyed_database(tmp_path):
@@ -3139,3 +3168,180 @@ def test_seed_ready_from_store_republishes_without_settling():
     state.last_round_ts = time.time() - state.ready_ttl_s - 1.0
     fwd.seed_ready_from_store(validator, state, loadout=loadout)  # type: ignore[arg-type]  # past the TTL: no trust
     assert state.ready_miners() == []
+
+
+def _attest_miner(**over) -> Any:  # a ServingMiner stand-in; Any so the hooks accept it
+    miner = SimpleNamespace(
+        release=SimpleNamespace(attest_url='http://sidecar:8081', attest_api_key='', request_timeout=30.0),
+        metagraph=SimpleNamespace(hotkeys=['vali'], S=[2_000_000.0], validator_permit=[True], validator_trust=[1.0]),
+        audit_budget={},
+        attest_inflight=set(),
+        slot_count=99,
+        slot_claims={},
+        prefilling={},
+        attest_hold_until=0.0,
+    )
+    for k, v in over.items():
+        setattr(miner, k, v)
+    return miner
+
+
+def test_attest_holds_admissions_and_waits_for_prefill_to_clear(monkeypatch):
+    """The 2026-09-04/05 mainnet quarantines: the sidecar's VRAM fill landed on a prefill in flight, sparkinfer fell
+    back to a pass whose output the reference rejects, and the validator's own challenge struck an honest card. Now
+    a challenge refuses new admissions "busy" (neutral, rerouted) and its fill waits for admitted requests to reach
+    their first content delta."""
+    from gittensor.serving.state import is_busy_detail
+    from gittensor.synapses import AttestSynapse
+    from neurons import serving_miner as sm
+
+    miner = _attest_miner()
+    events: Dict[str, Any] = {}
+
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {'devices': [{'wall_ms': 700.0, 'filled_bytes': 8_000_000_000}], 'queued_ms': 0.0}
+
+    def fake_post(url, **kw):
+        events['fill'] = time.monotonic()
+        return _Resp()
+
+    monkeypatch.setattr(sm.requests, 'post', fake_post)
+
+    async def scenario():
+        req = InferenceSynapse(messages=MSGS, model_id='m', max_tokens=4)
+        req.dendrite = bt.TerminalInfo(hotkey='vali')
+        assert not (await sm.blacklist_inference(miner, req))[0]  # admitted: prefilling from this moment
+        assert sm.prefilling(miner) == 1
+
+        async def user_traffic_meanwhile():
+            await asyncio.sleep(0.15)
+            late = InferenceSynapse(messages=MSGS, model_id='m', max_tokens=4)
+            late.dendrite = bt.TerminalInfo(hotkey='vali')
+            blocked, reason = await sm.blacklist_inference(miner, late)
+            events['refused'] = (blocked, reason)
+            miner.prefilling.pop(id(req))  # the admitted request reaches its first content delta
+            events['cleared'] = time.monotonic()
+
+        att = AttestSynapse(seed=7)
+        att.dendrite = bt.TerminalInfo(hotkey='vali')
+        side = asyncio.ensure_future(user_traffic_meanwhile())
+        out = await sm.handle_attest(miner, att)
+        await side
+        return out
+
+    out = asyncio.run(scenario())
+    assert out.error is None and out.wall_ms == 700.0
+    blocked, reason = events['refused']
+    assert blocked and is_busy_detail(reason) and 'attestation' in reason  # busy, never a miss
+    assert events['fill'] >= events['cleared']  # the fill waited for the prefill to finish
+    assert events['fill'] - events['cleared'] < 0.2
+    assert miner.attest_hold_until == 0.0 and miner.attest_inflight == set()
+    fresh = InferenceSynapse(messages=MSGS, model_id='m', max_tokens=4)
+    fresh.dendrite = bt.TerminalInfo(hotkey='vali')
+    assert not asyncio.run(sm.blacklist_inference(miner, fresh))[0]  # admissions reopen with the challenge
+
+
+def test_attest_prefill_wait_is_bounded_and_ignores_stale_marks():
+    """A prefill that never reports its first content delays the fill by at most the drain bound, never the round;
+    a mark nobody cleared (handler never ran, runtime stopped answering) holds nothing back."""
+    from neurons import serving_miner as sm
+
+    miner = _attest_miner(prefilling={1: time.monotonic()})
+    t0 = time.monotonic()
+    assert asyncio.run(sm.drain_prefill(miner, max_wait_s=0.2)) is False
+    assert 0.2 <= time.monotonic() - t0 < 0.6
+    miner.prefilling = {1: time.monotonic() - sm.PREFILL_STALE_S - 1.0}
+    t0 = time.monotonic()
+    assert asyncio.run(sm.drain_prefill(miner, max_wait_s=0.2)) is True
+    assert time.monotonic() - t0 < 0.1 and miner.prefilling == {}
+    assert asyncio.run(sm.drain_prefill(_attest_miner(), max_wait_s=0.2)) is True  # nothing admitted: no wait
+
+
+def test_attest_hold_outlives_one_caller_while_another_still_fills(monkeypatch):
+    """Two validators challenging at once: the hold stands until the last fill returns."""
+    from gittensor.synapses import AttestSynapse
+    from neurons import serving_miner as sm
+
+    miner = _attest_miner(attest_inflight={'other-vali'})
+
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {'devices': [{'wall_ms': 700.0}], 'queued_ms': 0.0}
+
+    monkeypatch.setattr(sm.requests, 'post', lambda url, **kw: _Resp())
+    att = AttestSynapse(seed=7)
+    att.dendrite = bt.TerminalInfo(hotkey='vali')
+    asyncio.run(sm.handle_attest(miner, att))
+    assert miner.attest_inflight == {'other-vali'} and sm.attest_holding(miner)
+    miner.attest_inflight.clear()
+    miner.attest_hold_until = 0.0
+    assert not sm.attest_holding(miner)
+
+
+def test_inference_stream_clears_the_prefill_mark_at_the_first_content_delta():
+    """sparkinfer streams a role chunk (content null) before prefill finishes and may stream logprobs-only chunks
+    (content ""); neither means decoding. The mark clears at the first chunk carrying text and the slot at the end."""
+    from neurons import serving_miner as sm
+
+    chunks = [
+        b'data: {"choices":[{"index":0,"delta":{"role":"assistant","content":null},"logprobs":null}]}\n\n',
+        b'data: {"choices":[{"index":0,"delta":{"content":""},"logprobs":{"content":[]}}]}\n\n',
+        b'data: {"choices":[{"index":0,"delta":{"content":"Hi"},"logprobs":null}]}\n\n',
+        b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n',
+        b'data: [DONE]\n\n',
+    ]
+    seen = []
+
+    class Backend:
+        def stream(self, messages, max_tokens, logprobs):
+            for chunk in chunks:
+                seen.append(sm.prefilling(miner))  # state left by the previous chunk
+                yield chunk
+
+    miner = _attest_miner(backend=Backend())
+    syn = InferenceSynapse(messages=MSGS, model_id='m', max_tokens=4)
+    syn.dendrite = bt.TerminalInfo(hotkey='vali')
+    assert sm.claim_slot(miner, syn) and sm.prefilling(miner) == 1
+    sent = []
+
+    async def run():
+        response = await sm.handle_inference(miner, syn)
+        await response.token_streamer(lambda msg: sent.append(msg) or asyncio.sleep(0))
+
+    asyncio.run(run())
+    assert seen == [1, 1, 1, 0, 0]  # role and logprobs-only chunks keep the mark; "Hi" clears it
+    assert [m['body'] for m in sent] == chunks
+    assert miner.prefilling == {} and miner.slot_claims == {}
+    reasoning = b'data: {"choices":[{"index":0,"delta":{"reasoning_content":"th"},"logprobs":null}]}\n\n'
+    assert sm._FIRST_CONTENT.search(reasoning)  # a thinking model's first text counts too
+    assert not sm._FIRST_CONTENT.search(chunks[0]) and not sm._FIRST_CONTENT.search(chunks[1])
+
+
+def test_shipped_curve_pays_an_honest_card_in_full_at_2_to_5_concurrent():
+    """#1753: the blessed curve had points at 1 and 6 only, and the straight line between them sat far above what a
+    5090 does at 2-5 streams, so an honest card read 0.32-0.48x expected there — under the floor, zero credit. The
+    curve now carries measured points 2-12 and interpolates on aggregate rate. The rows are the issue's on-box
+    measurement of an unshared, correctly pinned card."""
+    from gittensor.validator.serving.scoring import decode_credit, expected_decode_tps
+
+    release = load_serving_loadout().primary
+    assert release.decode_per_request is not None
+    miner_measured = {1: 426.8, 2: 148.2, 3: 91.8, 4: 74.7, 5: 59.9, 6: 49.6, 8: 37.5}
+    for n, observed in miner_measured.items():
+        expected = expected_decode_tps(release.decode_per_request, n)
+        assert observed / expected >= 0.8, (n, observed, expected)  # inside the WAN tolerance: full credit
+        assert decode_credit(observed, expected) == 1.0
+    # and between the sparse tail points a queued stream is still expected at the last measured rate, not below it
+    assert expected_decode_tps(release.decode_per_request, 20) == pytest.approx(
+        (16 * 19.4 + (24 * 19.4 - 16 * 19.4) * 0.5) / 20
+    )
+    assert expected_decode_tps(release.decode_per_request, 64) == 19.5
+    # a card genuinely shared between two hotkeys still reads under the floor at 1 in flight
+    assert decode_credit(144.3, expected_decode_tps(release.decode_per_request, 1)) == 0.0

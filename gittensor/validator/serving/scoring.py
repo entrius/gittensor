@@ -101,14 +101,23 @@ def latency_credit(elapsed_ms: float, full_ms: Optional[float] = None, zero_ms: 
 
 
 def expected_decode_tps(curve: Optional[Dict[int, float]], inflight: int) -> float:
-    """Per-request decode tok/s one honest card delivers at ``inflight`` concurrent requests (piecewise-linear)."""
+    """Per-request decode tok/s one honest card delivers at ``inflight`` concurrent requests.
+
+    The curve's points are per-request rates; between them the interpolation runs on the card's *aggregate* rate
+    (per-request x concurrency), the quantity that is actually flat once a batch forms, and the per-request rate is
+    that aggregate over ``inflight``. A straight line between per-request points instead sits far above the real
+    hyperbola: with points at 1 and 6 only, an honest 5090 at 2-5 concurrent read 0.32-0.48x expected — under the
+    floor, zero credit, exactly where every traffic burst spends its time (#1753). Past the last point the
+    per-request rate holds: a runtime that queues beyond its batch keeps each stream's rate and grows TTFT.
+    """
     points: Sequence[Tuple[int, float]] = sorted(curve.items()) if curve else SERVING_DECODE_PER_REQUEST_FALLBACK
     n = max(1, int(inflight))
     if n <= points[0][0]:
         return points[0][1]
     for (n0, t0), (n1, t1) in zip(points, points[1:]):
         if n <= n1:
-            return t0 + (t1 - t0) * (n - n0) / (n1 - n0)
+            a0, a1 = n0 * t0, n1 * t1
+            return (a0 + (a1 - a0) * (n - n0) / (n1 - n0)) / n
     return points[-1][1]
 
 

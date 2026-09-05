@@ -1788,7 +1788,9 @@ def test_decode_speed_prices_served_requests_against_the_blessing_curve():
     curve = {1: 440.0, 6: 46.0, 16: 19.0}
     assert expected_decode_tps(curve, 1) == 440.0 and expected_decode_tps(curve, 0) == 440.0
     assert expected_decode_tps(curve, 16) == 19.0 and expected_decode_tps(curve, 40) == 19.0
-    assert expected_decode_tps(curve, 11) == pytest.approx(32.5)  # linear between 6 and 16
+    # between points the aggregate (per-request x n) is interpolated, then divided by n: 6 -> 276, 16 -> 304 tok/s
+    assert expected_decode_tps(curve, 11) == pytest.approx((276.0 + (304.0 - 276.0) * 0.5) / 11)
+    assert expected_decode_tps(curve, 3) == pytest.approx((440.0 + (276.0 - 440.0) * 0.4) / 3)  # 124.8, not 282.4
     assert expected_decode_tps(None, 6) == 46.0  # constants' fallback curve
     assert decode_credit(440.0, 440.0) == 1.0 and decode_credit(600.0, 440.0) == 1.0  # never more than one card
     assert decode_credit(352.0, 440.0) == 1.0  # 0.8x: inside the tolerance for WAN-observed decode
@@ -3218,3 +3220,26 @@ def test_inference_stream_clears_the_prefill_mark_at_the_first_content_delta():
     reasoning = b'data: {"choices":[{"index":0,"delta":{"reasoning_content":"th"},"logprobs":null}]}\n\n'
     assert sm._FIRST_CONTENT.search(reasoning)  # a thinking model's first text counts too
     assert not sm._FIRST_CONTENT.search(chunks[0]) and not sm._FIRST_CONTENT.search(chunks[1])
+
+
+def test_shipped_curve_pays_an_honest_card_in_full_at_2_to_5_concurrent():
+    """#1753: the blessed curve had points at 1 and 6 only, and the straight line between them sat far above what a
+    5090 does at 2-5 streams, so an honest card read 0.32-0.48x expected there — under the floor, zero credit. The
+    curve now carries measured points 2-12 and interpolates on aggregate rate. The rows are the issue's on-box
+    measurement of an unshared, correctly pinned card."""
+    from gittensor.validator.serving.scoring import decode_credit, expected_decode_tps
+
+    release = load_serving_loadout().primary
+    assert release.decode_per_request is not None
+    miner_measured = {1: 426.8, 2: 148.2, 3: 91.8, 4: 74.7, 5: 59.9, 6: 49.6, 8: 37.5}
+    for n, observed in miner_measured.items():
+        expected = expected_decode_tps(release.decode_per_request, n)
+        assert observed / expected >= 0.8, (n, observed, expected)  # inside the WAN tolerance: full credit
+        assert decode_credit(observed, expected) == 1.0
+    # and between the sparse tail points a queued stream is still expected at the last measured rate, not below it
+    assert expected_decode_tps(release.decode_per_request, 20) == pytest.approx(
+        (16 * 19.4 + (24 * 19.4 - 16 * 19.4) * 0.5) / 20
+    )
+    assert expected_decode_tps(release.decode_per_request, 64) == 19.5
+    # a card genuinely shared between two hotkeys still reads under the floor at 1 in flight
+    assert decode_credit(144.3, expected_decode_tps(release.decode_per_request, 1)) == 0.0

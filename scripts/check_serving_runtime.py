@@ -323,10 +323,15 @@ def speed_profile(base_url: str, model_id: str, max_tokens: int, timeout: float,
     single_tps = statistics.median(t for t, _ in single)
     probe_tps = statistics.median(aggregate)
     curve = {1: round(single_tps, 1), burst: round(statistics.median(per_request), 1)}
-    if burst != 6:  # a mid point so the validator's interpolation follows the real curve
-        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
-            r6 = list(pool.map(lambda m: _stream_once(base_url, model_id, m, max_tokens, timeout), prompts[:6]))
-        curve[6] = round(statistics.median(t / max(w - tt, 1e-3) for t, tt, w in r6), 1)
+    # Every step from 2 to 6 plus 8 and 12: the validator interpolates on aggregate rate between points, but the
+    # 1 -> 2 knee (a batch forms and the aggregate drops before it flattens) is not interpolable from either side,
+    # and 2-5 in flight is where every traffic burst spends its time (#1753).
+    for k in (2, 3, 4, 5, 6, 8, 12):
+        if k >= burst:
+            break
+        with concurrent.futures.ThreadPoolExecutor(max_workers=k) as pool:
+            rk = list(pool.map(lambda m: _stream_once(base_url, model_id, m, max_tokens, timeout), prompts[:k]))
+        curve[k] = round(statistics.median(t / max(w - tt, 1e-3) for t, tt, w in rk), 1)
     return {
         'single_stream_decode_tps': round(single_tps, 1),
         # what the release carries as speed.aggregate_decode_tps: one card's output tok/s under load

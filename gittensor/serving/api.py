@@ -34,7 +34,12 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from gittensor.constants import SERVING_GATEWAY_BUSY_RETRIES, SERVING_MAX_PROMPT_CHARS, SERVING_MAX_TOKENS
+from gittensor.constants import (
+    SERVING_CONTEXT_TOKENS_FALLBACK,
+    SERVING_GATEWAY_BUSY_RETRIES,
+    SERVING_MAX_PROMPT_CHARS,
+    SERVING_MAX_TOKENS,
+)
 from gittensor.serving.loadout import ServingLoadout, ServingRelease
 from gittensor.serving.state import (
     ReadyMiner,
@@ -43,6 +48,7 @@ from gittensor.serving.state import (
     ServingState,
     finite_or_none,
     is_busy_detail,
+    prompt_token_estimate,
 )
 from gittensor.serving.stream import SSE_DONE, Event, consume_stream, sse_event
 from gittensor.synapses import InferenceSynapse
@@ -135,7 +141,7 @@ def build_app(
         if body.get('n', 1) != 1:
             raise HTTPException(status_code=400, detail='n must be 1')
         if sum(len(m['content']) + len(m['role']) for m in messages) > SERVING_MAX_PROMPT_CHARS:
-            raise HTTPException(status_code=413, detail=f'prompt exceeds {SERVING_MAX_PROMPT_CHARS} characters')
+            raise HTTPException(status_code=413, detail=f'messages exceed {SERVING_MAX_PROMPT_CHARS} characters')
         wanted = body.get('model')
         try:  # `model` = a release_id (or a model_id: its first release); absent -> the primary release
             release = loadout.get(str(wanted)) if wanted else primary
@@ -148,7 +154,18 @@ def build_app(
             raise HTTPException(status_code=400, detail='max_tokens must be an integer')
         if max_tokens <= 0:
             raise HTTPException(status_code=400, detail='max_tokens must be positive')
-        max_tokens = min(max_tokens, SERVING_MAX_TOKENS)
+        # The prompt's limit is the release's context window, not a character count. Estimated here (~4 characters
+        # per token) and enforced exactly by the runtime; a prompt that cannot fit is OpenAI's 400 so agent SDKs
+        # trim history and retry, and a completion that would overrun the window is clamped to what is left.
+        context = release.context_tokens or SERVING_CONTEXT_TOKENS_FALLBACK
+        prompt_estimate = prompt_token_estimate(messages)
+        if prompt_estimate >= context:
+            raise HTTPException(
+                status_code=400,
+                detail=f"context_length_exceeded: this model's maximum context length is {context} tokens, "
+                f'and the messages alone are about {prompt_estimate} tokens',
+            )
+        max_tokens = min(max_tokens, SERVING_MAX_TOKENS, context - prompt_estimate)
         want_logprobs = bool(body.get('logprobs', False))
         want_stream = bool(body.get('stream', False))
         stream_options = body.get('stream_options')

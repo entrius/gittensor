@@ -28,7 +28,12 @@ from typing import Deque, Dict, List, Optional, Sequence, Set, Tuple
 
 import bittensor as bt
 
-from gittensor.constants import SERVING_READY_TTL_S, SERVING_REQUEST_LOG_SIZE, SERVING_SETTLEMENT_ROUNDS
+from gittensor.constants import (
+    SERVING_CHARS_PER_TOKEN_ESTIMATE,
+    SERVING_READY_TTL_S,
+    SERVING_REQUEST_LOG_SIZE,
+    SERVING_SETTLEMENT_ROUNDS,
+)
 from gittensor.serving.audit import AuditWindow
 
 
@@ -87,6 +92,13 @@ class RequestRecord:
     def __post_init__(self) -> None:
         for name in ('latency_ms', 'ttft_ms', 'decode_tps'):
             self.__dict__[name] = finite_or_none(getattr(self, name))
+
+
+def prompt_token_estimate(messages: Sequence[Dict[str, str]]) -> int:
+    """The validator's own count of a prompt's tokens (~4 characters each): the gateway's context check and the
+    speed credit's prefill allowance when the reference reported no count. Never the miner's number."""
+    chars = sum(len(m.get('content') or '') + len(m.get('role') or '') for m in messages)
+    return chars // SERVING_CHARS_PER_TOKEN_ESTIMATE
 
 
 def finite_or_none(value: Optional[float]) -> Optional[float]:

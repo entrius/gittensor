@@ -347,14 +347,20 @@ SERVING_BACKEND_CONCURRENCY = 16  # miner: concurrent backend generations (spark
 # the client gets a 429. Each busy leg is an immediate 403, so the tail cost is round trips, not generations.
 SERVING_GATEWAY_BUSY_RETRIES = 3
 SERVING_SEEN_NONCES = 10_000  # miner: replay guard size; covers many minutes of validator traffic
-SERVING_MAX_TOKENS = 1024  # hard cap per request (API and miner both enforce)
-# Gateway: total characters across a request's messages (~4 per token). A prompt past the release's context makes
-# the runtime answer 400 — not the miner's fault, but every such request used to land in its window as a miss, so
-# one key holder could take any miner off READY with a few oversized prompts. Sized from the blessed release on a
-# 5090 (2026-08-28: ctx 36864; TTFT 403 ms at 8.9k prompt tokens, 500 ms at ~11.5k, 1453 ms at 35.6k): ~10k tokens
-# keeps an honest prefill inside the full-credit TTFT band. A request the runtime still rejects is checked against
-# the reference before it counts.
-SERVING_MAX_PROMPT_CHARS = 40_000
+SERVING_MAX_TOKENS = 4096  # hard cap per request (API and miner both enforce): the runtime's own max_output_tokens
+# Gateway: total characters across a request's messages — a denial-of-service backstop only (~0.25 MB of text; the
+# whole context window is ~150k characters). The prompt's real limit is the release's context window, checked in
+# tokens at the door (SERVING_CONTEXT_TOKENS_FALLBACK / release.context_tokens, estimated at
+# SERVING_CHARS_PER_TOKEN_ESTIMATE) and enforced exactly by the runtime. This sat at 40k (~10k tokens) while two
+# things needed it: an honest prefill had to stay inside the full-credit TTFT band, and a runtime-rejected prompt
+# landed in the miner's window as a miss. The TTFT credit now allows for the prompt's prefill, and a
+# runtime-rejected request is checked against the reference before it counts, so neither holds.
+SERVING_MAX_PROMPT_CHARS = 262_144
+# The blessed release's context window in tokens, prompt and completion together, for a release without its own
+# `context_tokens` (sparkinfer 7498736 on a 5090, /v1/info: max_context 36864 = 32k prompt + 4k completion KV
+# pool). A request whose estimated prompt alone exceeds it is a 400 context_length_exceeded (OpenAI's shape, so
+# agent SDKs trim history and retry); one whose completion would overrun it has max_tokens clamped to what is left.
+SERVING_CONTEXT_TOKENS_FALLBACK = 36_864
 SERVING_DB_RETENTION_DAYS = 7  # validator: per-round serving rows older than this are pruned on each write
 SERVING_REQUEST_LOG_SIZE = 5_000  # in-memory ring of recent API/audit requests (telemetry)
 

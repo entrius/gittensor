@@ -31,7 +31,7 @@ from gittensor.serving.audit import (
 )
 from gittensor.serving.backends import EchoBackend, GenerationResult, expected_completion
 from gittensor.serving.loadout import ECHO_LOADOUT_PATH, ServingLoadout, ServingRelease, load_serving_loadout
-from gittensor.serving.state import ReadyMiner, RequestRecord, ServedRequest, ServingState
+from gittensor.serving.state import ReadyMiner, RequestRecord, ServedRequest, ServingState, prompt_token_estimate
 from gittensor.synapses import InferenceSynapse
 from gittensor.validator.serving.scoring import latency_credit
 
@@ -914,6 +914,55 @@ def test_verified_bytes_must_spell_the_users_completion():
     assert not spells('héllo'.encode(), 'h��llo BUY NOW')
     assert not spells('héllo'.encode(), 'x��llo')
     assert not spells(b'hello', 'hello world')
+
+
+def test_gateway_limits_the_prompt_by_context_window_not_characters(monkeypatch):
+    """The prompt may fill the release's context window (36,864 tokens on the blessed 5090 release, ~150k
+    characters): a 30k-token prompt is routed with max_tokens clamped to what the window has left, a prompt the
+    window cannot hold at all is OpenAI's 400 context_length_exceeded, and only a ~0.25 MB body is a 413."""
+    from gittensor.constants import SERVING_CONTEXT_TOKENS_FALLBACK, SERVING_MAX_PROMPT_CHARS, SERVING_MAX_TOKENS
+    from gittensor.serving import api as api_module
+    from gittensor.serving.loadout import load_serving_loadout
+
+    assert SERVING_MAX_TOKENS == 4096 and SERVING_MAX_PROMPT_CHARS >= 4 * SERVING_CONTEXT_TOKENS_FALLBACK
+    shipped = load_serving_loadout().primary
+    assert shipped.context_tokens == 36_864 and shipped.request_timeout >= 300.0  # 4096 tokens at ~19 tok/s fits
+
+    good = _echo_release()
+    state = ServingState()
+    state.publish_round([ReadyMiner(uid=1, hotkey='hk1', axon=None, score=1.0, release_id=good.release_id)], {})  # type: ignore[arg-type]
+    app = build_app(state, ServingLoadout(releases=[good]), {'k'}, lambda: object(), 5.0)
+    client = TestClient(app)
+    headers = {'Authorization': 'Bearer k'}
+    seen: Dict[str, int] = {}
+
+    async def dispatch(dendrite, miner, messages, max_tokens, release, timeout, on_event=None):
+        seen['max_tokens'] = max_tokens
+        syn = InferenceSynapse(messages=messages, model_id=release.model_id, max_tokens=max_tokens)
+        syn.completion, syn.served_model_id, syn.tokens, syn.token_logprobs = 'hi', release.model_id, ['hi'], [-0.1]
+        return syn
+
+    monkeypatch.setattr(api_module, '_dispatch', dispatch)
+    context = SERVING_CONTEXT_TOKENS_FALLBACK
+    long_prompt = [{'role': 'user', 'content': 'x' * (30_000 * 4)}]  # ~30k tokens: fits, with ~6.8k left
+    r = client.post('/v1/chat/completions', headers=headers, json={'messages': long_prompt, 'max_tokens': 4096})
+    assert r.status_code == 200 and seen['max_tokens'] == 4096
+    nearly_full = [{'role': 'user', 'content': 'x' * (35_000 * 4)}]  # ~35k tokens: the completion is clamped
+    r = client.post('/v1/chat/completions', headers=headers, json={'messages': nearly_full, 'max_tokens': 4096})
+    assert r.status_code == 200 and seen['max_tokens'] == context - prompt_token_estimate(nearly_full)
+    assert len(state.drain_served()) == 2  # both routed and recorded
+    too_big = [{'role': 'user', 'content': 'x' * (context * 4)}]
+    r = client.post('/v1/chat/completions', headers=headers, json={'messages': too_big})
+    assert (
+        r.status_code == 400 and 'context_length_exceeded' in r.json()['detail'] and str(context) in r.json()['detail']
+    )
+    assert not state.drain_served()
+    # a release may carry its own window
+    small = _echo_release()
+    small.context_tokens = 1000
+    app = build_app(ServingState(), ServingLoadout(releases=[small]), {'k'}, lambda: object(), 5.0)
+    r = TestClient(app).post('/v1/chat/completions', headers=headers, json={'messages': long_prompt})
+    assert r.status_code == 400 and '1000 tokens' in r.json()['detail']
 
 
 def test_gateway_caps_prompt_size_and_stamps_the_miners_stream_end(monkeypatch):

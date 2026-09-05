@@ -47,6 +47,7 @@ class ServingRelease:
     backend: str
     release_id: str = ''  # what the validator keys audits, quarantine and READY sets by; defaults to model_id
     max_tokens: int = 64
+    context_tokens: Optional[int] = None  # the runtime's context window, prompt + completion; None -> the constants
     end_of_turn_token_id: Optional[int] = None  # the model's end-of-turn id; forced to verify an early stop
     base_url: Optional[str] = None  # miner side: the runtime this miner serves from
     runtime_pin: Optional[str] = None
@@ -128,6 +129,7 @@ class ServingRelease:
             reference_url=raw.get('reference_url'),
             reference_api_key=raw.get('reference_api_key'),
             request_timeout=float(raw.get('request_timeout', 60.0)),
+            context_tokens=int(raw['context_tokens']) if raw.get('context_tokens') else None,
             decode_per_request={int(k): float(v) for k, v in (speed.get('decode_per_request') or {}).items()} or None,
             aggregate_decode_tps=_optional_float(speed.get('aggregate_decode_tps')),
             prefill_tps=_optional_float(speed.get('prefill_tps')),

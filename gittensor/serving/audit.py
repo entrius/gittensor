@@ -100,6 +100,9 @@ class AuditVerdict:
     positional_overlap: float = 0.0
     max_abs_logprob_diff: float = float('inf')
     hard: bool = False  # a wrong answer (bands failed with aligned lengths), not a miss
+    # The reference's own count of the prompt's tokens (teacher-forced scoring reports it); None when it did not.
+    # Speed credit allows for prefilling this many tokens, so the number must never come from the miner.
+    prompt_tokens: Optional[int] = None
 
     @property
     def value(self) -> float:
@@ -476,6 +479,8 @@ def verify_served(
     # there must be the end-of-turn, which is what makes an early stop the model's own decision and not the miner's.
     ref = reference.score_served(messages, completion, mine_ids)
     argmax, ref_lp = list(ref.get('argmax') or []), list(ref.get('logprobs') or [])
+    reported = (ref.get('usage') or {}).get('prompt_tokens')
+    prompt_tokens = int(reported) if isinstance(reported, int) and reported > 0 else None
     if appended:
         if len(argmax) == len(mine) + 1 and argmax[-1] not in end_of_turn:
             return AuditVerdict(False, 0.0, float('inf'), 'stopped early: the model would have continued', hard=True)
@@ -494,16 +499,19 @@ def verify_served(
             return AuditVerdict(False, 0.0, float('inf'), 'token ids do not spell the completion')
     case = AuditCase(messages=list(messages), max_tokens=len(mine), reference_tokens=argmax, reference_logprobs=ref_lp)
     if release is None:
-        return verify_response(case, mine, mine_lp, aligned=True)
-    return verify_response(
-        case,
-        mine,
-        mine_lp,
-        release.min_prefix_agreement,
-        release.max_mean_abs_logprob_diff,
-        release.max_abs_logprob_diff,
-        aligned=True,
-    )
+        verdict = verify_response(case, mine, mine_lp, aligned=True)
+    else:
+        verdict = verify_response(
+            case,
+            mine,
+            mine_lp,
+            release.min_prefix_agreement,
+            release.max_mean_abs_logprob_diff,
+            release.max_abs_logprob_diff,
+            aligned=True,
+        )
+    verdict.prompt_tokens = prompt_tokens
+    return verdict
 
 
 def spells(ref_bytes: bytes, completion: str) -> bool:

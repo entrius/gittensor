@@ -25,6 +25,7 @@ from typing import Dict, Optional, Sequence, Tuple
 from gittensor.classes import RequestSpeed
 from gittensor.constants import (
     SERVING_AGGREGATE_DECODE_TPS_FALLBACK,
+    SERVING_CHARS_PER_TOKEN_ESTIMATE,
     SERVING_DECODE_FLOOR_RATIO,
     SERVING_DECODE_MIN_TOKENS,
     SERVING_DECODE_PER_REQUEST_FALLBACK,
@@ -134,12 +135,32 @@ def decode_credit(
     return 0.0 if ratio < floor_ratio else min(1.0, ratio / tolerance_ratio)
 
 
-def request_speed(req: ServedRequest, release: ServingRelease) -> RequestSpeed:
-    """Speed of one verified served request: TTFT band × decode band (decode only when measurable)."""
+def prompt_token_estimate(messages: Sequence[Dict[str, str]]) -> int:
+    """The validator's own count of a prompt's tokens when the reference reported none: ~4 characters each."""
+    chars = sum(len(m.get('content') or '') + len(m.get('role') or '') for m in messages)
+    return chars // SERVING_CHARS_PER_TOKEN_ESTIMATE
+
+
+def prefill_allowance_ms(prompt_tokens: int, release: ServingRelease) -> float:
+    """Time one honest card needs to prefill ``prompt_tokens`` on ``release``. Subtracted from the observed TTFT
+    before the latency bands apply, so a 30k-token prompt that took 1.4 s to first token reads as a fast card, not a
+    slow one; the bands then measure what they were set for — network, queue and the card's own overhead."""
+    return 1000.0 * max(prompt_tokens, 0) / prefill_tps(release)
+
+
+def request_speed(req: ServedRequest, release: ServingRelease, prompt_tokens: Optional[int] = None) -> RequestSpeed:
+    """Speed of one verified served request: TTFT band × decode band (decode only when measurable).
+
+    ``prompt_tokens`` is the reference's count of the prompt (``AuditVerdict.prompt_tokens``); None falls back to
+    the validator's own estimate from the prompt text. The miner-reported ``req.prompt_tokens`` is deliberately not
+    used here: a miner could inflate it to buy TTFT slack.
+    """
     speed_ms = req.ttft_ms if req.ttft_ms is not None else req.latency_ms
     if speed_ms is None:
         return RequestSpeed(credit=0.0)
-    credit = latency_credit(speed_ms, release.ttft_full_ms, release.ttft_zero_ms)
+    n = prompt_tokens if prompt_tokens is not None else prompt_token_estimate(req.messages)
+    residual_ms = max(0.0, speed_ms - prefill_allowance_ms(n, release))
+    credit = latency_credit(residual_ms, release.ttft_full_ms, release.ttft_zero_ms)
     tokens = len(req.tokens or [])
     decode_tps = None
     if (

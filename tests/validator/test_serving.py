@@ -1729,8 +1729,60 @@ def test_latency_credit_uses_time_to_first_token_not_total_latency(monkeypatch):
     state.enqueue_served(prompt)
     state.enqueue_served(slow)
     scores = _round(state, dendrite, [(1, 'hk1', axon), (2, 'hk2', axon)], good, monkeypatch)
-    assert _weights(state) == {1: 1.0, 2: pytest.approx(0.5)}
+    assert _weights(state) == {
+        1: 1.0,
+        2: pytest.approx(0.5, abs=1e-3),
+    }  # a 16-char prompt earns a sub-ms prefill allowance
     assert scores['hk1'] == scores['hk2'] == pytest.approx(_pay(8, good))  # speed routes; tokens pay
+
+
+def test_ttft_credit_allows_for_the_prompts_own_prefill():
+    """A 30k-token prompt takes an honest 5090 ~1.25 s to prefill, so a 1.4 s TTFT on it is a fast card; the same
+    1.4 s on a 100-token prompt is a slow one. The allowance is sized by the reference's token count, never the
+    miner's; without a reference count the validator estimates from the prompt text."""
+    from gittensor.validator.serving.scoring import (
+        prefill_allowance_ms,
+        prompt_token_estimate,
+        request_speed,
+    )
+
+    release = _echo_release()
+    release.prefill_tps = 24_000.0
+    assert prefill_allowance_ms(30_000, release) == pytest.approx(1250.0)
+    assert prefill_allowance_ms(0, release) == 0.0 and prefill_allowance_ms(-5, release) == 0.0
+
+    req = _served(1, release, latency_ms=1500.0)
+    req.ttft_ms = 1400.0
+    assert request_speed(req, release, prompt_tokens=30_000).credit == 1.0  # 150 ms residual: inside FULL
+    assert request_speed(req, release, prompt_tokens=100).credit == pytest.approx(0.1, abs=0.01)  # ~1.4 s residual
+    # the miner's own claim buys nothing: only the reference's count (or the validator's estimate) enters
+    req.prompt_tokens = 1_000_000
+    assert request_speed(req, release, prompt_tokens=100).credit == pytest.approx(0.1, abs=0.01)
+    # no reference count: ~4 characters per token from the prompt text
+    long = _served(1, release, latency_ms=1500.0)
+    long.ttft_ms = 1400.0
+    long.messages = [{'role': 'user', 'content': 'x' * 120_000}]  # ~30k tokens
+    assert prompt_token_estimate(long.messages) == 30_001
+    assert request_speed(long, release).credit == 1.0
+    assert request_speed(req, release).credit == pytest.approx(0.1, abs=0.01)  # a 16-char prompt: no allowance
+
+
+def test_verify_served_carries_the_references_prompt_token_count():
+    """Teacher-forced scoring reports the prompt's token count; the verdict carries it for the speed credit and
+    reads None when the reference reports nothing (echo, bank)."""
+    from gittensor.serving.audit import EchoReference, verify_served
+
+    good = _echo_release()
+    req = _served(1, good)
+
+    class Counting(EchoReference):
+        def score_served(self, messages, completion, token_ids=None):
+            return {**super().score_served(messages, completion, token_ids), 'usage': {'prompt_tokens': 4321}}
+
+    plain = verify_served(EchoReference(good), req.messages, req.completion, req.tokens, req.token_logprobs)
+    assert plain.passed and plain.prompt_tokens is None
+    counted = verify_served(Counting(good), req.messages, req.completion, req.tokens, req.token_logprobs)
+    assert counted.passed and counted.prompt_tokens == 4321
 
 
 def test_ready_miner_misses_are_logged_with_a_reason(monkeypatch):
@@ -1829,7 +1881,7 @@ def test_decode_speed_prices_served_requests_against_the_blessing_curve():
     short = req(8, 100.0, 5_000.0)  # too few tokens to measure decode: TTFT band only
     assert request_speed(short, release).credit == 1.0 and request_speed(short, release).decode_tps is None
     slow_ttft = req(64, 1_000.0, 1_000.0 + 64 / 440.0 * 1000.0)
-    assert request_speed(slow_ttft, release).credit == pytest.approx(0.5)
+    assert request_speed(slow_ttft, release).credit == pytest.approx(0.5, abs=1e-3)
 
 
 def test_gateway_and_baseline_record_inflight_at_dispatch(monkeypatch):

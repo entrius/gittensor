@@ -3449,3 +3449,185 @@ def test_shipped_curve_pays_an_honest_card_in_full_at_2_to_5_concurrent():
     assert expected_decode_tps(release.decode_per_request, 64) == 19.5
     # a card genuinely shared between two hotkeys still reads under the floor at 1 in flight
     assert decode_credit(144.3, expected_decode_tps(release.decode_per_request, 1)) == 0.0
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Two blessed releases at once (serving/multi-release): a miner runs one, the validator learns which and audits,
+# pays and routes it for that release only.
+
+
+def _two_release_dendrite(by_axon: Dict[int, ServingRelease]):
+    """Fake streaming dendrite for miners on different releases: an axon echoes its own release's completion when
+    asked for it and refuses like ``blacklist_caller`` does when asked for another. Counts calls per axon."""
+    from gittensor.serving.stream import result_to_sse
+
+    calls: Dict[int, list] = {}
+
+    async def call_stream(target_axon, synapse, timeout, deserialize):
+        mine = by_axon[id(target_axon)]
+        calls.setdefault(id(target_axon), []).append(synapse.release_id)
+        final = synapse.model_copy()
+        if synapse.release_id and synapse.release_id != mine.release_id:
+            final.dendrite.status_code = 403
+            final.dendrite.status_message = f'serving release {mine.release_id}, not {synapse.release_id}'
+            yield final
+            return
+        ref = expected_completion(synapse.messages, synapse.max_tokens, mine.model_id)
+        ref.model_id = mine.model_id
+        for chunk in result_to_sse(ref, 'chatcmpl-miner', 0, logprobs=True):
+            yield chunk
+        final.dendrite.process_time = 0.05
+        yield final
+
+    return SimpleNamespace(call_stream=call_stream), calls
+
+
+def test_refused_release_parses_the_miners_own_refusal():
+    from gittensor.validator.serving.forward import refused_release
+
+    assert refused_release('Forbidden. Key is blacklisted: serving release b-v0, not a-v0') == 'b-v0'
+    assert refused_release('busy: all backend slots in use') is None
+    assert refused_release(None) is None
+
+
+def test_baseline_discovers_a_miners_release_from_its_refusal_and_retargets():
+    """Round 1: every undeclared miner gets primary prompts; the second-release miner refuses naming its release,
+    which is recorded as discovery (no miss). Round 2: it is prompted for its own release and serves."""
+    from gittensor.validator.serving import forward as fwd
+
+    a = ServingRelease(model_id='echo-a', backend='echo', max_tokens=8, release_id='a-v0')
+    b = ServingRelease(model_id='echo-b', backend='echo', max_tokens=8, release_id='b-v0')
+    loadout = ServingLoadout(releases=[a, b])
+    ax1, ax2, ax3 = (SimpleNamespace(is_serving=True) for _ in range(3))
+    dendrite, calls = _two_release_dendrite(
+        {id(ax1): a, id(ax2): b, id(ax3): ServingRelease(model_id='x', backend='echo', release_id='not-blessed')}
+    )
+    serving = [(1, 'hk1', ax1), (2, 'hk2', ax2), (3, 'hk3', ax3)]
+    state = ServingState()
+
+    sent = asyncio.run(fwd.baseline_round(state, dendrite, serving, loadout, 0.0, per_miner=1, rng=random.Random(1)))  # type: ignore[arg-type]
+    assert sent == 3 and calls[id(ax1)] == ['a-v0'] and calls[id(ax2)] == ['a-v0'] and calls[id(ax3)] == ['a-v0']
+    assert state.miner_release == {'hk1': 'a-v0', 'hk2': 'b-v0'}  # hk3 named a release we do not bless
+    served = state.drain_served()
+    assert {req.hotkey: (req.ok, req.release_id) for req in served} == {'hk1': (True, 'a-v0'), 'hk3': (False, 'a-v0')}
+    assert 'not-blessed' in served[-1].detail  # the unblessed refusal is that miner's miss, nothing is hidden
+
+    asyncio.run(fwd.baseline_round(state, dendrite, serving, loadout, 0.0, per_miner=1, rng=random.Random(2)))  # type: ignore[arg-type]
+    assert calls[id(ax2)] == ['a-v0', 'b-v0']
+    assert {(req.hotkey, req.ok, req.release_id) for req in state.drain_served()} >= {
+        ('hk2', True, 'b-v0'),
+        ('hk1', True, 'a-v0'),
+    }
+
+    # a miner that switches releases is rediscovered from its next refusal, not stranded on the stale mapping
+    by_axon = {id(ax1): b, id(ax2): b, id(ax3): a}
+    dendrite2, calls2 = _two_release_dendrite(by_axon)
+    asyncio.run(fwd.baseline_round(state, dendrite2, serving, loadout, 0.0, per_miner=1, rng=random.Random(3)))  # type: ignore[arg-type]
+    assert state.miner_release == {'hk1': 'b-v0', 'hk2': 'b-v0', 'hk3': 'a-v0'}
+    assert all(req.ok for req in state.drain_served())  # discovery rounds carry no misses
+
+    # release_for falls back to the primary when a declared release leaves the loadout
+    assert fwd.release_for(state, ServingLoadout(releases=[a]), 'hk2') is a and 'hk2' not in state.miner_release
+
+
+def test_audit_round_settles_two_live_releases_independently(monkeypatch):
+    """Miners on two blessed releases in one round: each is verified against its own reference, reported and paid
+    under its own release, READY for it alone; an undeclared miner sits in probation on the primary; a served
+    completion for a release declares the miner for it without a baseline refusal."""
+    from gittensor.validator.serving import forward as fwd
+
+    a = ServingRelease(model_id='echo-a', backend='echo', max_tokens=8, release_id='a-v0')
+    b = ServingRelease(model_id='echo-b', backend='echo', max_tokens=8, release_id='b-v0', request_timeout=123.0)
+    loadout = ServingLoadout(releases=[a, b])
+    ax1, ax2, ax3 = (SimpleNamespace(is_serving=True) for _ in range(3))
+    dendrite, _ = _two_release_dendrite({id(ax1): a, id(ax2): b, id(ax3): a})
+    state = ServingState(settlement_rounds=1)
+    state.miner_release['hk1'] = 'a-v0'  # hk2 is undeclared: its served completion for b-v0 declares it below
+    for uid, release in ((1, a), (2, b), (1, a), (2, b)):
+        req = _served(uid, release)
+        req.release_id = release.release_id  # as the gateway and baseline stamp it
+        state.enqueue_served(req)
+
+    scores = asyncio.run(
+        fwd.audit_round(state, dendrite, [(1, 'hk1', ax1), (2, 'hk2', ax2), (3, 'hk3', ax3)], loadout, round_s=ROUND_S)  # type: ignore[arg-type]
+    )
+    assert scores == {'hk1': pytest.approx(_pay(16, a)), 'hk2': pytest.approx(_pay(16, b)), 'hk3': 0.0}
+    assert state.miner_release == {'hk1': 'a-v0', 'hk2': 'b-v0'}
+    ready = {m.uid: m.release_id for m in state.ready_miners()}
+    assert ready == {1: 'a-v0', 2: 'b-v0'}
+    windows = state.last_round['windows']
+    assert windows[1]['release_id'] == 'a-v0' and windows[1]['status'] == 'ready' and windows[1]['tokens'] == 16
+    assert windows[2]['release_id'] == 'b-v0' and windows[2]['status'] == 'ready' and windows[2]['tokens'] == 16
+    assert windows[3]['release_id'] == 'a-v0' and windows[3]['status'] == 'probation'  # undeclared -> primary
+    assert state.audits.verdict('hk2', 'a-v0').n_audits == 0  # nothing of hk2's landed in the primary's window
+    # routing: each release acquires only its own miner; probation for the primary holds the undeclared one
+    assert state.acquire('a-v0').uid == 1 and state.acquire('b-v0').uid == 2  # type: ignore[union-attr]
+    assert state.acquire('a-v0', probation=True).uid == 3  # type: ignore[union-attr]
+    # the round's per-miner DB rows carry each miner's own release and rate
+    import datetime as dt
+
+    from gittensor.validator.serving.persist import round_rows
+
+    now = dt.datetime.now(dt.timezone.utc)
+    summary, miners = round_rows('vali', now, state.last_round, state.settled_scores(), None, a)
+    by_uid = {row[2]: row for row in miners}
+    assert by_uid[1][5] == 'a-v0' and by_uid[2][5] == 'b-v0' and by_uid[3][5] == 'a-v0'
+
+
+def test_serving_store_round_trips_miner_releases(tmp_path):
+    from gittensor.serving.store import ServingStore
+
+    store = ServingStore(tmp_path / 'serving.db')
+    state = ServingState()
+    state.miner_release = {'hk1': 'a-v0', 'hk2': 'b-v0'}
+    store.save(state)
+    assert store.load(ServingState()).miner_release == {'hk1': 'a-v0', 'hk2': 'b-v0'}
+    state.miner_release.pop('hk2')
+    store.save(state)
+    assert store.load(ServingState()).miner_release == {'hk1': 'a-v0'}  # replaced, never appended
+
+
+def test_seeded_probation_uses_the_miners_known_release(monkeypatch):
+    from gittensor.validator.serving import forward as fwd
+
+    a = ServingRelease(model_id='echo-a', backend='echo', max_tokens=8, release_id='a-v0')
+    b = ServingRelease(model_id='echo-b', backend='echo', max_tokens=8, release_id='b-v0')
+    state = ServingState()
+    state.last_round_ts = time.time()
+    state.miner_release['hk2'] = 'b-v0'
+    ax1, ax2 = SimpleNamespace(is_serving=True), SimpleNamespace(is_serving=True)
+    monkeypatch.setattr(fwd, 'get_serving_axons', lambda v: [(1, 'hk1', ax1), (2, 'hk2', ax2)])
+    fwd.seed_ready_from_store(SimpleNamespace(), state, ServingLoadout(releases=[a, b]))  # type: ignore[arg-type]
+    assert state.acquire('a-v0', probation=True).uid == 1 and state.acquire('b-v0', probation=True).uid == 2  # type: ignore[union-attr]
+
+
+def test_loadout_env_overrides_target_each_release(monkeypatch, tmp_path):
+    """SERVING_REFERENCE_URL names the primary's reference; SERVING_REFERENCE_URL__<RELEASE_ID> a second release's;
+    the miner-side SERVING_BASE_URL applies to the release named by SERVING_RELEASE."""
+    from gittensor.serving.loadout import env_suffix
+
+    path = tmp_path / 'loadout.json'
+    path.write_text(
+        json.dumps(
+            {
+                'releases': [
+                    {'model_id': 'echo-a', 'backend': 'echo', 'release_id': 'a-v0'},
+                    {'model_id': 'echo-b', 'backend': 'echo', 'release_id': 'qwen3.8-27b-nvfp4-sparkinfer-abc'},
+                ]
+            }
+        )
+    )
+    assert env_suffix('qwen3.8-27b-nvfp4-sparkinfer-abc') == 'QWEN3_8_27B_NVFP4_SPARKINFER_ABC'
+    monkeypatch.setenv('SERVING_REFERENCE_URL', 'http://ref-a:8080')
+    monkeypatch.setenv('SERVING_REFERENCE_URL__QWEN3_8_27B_NVFP4_SPARKINFER_ABC', 'http://ref-b:8080')
+    monkeypatch.setenv('SERVING_REFERENCE_API_KEY__QWEN3_8_27B_NVFP4_SPARKINFER_ABC', 'kb')
+    monkeypatch.setenv('SERVING_RELEASE', 'qwen3.8-27b-nvfp4-sparkinfer-abc')
+    monkeypatch.setenv('SERVING_BASE_URL', 'http://runtime:8080')
+    a, b = load_serving_loadout(path).releases
+    assert a.reference_url == 'http://ref-a:8080' and a.attest_reference_url == 'http://ref-a:8081'
+    assert a.reference_api_key is None and a.base_url is None
+    assert b.reference_url == 'http://ref-b:8080' and b.attest_reference_url == 'http://ref-b:8081'
+    assert b.reference_api_key == 'kb' and b.base_url == 'http://runtime:8080' and b.attest_url == 'http://runtime:8081'
+    monkeypatch.delenv('SERVING_RELEASE')
+    a, b = load_serving_loadout(path).releases
+    assert a.base_url == 'http://runtime:8080' and b.base_url is None  # no SERVING_RELEASE: the primary, as before

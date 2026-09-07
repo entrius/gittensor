@@ -267,7 +267,7 @@ def build_app(
                 async def run(miner=miner, relay=relay, queue=queue) -> Optional[InferenceSynapse]:
                     try:
                         return await _dispatch(
-                            get_dendrite(), miner, messages, max_tokens, release, request_timeout, relay
+                            get_dendrite(), miner, messages, max_tokens, release, release.request_timeout, relay
                         )
                     finally:
                         await queue.put(_END)
@@ -305,7 +305,7 @@ def build_app(
                 return StreamingResponse(body_iter(), media_type='text/event-stream')
 
             try:
-                result = await _dispatch(get_dendrite(), miner, messages, max_tokens, release, request_timeout)
+                result = await _dispatch(get_dendrite(), miner, messages, max_tokens, release, release.request_timeout)
             except Exception:
                 result = None
             if _busy_refused(result):  # refused at capacity: try elsewhere

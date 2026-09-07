@@ -24,6 +24,7 @@ traffic-driven schedule (Gepetto-lite) is the planned upgrade path.
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -192,6 +193,11 @@ class ServingLoadout:
         raise KeyError(f'release {release_id!r} not in serving loadout: {[r.release_id for r in self.releases]}')
 
 
+def env_suffix(release_id: str) -> str:
+    """``qwen3.8-27b-nvfp4`` -> ``QWEN3_8_27B_NVFP4``: how a non-primary release is named in env overrides."""
+    return re.sub(r'[^A-Za-z0-9]', '_', release_id).upper()
+
+
 def resolve_loadout_path(path: Optional[Path] = None) -> Path:
     if path is not None:
         return path
@@ -206,26 +212,37 @@ def load_serving_loadout(path: Optional[Path] = None) -> ServingLoadout:
     entries = raw['releases'] if isinstance(raw, dict) and 'releases' in raw else [raw]
     loadout = ServingLoadout(releases=[ServingRelease.from_dict(entry) for entry in entries])
 
+    # Miner side: the runtime/sidecar overrides apply to the release this miner serves (SERVING_RELEASE), else the
+    # primary. Validator side: SERVING_REFERENCE_URL & co. name the primary's reference; every other release's is
+    # SERVING_REFERENCE_URL__<RELEASE_ID> (release_id upper-cased, non-alphanumerics as '_'), same for the api keys
+    # and the attest sidecar, so a validator hosts one reference per release without committing its endpoints.
+    wanted = os.getenv('SERVING_RELEASE')
+    try:
+        mine = loadout.get(wanted) if wanted else loadout.primary
+    except KeyError:
+        mine = loadout.primary
     base_override = os.getenv('SERVING_BASE_URL')
     if base_override:
-        loadout.primary.base_url = base_override
-        loadout.primary.attest_url = _sidecar_url(base_override)
+        mine.base_url = base_override
+        mine.attest_url = _sidecar_url(base_override)
     attest_override = os.getenv('SERVING_ATTEST_URL')
     if attest_override:
-        loadout.primary.attest_url = attest_override
+        mine.attest_url = attest_override
 
-    reference_override = os.getenv('SERVING_REFERENCE_URL')
-    if reference_override:
-        loadout.primary.reference_url = reference_override
-        loadout.primary.attest_reference_url = os.getenv('SERVING_ATTEST_REFERENCE_URL') or _sidecar_url(
-            reference_override
-        )
-    key_override = os.getenv('SERVING_REFERENCE_API_KEY')
-    if key_override:
-        loadout.primary.reference_api_key = key_override
-    attest_key_override = os.getenv('SERVING_ATTEST_REFERENCE_API_KEY')
-    if attest_key_override:
-        loadout.primary.attest_reference_api_key = attest_key_override
+    for release in loadout.releases:
+        suffix = '' if release is loadout.primary else '__' + env_suffix(release.release_id)
+        reference_override = os.getenv('SERVING_REFERENCE_URL' + suffix)
+        if reference_override:
+            release.reference_url = reference_override
+            release.attest_reference_url = os.getenv('SERVING_ATTEST_REFERENCE_URL' + suffix) or _sidecar_url(
+                reference_override
+            )
+        key_override = os.getenv('SERVING_REFERENCE_API_KEY' + suffix)
+        if key_override:
+            release.reference_api_key = key_override
+        attest_key_override = os.getenv('SERVING_ATTEST_REFERENCE_API_KEY' + suffix)
+        if attest_key_override:
+            release.attest_reference_api_key = attest_key_override
 
     lines = [
         f'Serving release {release.release_id}: model={release.model_id} backend={release.backend} pin={release.runtime_pin} '

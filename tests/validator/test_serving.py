@@ -125,7 +125,7 @@ def test_live_reference_wins_over_bank(monkeypatch):
     assert isinstance(ref, audit.LiveReference)
     captured = {}
 
-    def fake_greedy(base_url, model_id, messages, max_tokens, timeout, api_key=None):
+    def fake_greedy(base_url, model_id, messages, max_tokens, timeout, api_key=None, **kw):
         captured['base_url'] = base_url
         captured['api_key'] = api_key
         return {
@@ -3631,3 +3631,60 @@ def test_loadout_env_overrides_target_each_release(monkeypatch, tmp_path):
     monkeypatch.delenv('SERVING_RELEASE')
     a, b = load_serving_loadout(path).releases
     assert a.base_url == 'http://runtime:8080' and b.base_url is None  # no SERVING_RELEASE: the primary, as before
+
+
+def test_release_pins_thinking_and_a_model_directory(monkeypatch):
+    """A release's enable_thinking rides on every request the miner, the reference and the checker send, so served
+    text and its teacher-forced score template identically; a model-directory artifact is pinned by HF revision
+    plus per-shard digests and surfaces on /v1/models for the release card."""
+    from gittensor.serving import probe
+    from gittensor.serving.audit import LiveReference
+    from gittensor.serving.backends import OpenAICompatBackend
+
+    raw = {
+        'model_id': 'qwen3.8-27b',
+        'backend': 'openai-compat',
+        'base_url': 'http://runtime:8080',
+        'reference_url': 'http://ref:8080',
+        'enable_thinking': False,
+        'model_dir': {'repo': 'org/Model-NVFP4', 'revision': 'abc123', 'sha256': 'a.safetensors=00,b.safetensors=11'},
+    }
+    release = ServingRelease.from_dict(raw)
+    assert release.enable_thinking is False and release.model_sha256 is None
+    assert (release.model_dir_repo, release.model_dir_revision) == ('org/Model-NVFP4', 'abc123')
+    assert ServingRelease.from_dict({'model_id': 'x', 'backend': 'echo'}).enable_thinking is None
+
+    body = OpenAICompatBackend(release)._body(MSGS, 8, logprobs=True, stream=False)
+    assert body['enable_thinking'] is False
+    assert 'enable_thinking' not in OpenAICompatBackend(_echo_release_openai())._body(MSGS, 8, False, False)
+
+    sent = []
+
+    class _R:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                'choices': [{'message': {'content': 'x'}, 'logprobs': {'content': [{'token': 'x', 'logprob': -0.1}]}}],
+                'usage': {'completion_tokens': 1},
+                'tokens': ['x'],
+                'logprobs': [-0.1],
+            }
+
+    monkeypatch.setattr(probe.requests, 'post', lambda url, **kw: (sent.append((url, kw['json'])), _R())[1])
+    ref = LiveReference(release)
+    ref.case_for(MSGS)
+    ref.score(MSGS, 'x')
+    assert [u.rsplit('/', 1)[1] for u, _ in sent] == ['completions', 'score']
+    assert all(j['enable_thinking'] is False for _, j in sent)
+
+    with TestClient(build_app(ServingState(), ServingLoadout(releases=[release]), {'k'}, lambda: None, 60.0)) as c:
+        model = c.get('/v1/models', headers={'Authorization': 'Bearer k'}).json()['data'][0]
+    assert model['model_dir'] == raw['model_dir'] and model['model_sha256'] is None
+
+
+def _echo_release_openai() -> ServingRelease:
+    return ServingRelease(model_id='echo-v0', backend='openai-compat', base_url='http://runtime:8080')

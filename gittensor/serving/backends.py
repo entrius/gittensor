@@ -122,6 +122,7 @@ class OpenAICompatBackend:
         self.model_id = release.model_id
         self.base_url = release.base_url.rstrip('/')
         self.timeout = release.request_timeout
+        self.enable_thinking = release.enable_thinking
 
     def _body(self, messages: List[Message], max_tokens: int, logprobs: bool, stream: bool) -> Dict:
         body: Dict = {
@@ -136,6 +137,8 @@ class OpenAICompatBackend:
         if logprobs:
             body['logprobs'] = True
             body['top_logprobs'] = 1
+        if self.enable_thinking is not None:
+            body['enable_thinking'] = self.enable_thinking
         return body
 
     def stream(self, messages: List[Message], max_tokens: int, logprobs: bool = False) -> Iterator[bytes]:

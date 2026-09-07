@@ -55,12 +55,22 @@ class ServingRelease:
     runtime_image: Optional[str] = None  # the blessed image by digest (entrius/sparkinfer:<tag>@sha256:...)
     model_sha256: Optional[str] = None  # digest of the model file; runtime_pin + model_sha256 = the release
     model_file: Optional[str] = None  # HF path of the model file, informational (the digest is what is enforced)
+    # A release whose artifact is a Hugging Face model DIRECTORY (compressed-tensors NVFP4/FP8 safetensors) instead of
+    # one GGUF: the repo, the commit it is pinned at (HF repos are mutable) and "file=sha256,..." for its weight shards.
+    # docker/sparkinfer-entrypoint.sh fetches and verifies exactly this; model_sha256 is then None.
+    model_dir_repo: Optional[str] = None
+    model_dir_revision: Optional[str] = None
+    model_dir_sha256: Optional[str] = None
     audit_bank: Optional[str] = None  # validator side: snapshot reference, filename under weights/
     reference_url: Optional[str] = (
         None  # validator side: live reference runtime (own GPU or a rented one); wins over audit_bank
     )
     reference_api_key: Optional[str] = None  # bearer for a remote reference (sparkinfer --api-key)
     request_timeout: float = 60.0
+    # Whether the runtime renders the chat template with thinking on (None = the runtime's default). A hybrid-thinking
+    # model (Qwen3.8) thinks by default; a release that serves answers, not reasoning, pins False and the miner,
+    # the reference and the checker all send it, so served text and its teacher-forced score template identically.
+    enable_thinking: Optional[bool] = None
     # Speed of one honest card on this exact runtime, measured at blessing time (scripts/check_serving_runtime.py
     # --speed-json on the conformance GPU) and written by the pin-bump PR. The validator credits speed against the
     # curve and prices tokens against the aggregate, so the "one card" bar tracks the runtime as it gets faster and
@@ -113,6 +123,7 @@ class ServingRelease:
         speed = raw.get('speed') or {}
         attest = raw.get('attest') or {}
         audit = raw.get('audit') or {}
+        model_dir = raw.get('model_dir') or {}
         return cls(
             model_id=raw['model_id'],
             backend=raw['backend'],
@@ -126,10 +137,14 @@ class ServingRelease:
             runtime_image=raw.get('runtime_image'),
             model_file=raw.get('model_file'),
             model_sha256=raw.get('model_sha256'),
+            model_dir_repo=model_dir.get('repo'),
+            model_dir_revision=model_dir.get('revision'),
+            model_dir_sha256=model_dir.get('sha256'),
             audit_bank=raw.get('audit_bank'),
             reference_url=raw.get('reference_url'),
             reference_api_key=raw.get('reference_api_key'),
             request_timeout=float(raw.get('request_timeout', 60.0)),
+            enable_thinking=bool(raw['enable_thinking']) if raw.get('enable_thinking') is not None else None,
             context_tokens=int(raw['context_tokens']) if raw.get('context_tokens') else None,
             decode_per_request={int(k): float(v) for k, v in (speed.get('decode_per_request') or {}).items()} or None,
             aggregate_decode_tps=_optional_float(speed.get('aggregate_decode_tps')),

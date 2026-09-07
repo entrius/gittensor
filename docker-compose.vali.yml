@@ -43,8 +43,17 @@ services:
     restart: unless-stopped
     profiles: ["reference"]
     environment:
-      # model_sha256 from the release in serving_loadout.json (overrides upstream's reference.lock pin)
+      # The release's artifact, from serving_loadout.json: a GGUF (model_sha256) or a pinned Hugging Face model
+      # directory (model_dir.repo / revision / sha256) — docker/sparkinfer-entrypoint.sh. Same values a miner runs.
       MODEL_SHA256: ${SPARKINFER_MODEL_SHA256:-}
+      MODEL_REPO: ${SPARKINFER_MODEL_REPO:-}
+      MODEL_FILE: ${SPARKINFER_MODEL_FILE:-}
+      MODEL_DIR_REPO: ${SPARKINFER_MODEL_DIR_REPO:-}
+      MODEL_DIR_REVISION: ${SPARKINFER_MODEL_DIR_REVISION:-}
+      MODEL_DIR_SHA256: ${SPARKINFER_MODEL_DIR_SHA256:-}
+      TOK_REPO: ${SPARKINFER_TOK_REPO:-}
+      MODEL_NAME: ${SPARKINFER_MODEL_NAME:-}
+      CTX: ${SPARKINFER_CTX:-}
       # already baked into the image; repeated here so nobody turns it off by accident (contract D1)
       SPARKINFER_DETERMINISTIC: "1"
     deploy:

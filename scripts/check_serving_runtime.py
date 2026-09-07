@@ -6,7 +6,7 @@
 
 Point it at a running runtime and it exercises every MUST/SHOULD in the contract:
 
-    uv run python scripts/check_serving_runtime.py --base-url http://127.0.0.1:8080 --model-id qwen3.6-35b-a3b
+    uv run python scripts/check_serving_runtime.py --base-url http://127.0.0.1:8080 --model-id qwen3.8-27b
 
 Prints PASS/FAIL/WARN per check, the measured greedy-stability distribution (D1) and whether the
 server 429s under overload instead of queueing (R6). Exit code 1 if any MUST fails. Runtime
@@ -57,6 +57,7 @@ def get_json(url: str, timeout: float, api_key: Optional[str] = None) -> Tuple[O
 
 
 API_KEY: Optional[str] = None
+THINKING: Optional[bool] = None  # --thinking on|off: sent as `enable_thinking` on every request, as the release will
 
 
 def chat(base_url: str, body: Dict, timeout: float) -> requests.Response:
@@ -91,6 +92,7 @@ def check_completion_shape(rep: Report, base_url: str, model_id: str, max_tokens
         'messages': [{'role': 'user', 'content': 'Explain TCP congestion control in two sentences.'}],
         'max_tokens': max_tokens,
         'temperature': 0,
+        **({'enable_thinking': THINKING} if THINKING is not None else {}),
         'stream': False,
         'logprobs': True,
         'top_logprobs': 1,
@@ -182,7 +184,9 @@ def check_score(rep: Report, base_url: str, model_id: str, max_tokens: int, time
     messages = make_prompts(1, seed=11)[0]
     gen = greedy(base_url, model_id, messages, max_tokens, timeout, API_KEY)
     try:
-        sc = score(base_url, model_id, messages, gen['reference_completion'], timeout, API_KEY)
+        sc = score(
+            base_url, model_id, messages, gen['reference_completion'], timeout, API_KEY, enable_thinking=THINKING
+        )
     except requests.HTTPError as e:
         rep.add('R8 POST /v1/score', MUST, False, f'HTTP {e.response.status_code if e.response else "?"}')
         return
@@ -231,6 +235,7 @@ def check_overload(rep: Report, base_url: str, model_id: str, parallel: int, max
         'messages': [{'role': 'user', 'content': 'Write a long essay about the history of computing.'}],
         'max_tokens': max_tokens,
         'temperature': 0,
+        **({'enable_thinking': THINKING} if THINKING is not None else {}),
         'stream': False,
     }
 
@@ -273,6 +278,7 @@ def _stream_once(base_url: str, model_id: str, messages, max_tokens: int, timeou
         'messages': messages,
         'max_tokens': max_tokens,
         'temperature': 0,
+        **({'enable_thinking': THINKING} if THINKING is not None else {}),
         'stream': True,
         'stream_options': {'include_usage': True},
     }
@@ -302,6 +308,7 @@ def _prefill_once(base_url: str, model_id: str, messages, timeout: float) -> Tup
         'messages': messages,
         'max_tokens': 1,
         'temperature': 0,
+        **({'enable_thinking': THINKING} if THINKING is not None else {}),
         'stream': True,
         'stream_options': {'include_usage': True},
     }
@@ -459,6 +466,12 @@ def main() -> int:
     )
     ap.add_argument('--overload-max-tokens', type=int, default=512)
     ap.add_argument('--api-key', default=None, help='bearer for a remote runtime (sparkinfer --api-key)')
+    ap.add_argument(
+        '--thinking',
+        choices=('runtime', 'on', 'off'),
+        default='runtime',
+        help="send enable_thinking on every request (the release's `enable_thinking`); runtime = the server default",
+    )
     ap.add_argument('--attest-url', default=None, help='the attest container (default: the runtime host, port 8081)')
     ap.add_argument(
         '--speed-json',
@@ -472,6 +485,8 @@ def main() -> int:
     args = ap.parse_args()
     global API_KEY
     API_KEY = args.api_key
+    global THINKING
+    THINKING = {'on': True, 'off': False}.get(args.thinking)
     base_url = args.base_url.rstrip('/')
 
     rep = Report()

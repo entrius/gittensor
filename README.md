@@ -65,7 +65,7 @@ No clone, no build — every image is published on Docker Hub:
 
 ```bash
 # 1. The whole box (runtime + attest + neuron) from one compose file. Fill .env from the
-#    "Current release" card on gittensor.io/compute (images + model sha) plus wallet/network/port.
+#    "Current release" card on gittensor.io/compute (images + the model pin) plus wallet/network/port.
 curl -O https://raw.githubusercontent.com/entrius/gittensor/main/docker-compose.miner.yml
 curl -o .env https://raw.githubusercontent.com/entrius/gittensor/main/miner.env.example
 nano .env
@@ -73,7 +73,7 @@ docker compose -f docker-compose.miner.yml up -d
 
 # 2. Prove the box is conformant before you serve (model id from the same card)
 docker run --rm --network host entrius/gt-checker \
-  --base-url http://127.0.0.1:8080 --model-id qwen3.6-35b-a3b --attest-url http://127.0.0.1:8081
+  --base-url http://127.0.0.1:8080 --model-id qwen3.8-27b --attest-url http://127.0.0.1:8081
 ```
 
 Your status (READY / probation / quarantined, window, throughput, estimated payout, last miss reason) is on
@@ -100,8 +100,10 @@ See full guide **[here](https://docs.gittensor.io/validator.html)**
 `SERVING_ENABLED=true` plus the `reference` compose profile:
 
 ```bash
-SPARKINFER_TAG=<runtime_pin> SPARKINFER_MODEL_SHA256=<model_sha256> \
-  docker compose -f docker-compose.vali.yml --profile reference up -d
+# the release's artifact pins, from serving_loadout.json: a GGUF (SPARKINFER_MODEL_SHA256) or a pinned Hugging Face
+# model directory (SPARKINFER_MODEL_DIR_REPO / _REVISION / _SHA256) — docker-compose.vali.yml lists every variable
+SPARKINFER_TAG=<runtime_pin> SPARKINFER_MODEL_DIR_REPO=<model_dir.repo> SPARKINFER_MODEL_DIR_REVISION=<model_dir.revision> \
+  SPARKINFER_MODEL_DIR_SHA256=<model_dir.sha256> docker compose -f docker-compose.vali.yml --profile reference up -d
 ```
 
 Without a reference the validator still validates OSS and sends the serving cap to UID 0. All `SERVING_*`

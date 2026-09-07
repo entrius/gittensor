@@ -60,9 +60,10 @@ free_node() {
 }
 
 echo "renting 2x 1x$GPU: entrius/sparkinfer:$REF + $ATTEST_IMAGE (waiting up to ${RENT_WAIT_MIN} min for free cards)"
+# CONFORMANCE_SKIP_NODES: executor ids to leave alone (space-separated), e.g. one whose pod just CREATION_FAILED.
 for ((i = 0; i < RENT_WAIT_MIN; i++)); do
-  NODE=$(free_node "")
-  ATTEST_NODE=$([ -n "$NODE" ] && free_node "$NODE" || true)
+  NODE=$(free_node "${CONFORMANCE_SKIP_NODES:-}")
+  ATTEST_NODE=$([ -n "$NODE" ] && free_node "${CONFORMANCE_SKIP_NODES:-} $NODE" || true)
   [ -n "$NODE" ] && [ -n "$ATTEST_NODE" ] && break
   sleep 60
 done
@@ -130,8 +131,10 @@ done
 echo "checker reaches the runtime through ssh root@$SSH_HOST:$SSH_PORT (tunnel $TUNNEL)"
 
 set +e
+# CONFORMANCE_CHECKER_ARGS: extra checker flags, e.g. "--thinking off" for a release that pins enable_thinking.
 uv run python scripts/check_serving_runtime.py --base-url "$TUNNEL" --model-id "$MODEL_ID" --attest-url "$ATTEST" \
-  --determinism-count 30 --repeat 3 --parallel 16 --speed-json "$OUT/speed.json" 2>&1 | tee "$OUT/conformance.txt"
+  --determinism-count 30 --repeat 3 --parallel 16 --speed-json "$OUT/speed.json" ${CONFORMANCE_CHECKER_ARGS:-} \
+  2>&1 | tee "$OUT/conformance.txt"
 RC=${PIPESTATUS[0]}
 set -e
 echo "checker exit $RC (report: $OUT/conformance.txt)"

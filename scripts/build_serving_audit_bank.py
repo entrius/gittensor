@@ -8,7 +8,7 @@ Run on a team 5090 with the pinned runtime + model:
 
     ./server/run.sh --download --port 8080            # in the sparkinfer checkout
     uv run python scripts/build_serving_audit_bank.py \\
-        --base-url http://127.0.0.1:8080 --model-id qwen3.6-35b-a3b \\
+        --base-url http://127.0.0.1:8080 --model-id qwen3.8-27b \\
         --runtime-pin gittensor-ai-lab/sparkinfer@<commit> --count 500 --max-tokens 64 \\
         --out gittensor/validator/weights/serving_audit_bank.json
 

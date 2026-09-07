@@ -82,6 +82,7 @@ def greedy(
     max_tokens: int,
     timeout: float,
     api_key: Optional[str] = None,
+    enable_thinking: Optional[bool] = None,
 ) -> dict:
     r = requests.post(
         f'{base_url.rstrip("/")}/v1/chat/completions',
@@ -94,6 +95,7 @@ def greedy(
             'stream': False,
             'logprobs': True,
             'top_logprobs': 1,
+            **({'enable_thinking': enable_thinking} if enable_thinking is not None else {}),
         },
         timeout=timeout,
     )
@@ -123,6 +125,7 @@ def score(
     api_key: Optional[str] = None,
     top_logprobs: int = 1,
     completion_token_ids: Optional[Sequence[int]] = None,
+    enable_thinking: Optional[bool] = None,
 ) -> dict:
     """Teacher-forced scoring (contract R8): per-token logprobs of ``completion`` under the model.
 
@@ -140,6 +143,7 @@ def score(
             'model': model_id,
             'messages': messages,
             'top_logprobs': top_logprobs,
+            **({'enable_thinking': enable_thinking} if enable_thinking is not None else {}),
             **(
                 {'completion_token_ids': list(completion_token_ids)}
                 if completion_token_ids

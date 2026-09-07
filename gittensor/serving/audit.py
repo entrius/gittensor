@@ -330,10 +330,19 @@ class LiveReference:
         self.max_tokens = release.max_tokens
         self.timeout = release.request_timeout
         self.api_key = release.reference_api_key
+        self.enable_thinking = release.enable_thinking
 
     def case_for(self, messages: List[Message], max_tokens: Optional[int] = None) -> AuditCase:
         """Reference for an arbitrary prompt (audit, mirrored traffic, dispute)."""
-        ref = greedy(self.base_url, self.model_id, messages, max_tokens or self.max_tokens, self.timeout, self.api_key)
+        ref = greedy(
+            self.base_url,
+            self.model_id,
+            messages,
+            max_tokens or self.max_tokens,
+            self.timeout,
+            self.api_key,
+            enable_thinking=self.enable_thinking,
+        )
         return AuditCase(
             messages=messages,
             max_tokens=ref['max_tokens'],
@@ -359,6 +368,7 @@ class LiveReference:
             self.timeout,
             self.api_key,
             completion_token_ids=token_ids,
+            enable_thinking=self.enable_thinking,
         )
 
     def score_served(self, messages: List[Message], completion: str, token_ids: Optional[Sequence[int]] = None) -> dict:

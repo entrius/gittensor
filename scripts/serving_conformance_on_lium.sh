@@ -14,8 +14,17 @@ set -euo pipefail
 REF="${1:?sparkinfer ref (image tag)}"
 OUT="${2:-serving-conformance-$REF}"
 LOADOUT="$(dirname "$0")/../gittensor/validator/weights/serving_loadout.json"
-MODEL_ID=$(jq -r '.releases[0].model_id' "$LOADOUT")
+# Measuring a release other than the loadout's primary (a candidate second model): CONFORMANCE_MODEL_ID is what the
+# runtime will report in /v1/models, CONFORMANCE_MODEL_ENV the space-separated KEY=VALUE pairs the runtime pod needs
+# for that artifact (MODEL_REPO/MODEL_FILE/TOK_REPO/MODEL_NAME/MODEL_SHA256 for a GGUF; MODEL_DIR_REPO/
+# MODEL_DIR_REVISION/MODEL_DIR_SHA256/TOK_REPO/MODEL_NAME for a Hugging Face directory — docker/sparkinfer-entrypoint.sh).
+MODEL_ID="${CONFORMANCE_MODEL_ID:-$(jq -r '.releases[0].model_id' "$LOADOUT")}"
 MODEL_SHA=$(jq -r '.releases[0].model_sha256' "$LOADOUT")
+MODEL_ENV=(-e "MODEL_SHA256=$MODEL_SHA")
+if [ -n "${CONFORMANCE_MODEL_ENV:-}" ]; then
+  MODEL_ENV=()
+  for kv in $CONFORMANCE_MODEL_ENV; do MODEL_ENV+=(-e "$kv"); done
+fi
 ATTEST_IMAGE="${CONFORMANCE_ATTEST_IMAGE:-$(jq -r '.releases[0].attest.image' "$LOADOUT")}"
 POD="conf-${REF:0:7}-$RANDOM"
 ATTEST_POD="$POD-attest"
@@ -59,7 +68,7 @@ for ((i = 0; i < RENT_WAIT_MIN; i++)); do
 done
 [ -n "${NODE:-}" ] && [ -n "${ATTEST_NODE:-}" ] || { echo "two 1x$GPU executors did not become available in ${RENT_WAIT_MIN} min"; exit 2; }
 lium up "$NODE" --name "$POD" --image "entrius/sparkinfer:$REF" --internal-ports 22,8080 \
-  -e "MODEL_SHA256=$MODEL_SHA" -e SPARKINFER_DETERMINISTIC=1 --ttl 3h -y --no-ssh
+  "${MODEL_ENV[@]}" -e SPARKINFER_DETERMINISTIC=1 --ttl 3h -y --no-ssh
 lium up "$ATTEST_NODE" --name "$ATTEST_POD" --image "$ATTEST_IMAGE" --internal-ports 22,8081 --ttl 3h -y --no-ssh
 
 # public URL of a pod's internal port, empty until the pod is RUNNING with the port mapped

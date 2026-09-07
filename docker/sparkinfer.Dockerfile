@@ -83,6 +83,7 @@ LABEL org.opencontainers.image.source="https://github.com/gittensor-ai-lab/spark
 HEALTHCHECK --interval=30s --timeout=5s --start-period=600s --retries=5 \
     CMD curl -fsS http://127.0.0.1:8080/v1/models || exit 1
 
-# run.sh downloads the blessed model + tokenizer into MODELS_DIR on first start (--download) and execs the prebuilt
-# server binary.
-ENTRYPOINT ["bash", "server/run.sh", "--download"]
+# The entrypoint fetches + verifies the blessed artifact (one GGUF via run.sh --download, or a pinned Hugging Face
+# model directory via MODEL_DIR_*; see docker/sparkinfer-entrypoint.sh) and execs the prebuilt server binary.
+COPY docker/sparkinfer-entrypoint.sh /opt/sparkinfer/entrypoint.sh
+ENTRYPOINT ["bash", "/opt/sparkinfer/entrypoint.sh"]

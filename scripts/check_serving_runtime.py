@@ -182,13 +182,16 @@ def check_determinism(
 def check_score(rep: Report, base_url: str, model_id: str, max_tokens: int, timeout: float) -> None:
     """R8: /v1/score must exist and reproduce, for the model's own greedy output, the logprobs generation reported."""
     messages = make_prompts(1, seed=11)[0]
-    gen = greedy(base_url, model_id, messages, max_tokens, timeout, API_KEY)
+    gen = greedy(base_url, model_id, messages, max_tokens, timeout, API_KEY, enable_thinking=THINKING)
     try:
         sc = score(
             base_url, model_id, messages, gen['reference_completion'], timeout, API_KEY, enable_thinking=THINKING
         )
     except requests.HTTPError as e:
-        rep.add('R8 POST /v1/score', MUST, False, f'HTTP {e.response.status_code if e.response else "?"}')
+        # `if e.response` is False for any 4xx/5xx (Response.__bool__ is .ok): test for None, and show the body.
+        r = e.response
+        detail = f'HTTP {r.status_code}: {r.text[:300]!r}' if r is not None else repr(e)
+        rep.add('R8 POST /v1/score', MUST, False, detail)
         return
     rep.add('R8 POST /v1/score', MUST, True, f'{len(sc["tokens"])} tokens')
     same_tok = sc['tokens'] == gen['reference_tokens']
@@ -213,6 +216,7 @@ def check_score(rep: Report, base_url: str, model_id: str, max_tokens: int, time
         reference_url=base_url,
         reference_api_key=API_KEY,
         request_timeout=timeout,
+        enable_thinking=THINKING,
     )
     ref = LiveReference(release)
     verdict = verify_served(
@@ -221,7 +225,7 @@ def check_score(rep: Report, base_url: str, model_id: str, max_tokens: int, time
     rep.add("R8 verify_served passes the model's own greedy output", MUST, verdict.passed, verdict.reason)
     for i in range(3):  # and on longer, traffic-shaped prompts
         msgs = make_baseline_prompt(random.Random(100 + i))
-        g = greedy(base_url, model_id, msgs, 256, timeout, API_KEY)
+        g = greedy(base_url, model_id, msgs, 256, timeout, API_KEY, enable_thinking=THINKING)
         v = verify_served(ref, msgs, g['reference_completion'], g['reference_tokens'], g['reference_logprobs'])
         rep.add(
             f'R8 verify_served on baseline prompt #{i + 1} ({len(g["reference_tokens"])} tok)', MUST, v.passed, v.reason

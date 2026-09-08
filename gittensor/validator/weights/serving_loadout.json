@@ -46,6 +46,11 @@
         "iters": 3,
         "vram_model_reserved_bytes": 26400000000,
         "reference_wall_ms": 832.0
+      },
+      "audit": {
+        "min_prefix_agreement": 1.0,
+        "max_mean_abs_logprob_diff": 100.0,
+        "max_abs_logprob_diff": 100.0
       }
     }
   ]

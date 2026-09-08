@@ -12,11 +12,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gittensor.constants import (
+    SERVING_AGGREGATE_DECODE_TPS_FALLBACK,
     SERVING_AUDIT_MAX_ABS_LOGPROB_DIFF,
     SERVING_AUDIT_MAX_MEAN_ABS_LOGPROB_DIFF,
     SERVING_AUDIT_MIN_PREFIX_AGREEMENT,
     SERVING_AUDIT_WINDOW,
     SERVING_AUDIT_WINDOW_THRESHOLDS,
+    SERVING_DECODE_PER_REQUEST_FALLBACK,
+    SERVING_PREFILL_TPS_FALLBACK,
     SERVING_PRICING_MAX_AGE_S,
 )
 from gittensor.serving.api import build_app, parse_api_keys
@@ -349,7 +352,7 @@ def test_gateway_requires_key(monkeypatch):
     assert r.status_code == 200 and set(r.json()['data'][0]) >= {'id', 'runtime_pin', 'model_sha256'}
     # OpenRouter's context fields: a harness reads these to size its compaction instead of hitting the 400
     model = r.json()['data'][0]
-    assert model['context_length'] == 36_864 and model['max_output_tokens'] == 4096
+    assert model['context_length'] == 65_536 and model['max_output_tokens'] == 4096
     assert client.get('/health').status_code == 200
 
 
@@ -953,10 +956,10 @@ def test_gateway_limits_the_prompt_by_context_window_not_characters(monkeypatch)
 
     monkeypatch.setattr(api_module, '_dispatch', dispatch)
     context = SERVING_CONTEXT_TOKENS_FALLBACK
-    long_prompt = [{'role': 'user', 'content': 'x' * (30_000 * 4)}]  # ~30k tokens: fits, with ~6.8k left
+    long_prompt = [{'role': 'user', 'content': 'x' * ((context - 6_800) * 4)}]  # fits, with ~6.8k tokens left
     r = client.post('/v1/chat/completions', headers=headers, json={'messages': long_prompt, 'max_tokens': 4096})
     assert r.status_code == 200 and seen['max_tokens'] == 4096
-    nearly_full = [{'role': 'user', 'content': 'x' * (35_000 * 4)}]  # ~35k tokens: the completion is clamped
+    nearly_full = [{'role': 'user', 'content': 'x' * ((context - 1_800) * 4)}]  # ~1.8k left: the completion is clamped
     r = client.post('/v1/chat/completions', headers=headers, json={'messages': nearly_full, 'max_tokens': 4096})
     assert r.status_code == 200 and seen['max_tokens'] == context - prompt_token_estimate(nearly_full)
     assert len(state.drain_served()) == 2  # both routed and recorded
@@ -1901,7 +1904,7 @@ def test_decode_speed_prices_served_requests_against_the_blessing_curve():
     # between points the aggregate (per-request x n) is interpolated, then divided by n: 6 -> 276, 16 -> 304 tok/s
     assert expected_decode_tps(curve, 11) == pytest.approx((276.0 + (304.0 - 276.0) * 0.5) / 11)
     assert expected_decode_tps(curve, 3) == pytest.approx((440.0 + (276.0 - 440.0) * 0.4) / 3)  # 124.8, not 282.4
-    assert expected_decode_tps(None, 6) == 46.0  # constants' fallback curve
+    assert expected_decode_tps(None, 6) == pytest.approx(SERVING_DECODE_PER_REQUEST_FALLBACK[1][1])  # fallback curve
     assert decode_credit(440.0, 440.0) == 1.0 and decode_credit(600.0, 440.0) == 1.0  # never more than one card
     assert decode_credit(352.0, 440.0) == 1.0  # 0.8x: inside the tolerance for WAN-observed decode
     assert decode_credit(264.0, 440.0) == pytest.approx(0.75)  # 0.6x -> 0.6 / 0.8
@@ -1965,9 +1968,7 @@ def test_token_pay_is_derived_from_the_release_speed(tmp_path):
     """Only the card-hour target is hand-set: the per-token rate is that target over what one card decodes in an
     hour, so a card flat out earns exactly the card-hour, 1.5 cards' worth of tokens earns 1.5, an idle card 0."""
     from gittensor.constants import (
-        SERVING_AGGREGATE_DECODE_TPS_FALLBACK,
         SERVING_GPU_HOUR_USD,
-        SERVING_PREFILL_TPS_FALLBACK,
         SERVING_PROMPT_TEMPLATE_TOKENS,
     )
     from gittensor.serving.loadout import load_serving_loadout
@@ -2101,8 +2102,12 @@ def test_round_pays_prefill_as_card_time(monkeypatch):
     assert scores['hk1'] == pytest.approx(card_equivalents(3 * 8, release, ROUND_S))
     assert scores['hk2'] == pytest.approx(card_equivalents(3 * 8, release, ROUND_S, 3 * 1000))
     assert scores['hk2'] > scores['hk1']
-    # 3000 prompt tokens at 24k tok/s is 0.125 s of card-time on top of 24 tokens' 0.086 s of decode
-    assert scores['hk2'] / scores['hk1'] == pytest.approx(1 + (3000 / 24_000.0) / (24 / 280.0))
+    # 3000 prompt tokens at the release's prefill rate is card-time on top of 24 tokens' decode at its aggregate rate
+    from gittensor.validator.serving.scoring import aggregate_decode_tps, prefill_tps
+
+    assert scores['hk2'] / scores['hk1'] == pytest.approx(
+        1 + (3000 / prefill_tps(release)) / (24 / aggregate_decode_tps(release))
+    )
     windows = state.last_round['windows']
     assert windows[1]['tokens'] == 24 and windows[1]['prompt_tokens'] == 0
     assert windows[2]['tokens'] == 24 and windows[2]['prompt_tokens'] == 3000
@@ -2131,8 +2136,12 @@ def test_round_rows_carry_prompt_tokens_and_both_rates():
     summary, miners = round_rows('vali', dt.datetime.now(dt.timezone.utc), last_round, {}, None, release)
     assert len(summary) == INSERT_SERVING_ROUND.count('%s')
     assert all(len(row) == BULK_INSERT_SERVING_MINER_ROUNDS.count('%s') for row in miners)
-    assert summary[-4:-2] == (1000, pytest.approx(0.694, abs=0.001))  # output tokens, $/M output
-    assert summary[-2] == 30_000 and summary[-1] == pytest.approx(0.0081, abs=0.0001)  # prompt tokens, $/M prompt
+    from gittensor.validator.serving.scoring import aggregate_decode_tps, prefill_tps
+
+    out_rate = 0.70 / (aggregate_decode_tps(release) * 3600) * 1e6
+    prompt_rate = 0.70 / (prefill_tps(release) * 3600) * 1e6
+    assert summary[25:27] == (1000, pytest.approx(out_rate))  # output tokens, $/M output
+    assert summary[27] == 30_000 and summary[28] == pytest.approx(prompt_rate)  # prompt tokens, $/M prompt
     assert sorted((row[2], row[-2], row[-1]) for row in miners) == [(1, 800, 30_000), (2, 200, 0)]
 
 

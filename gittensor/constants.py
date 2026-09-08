@@ -162,8 +162,10 @@ MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software,
 # =============================================================================
 # Serving miners are paid for the card-time the gateway saw them serve: output tokens at the decode rate and
 # prompt tokens (prefill) at the prefill rate, both derived from the card-hour target:
-# rate = SERVING_GPU_HOUR_USD / (one card's aggregate tok/s x 3600), so a 5090 flat out for an hour (~1M output
-# tokens on the current runtime, or ~86M prompt tokens) earns exactly the card-hour and an idle one earns nothing. A
+# rate = SERVING_GPU_HOUR_USD / (one card's aggregate tok/s x 3600), so a 5090 flat out for an hour (~1.2M output
+# tokens on the blessed Qwen3.8-27B release, or ~27M prompt tokens) earns exactly the card-hour and an idle one earns
+# nothing. Both rates come from the release's own measured `speed` block, so a pin or model change re-prices itself;
+# the constants below are only the fallback for a release that carries no measurement. A
 # round score is that card-time in card-equivalents ((tokens / decode tok/s + prompt tokens / prefill tok/s) /
 # round seconds); the settled mean is priced at
 # SERVING_GPU_HOUR_USD, converted to an emission share through the on-chain alpha/TAO price and a live TAO/USD
@@ -175,16 +177,16 @@ MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software,
 SERVING_GPU_HOUR_USD = 0.70
 SERVING_EMISSION_SHARE_CAP = 0.05
 # Output tok/s one card sustains under load on the blessed runtime, for a release without its own
-# `speed.aggregate_decode_tps` (sparkinfer 7498736 on a 5090: 279-282 at 16 concurrent, 2026-08-27).
-SERVING_AGGREGATE_DECODE_TPS_FALLBACK = 280.0
+# `speed.aggregate_decode_tps` (Qwen3.8-27B NVFP4 on sparkinfer 19ef39ec2, 5090, 16 concurrent, logprobs on:
+# 334-343, 2026-09-08; the Qwen3.6-35B-A3B release before it did 280).
+SERVING_AGGREGATE_DECODE_TPS_FALLBACK = 338.0
 # Prompt tok/s one card prefills on the blessed runtime, for a release without its own `speed.prefill_tps`. Prefill
-# is paid as card-time exactly like decode, so a 30k-token prompt with a 150-token answer pays for the ~1.3 s of
-# prefill it cost the card and not only the 0.5 s of decode; at this rate a prompt token is worth ~1/85 of an output
-# token, which is also why claiming prompt tokens is not worth lying about. Derived from the 2026-08-28 5090 TTFT
-# readings behind SERVING_MAX_PROMPT_CHARS (8.9k prompt tokens in 403 ms, 35.6k in 1453 ms; RTT included, so this
-# understates the card). Re-measure with scripts/check_serving_runtime.py --speed-json (`prefill_tps`) and carry it
-# on the release.
-SERVING_PREFILL_TPS_FALLBACK = 24_000.0
+# is paid as card-time exactly like decode, so a 30k-token prompt with a 150-token answer pays for the ~4 s of
+# prefill it cost the card and not only the ~1.5 s of decode; at this rate a prompt token is worth ~1/45 of an output
+# token, which is also why claiming prompt tokens is not worth lying about. Measured cold on Qwen3.8-27B NVFP4,
+# sparkinfer 19ef39ec2, deterministic mode, engine-reported ttft_ms: 7.6k tok/s at 10k prompt tokens, 9.7k at 41k,
+# 7.8k at 102k (2026-09-08); the 35B did ~24k. Re-measure per release and carry it on the release's `speed` block.
+SERVING_PREFILL_TPS_FALLBACK = 7_500.0
 # The prompt token count is what the miner's runtime reported (usage.prompt_tokens). Pay is clamped to what the
 # prompt could honestly tokenize to: one token per character plus this many chat-template tokens per message.
 SERVING_PROMPT_TEMPLATE_TOKENS = 16
@@ -233,7 +235,9 @@ SERVING_ATTEST_PREFILL_DRAIN_S = 1.5
 # the reservation (a bare 5090 shows ~32 GB free, one holding the model ~8 GB). A spare card with nothing loaded is
 # not a serving card.
 SERVING_ATTEST_MODEL_RESIDENT_RATIO = 0.8
-SERVING_VRAM_MODEL_RESERVED_BYTES = 24e9  # what sparkinfer holds with the model loaded (7498736 on a 5090: 23.7 GB)
+SERVING_VRAM_MODEL_RESERVED_BYTES = (
+    26.4e9  # what sparkinfer holds with the model loaded (Qwen3.8-27B NVFP4 at CTX 131072 on a 5090: 25.1 GiB idle)
+)
 SERVING_VERIFY_WORKERS = 8  # concurrent /v1/score calls to the reference per round
 # A reference 429 is R6 backpressure (a conformant runtime refuses at capacity instead of queueing) — a fact about
 # the reference's load, never about the miner's answer. Retried with backoff this many times, then neutral.
@@ -265,7 +269,7 @@ SERVING_DECODE_FLOOR_RATIO = 0.5
 SERVING_DECODE_TOLERANCE_RATIO = 0.8  # full credit down to this fraction of expected: the curve is measured on-box, the
 # validator observes stream delivery over the WAN (soak 5: honest cards read 0.75-0.96x); credit = min(1, ratio / this)
 SERVING_DECODE_MIN_TOKENS = 32
-SERVING_DECODE_PER_REQUEST_FALLBACK = ((1, 440.0), (6, 46.0), (16, 19.0))  # (concurrent requests, tok/s each)
+SERVING_DECODE_PER_REQUEST_FALLBACK = ((1, 99.4), (6, 49.7), (16, 23.4))  # (concurrent requests, tok/s each)
 # Per-audit verdict. The blessed runtime is bit-reproducible (sparkinfer 7498736, SPARKINFER_DETERMINISTIC=1), so an
 # honest miner reproduces the reference's greedy tokens exactly and its logprobs to float noise; every planted
 # cheater differs on every prompt (measured 2026-08-24, internal serving-experiments notes: honest max |delta| 0.0000,
@@ -348,19 +352,20 @@ SERVING_BACKEND_CONCURRENCY = 16  # miner: concurrent backend generations (spark
 SERVING_GATEWAY_BUSY_RETRIES = 3
 SERVING_SEEN_NONCES = 10_000  # miner: replay guard size; covers many minutes of validator traffic
 SERVING_MAX_TOKENS = 4096  # hard cap per request (API and miner both enforce): the runtime's own max_output_tokens
-# Gateway: total characters across a request's messages — a denial-of-service backstop only (~0.25 MB of text; the
-# whole context window is ~150k characters). The prompt's real limit is the release's context window, checked in
+# Gateway: total characters across a request's messages — a denial-of-service backstop only (~0.5 MB of text; the
+# whole 64k context window is ~260k characters). The prompt's real limit is the release's context window, checked in
 # tokens at the door (SERVING_CONTEXT_TOKENS_FALLBACK / release.context_tokens, estimated at
 # SERVING_CHARS_PER_TOKEN_ESTIMATE) and enforced exactly by the runtime. This sat at 40k (~10k tokens) while two
 # things needed it: an honest prefill had to stay inside the full-credit TTFT band, and a runtime-rejected prompt
 # landed in the miner's window as a miss. The TTFT credit now allows for the prompt's prefill, and a
 # runtime-rejected request is checked against the reference before it counts, so neither holds.
-SERVING_MAX_PROMPT_CHARS = 262_144
+SERVING_MAX_PROMPT_CHARS = 524_288
 # The blessed release's context window in tokens, prompt and completion together, for a release without its own
-# `context_tokens` (sparkinfer 7498736 on a 5090, /v1/info: max_context 36864 = 32k prompt + 4k completion KV
+# `context_tokens` (Qwen3.8-27B on sparkinfer 19ef39ec2: 64k prompt + 4k completion on a 131k KV pool; the 35B
+# release before it: max_context 36864 = 32k prompt + 4k completion KV
 # pool). A request whose estimated prompt alone exceeds it is a 400 context_length_exceeded (OpenAI's shape, so
 # agent SDKs trim history and retry); one whose completion would overrun it has max_tokens clamped to what is left.
-SERVING_CONTEXT_TOKENS_FALLBACK = 36_864
+SERVING_CONTEXT_TOKENS_FALLBACK = 65_536
 SERVING_DB_RETENTION_DAYS = 7  # validator: per-round serving rows older than this are pruned on each write
 SERVING_REQUEST_LOG_SIZE = 5_000  # in-memory ring of recent API/audit requests (telemetry)
 

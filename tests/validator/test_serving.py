@@ -69,9 +69,15 @@ def test_echo_backend_matches_expected_completion():
 def test_default_loadout_targets_sparkinfer():
     release = load_serving_loadout().primary
     assert release.backend == 'openai-compat'
-    assert release.base_url and release.audit_bank
+    assert release.base_url and release.runtime_pin and release.runtime_image and '@sha256:' in release.runtime_image
     assert release.reference_url is None  # validators point SERVING_REFERENCE_URL at their own/rented runtime
     assert release.max_tokens > 0
+    # Qwen3.8-27B: a pinned model directory (HF commit + per-shard digests), thinking off, 64k prompts
+    assert release.model_id == 'qwen3.8-27b' and release.model_sha256 is None
+    assert release.model_dir_repo and len(release.model_dir_revision or '') == 40
+    assert (release.model_dir_sha256 or '').count('=') == 2
+    assert release.enable_thinking is False and release.end_of_turn_token_id == 248046
+    assert release.context_tokens == 65_536 and (release.runtime_env or {}).get('CTX') == '131072'
 
 
 def test_echo_loadout_loads_via_env(monkeypatch):
@@ -929,7 +935,7 @@ def test_gateway_limits_the_prompt_by_context_window_not_characters(monkeypatch)
 
     assert SERVING_MAX_TOKENS == 4096 and SERVING_MAX_PROMPT_CHARS >= 4 * SERVING_CONTEXT_TOKENS_FALLBACK
     shipped = load_serving_loadout().primary
-    assert shipped.context_tokens == 36_864 and shipped.request_timeout >= 300.0  # 4096 tokens at ~19 tok/s fits
+    assert shipped.context_tokens == 65_536 and shipped.request_timeout >= 300.0  # 4096 tokens at ~23 tok/s fits
 
     good = _echo_release()
     state = ServingState()
@@ -3431,24 +3437,25 @@ def test_inference_stream_clears_the_prefill_mark_at_the_first_content_delta():
 def test_shipped_curve_pays_an_honest_card_in_full_at_2_to_5_concurrent():
     """#1753: the blessed curve had points at 1 and 6 only, and the straight line between them sat far above what a
     5090 does at 2-5 streams, so an honest card read 0.32-0.48x expected there — under the floor, zero credit. The
-    curve now carries measured points 2-12 and interpolates on aggregate rate. The rows are the issue's on-box
-    measurement of an unshared, correctly pinned card."""
+    curve carries measured points 1-16 and interpolates on aggregate rate. The rows are the first of the two
+    2026-09-08 checker runs on Qwen3.8-27B NVFP4 (the loadout curve is the mean of both, made monotone)."""
     from gittensor.validator.serving.scoring import decode_credit, expected_decode_tps
 
     release = load_serving_loadout().primary
     assert release.decode_per_request is not None
-    miner_measured = {1: 426.8, 2: 148.2, 3: 91.8, 4: 74.7, 5: 59.9, 6: 49.6, 8: 37.5}
+    miner_measured = {1: 99.6, 2: 89.4, 3: 72.3, 4: 57.3, 5: 53.6, 6: 49.4, 8: 39.5, 12: 24.9, 16: 23.2}
     for n, observed in miner_measured.items():
         expected = expected_decode_tps(release.decode_per_request, n)
         assert observed / expected >= 0.8, (n, observed, expected)  # inside the WAN tolerance: full credit
         assert decode_credit(observed, expected) == 1.0
-    # and between the sparse tail points a queued stream is still expected at the last measured rate, not below it
-    assert expected_decode_tps(release.decode_per_request, 20) == pytest.approx(
-        (16 * 19.4 + (24 * 19.4 - 16 * 19.4) * 0.5) / 20
-    )
-    assert expected_decode_tps(release.decode_per_request, 64) == 19.5
-    # a card genuinely shared between two hotkeys still reads under the floor at 1 in flight
-    assert decode_credit(144.3, expected_decode_tps(release.decode_per_request, 1)) == 0.0
+    # past the last measured point a queued stream is still expected at the last measured rate, not below it
+    assert expected_decode_tps(release.decode_per_request, 20) == 23.4
+    assert expected_decode_tps(release.decode_per_request, 64) == 23.4
+    # A dense 27B barely slows at 2 streams (92 vs 99 tok/s), so two hotkeys on one card are NOT caught by decode
+    # speed the way the MoE's 144-vs-440 was; the same-instant attest fill is what catches sharing now. Four
+    # hotkeys on one card still read under the tolerance at 1 in flight.
+    assert decode_credit(92.1, expected_decode_tps(release.decode_per_request, 1)) == 1.0
+    assert decode_credit(56.8, expected_decode_tps(release.decode_per_request, 1)) < 0.8
 
 
 # ---------------------------------------------------------------------------------------------------------------

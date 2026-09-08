@@ -118,6 +118,7 @@ def build_app(
                     }
                     if release.model_dir_repo
                     else None,
+                    'runtime_env': release.runtime_env,
                     # OpenRouter's fields: agent harnesses size their context compaction from these, so a client
                     # that reads them never has to hit the 400 context_length_exceeded
                     'context_length': release.context_tokens or SERVING_CONTEXT_TOKENS_FALLBACK,

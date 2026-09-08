@@ -109,6 +109,8 @@ def greedy(
         'messages': messages,
         'max_tokens': max_tokens,
         'reference_tokens': [e['token'] for e in content],
+        # sparkinfer reports token_id per entry (#925); a verifier forces these rather than re-tokenizing text
+        'reference_token_ids': [int(e['token_id']) for e in content] if all('token_id' in e for e in content) else None,
         'reference_logprobs': [float(e['logprob']) for e in content],
         'reference_completion': choice['message'].get('content') or '',
         'served_model': payload.get('model'),

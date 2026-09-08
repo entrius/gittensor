@@ -61,6 +61,9 @@ class ServingRelease:
     model_dir_repo: Optional[str] = None
     model_dir_revision: Optional[str] = None
     model_dir_sha256: Optional[str] = None
+    # Env the runtime container needs beyond the artifact pins (CTX, MODEL_NAME, TOK_REPO): informational for the release
+    # card and compose files; nothing enforces it.
+    runtime_env: Optional[Dict[str, str]] = None
     audit_bank: Optional[str] = None  # validator side: snapshot reference, filename under weights/
     reference_url: Optional[str] = (
         None  # validator side: live reference runtime (own GPU or a rented one); wins over audit_bank
@@ -140,6 +143,7 @@ class ServingRelease:
             model_dir_repo=model_dir.get('repo'),
             model_dir_revision=model_dir.get('revision'),
             model_dir_sha256=model_dir.get('sha256'),
+            runtime_env={str(k): str(v) for k, v in (raw.get('runtime_env') or {}).items()} or None,
             audit_bank=raw.get('audit_bank'),
             reference_url=raw.get('reference_url'),
             reference_api_key=raw.get('reference_api_key'),

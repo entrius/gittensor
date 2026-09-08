@@ -219,14 +219,27 @@ def check_score(rep: Report, base_url: str, model_id: str, max_tokens: int, time
         enable_thinking=THINKING,
     )
     ref = LiveReference(release)
+    # As the validator does on served traffic: force the runtime's own token ids, never re-tokenized text.
     verdict = verify_served(
-        ref, messages, gen['reference_completion'], gen['reference_tokens'], gen['reference_logprobs']
+        ref,
+        messages,
+        gen['reference_completion'],
+        gen['reference_tokens'],
+        gen['reference_logprobs'],
+        token_ids=gen.get('reference_token_ids'),
     )
     rep.add("R8 verify_served passes the model's own greedy output", MUST, verdict.passed, verdict.reason)
     for i in range(3):  # and on longer, traffic-shaped prompts
         msgs = make_baseline_prompt(random.Random(100 + i))
         g = greedy(base_url, model_id, msgs, 256, timeout, API_KEY, enable_thinking=THINKING)
-        v = verify_served(ref, msgs, g['reference_completion'], g['reference_tokens'], g['reference_logprobs'])
+        v = verify_served(
+            ref,
+            msgs,
+            g['reference_completion'],
+            g['reference_tokens'],
+            g['reference_logprobs'],
+            token_ids=g.get('reference_token_ids'),
+        )
         rep.add(
             f'R8 verify_served on baseline prompt #{i + 1} ({len(g["reference_tokens"])} tok)', MUST, v.passed, v.reason
         )

@@ -126,7 +126,13 @@ def test_round_rows_carry_the_enforced_release():
 
 
 def test_default_loadout_keeps_model_file():
-    assert loadout.load_serving_loadout().primary.model_file.endswith('.gguf')
+    """The serving_rounds row carries model_file: a GGUF path, or for a model-directory release '<repo>@<commit>'."""
+    release = loadout.load_serving_loadout().primary
+    assert release.model_file
+    if release.model_dir_repo:
+        assert release.model_file == f'{release.model_dir_repo}@{release.model_dir_revision}'
+    else:
+        assert release.model_file.endswith('.gguf')
 
 
 def test_round_rows_report_the_share_that_will_actually_be_paid():

@@ -182,7 +182,7 @@ SERVING_EMISSION_SHARE_CAP = 0.05
 SERVING_AGGREGATE_DECODE_TPS_FALLBACK = 338.0
 # Prompt tok/s one card prefills on the blessed runtime, for a release without its own `speed.prefill_tps`. Prefill
 # is paid as card-time exactly like decode, so a 30k-token prompt with a 150-token answer pays for the ~4 s of
-# prefill it cost the card and not only the ~1.5 s of decode; at this rate a prompt token is worth ~1/45 of an output
+# prefill it cost the card and not only the ~1.5 s of decode; at this rate a prompt token is worth ~1/22 of an output
 # token, which is also why claiming prompt tokens is not worth lying about. Measured cold on Qwen3.8-27B NVFP4,
 # sparkinfer 19ef39ec2, deterministic mode, engine-reported ttft_ms: 7.6k tok/s at 10k prompt tokens, 9.7k at 41k,
 # 7.8k at 102k (2026-09-08); the 35B did ~24k. Re-measure per release and carry it on the release's `speed` block.

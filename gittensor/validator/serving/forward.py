@@ -39,11 +39,12 @@ import hashlib
 import math
 import os
 import random
+import re
 import secrets
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import aiohttp
 import bittensor as bt
@@ -68,7 +69,7 @@ from gittensor.constants import (
 )
 from gittensor.serving.audit import AuditVerdict, Reference, reference_for, verify_served
 from gittensor.serving.baseline import baseline_max_tokens, make_baseline_prompt
-from gittensor.serving.loadout import ServingRelease, load_serving_loadout
+from gittensor.serving.loadout import ServingLoadout, ServingRelease, load_serving_loadout
 from gittensor.serving.state import ReadyMiner, RequestRecord, ServedRequest, ServingState, is_busy_detail
 from gittensor.serving.store import ServingStore
 from gittensor.serving.stream import consume_stream
@@ -328,28 +329,80 @@ def _mean(xs: List[float]) -> Optional[float]:
     return round(sum(xs) / len(xs), 1) if xs else None
 
 
+# A miner's own refusal of a request routed for another release (neurons/serving_miner.py, blacklist_caller), as it
+# lands in the axon status message. It names the release the miner does serve, which is how a validator learns it.
+_RELEASE_REFUSAL = re.compile(r'serving release (\S+), not (\S+)')
+
+
+def refused_release(detail: Optional[str]) -> Optional[str]:
+    """The release a miner declared in its refusal, or None when the detail is anything else."""
+    m = _RELEASE_REFUSAL.search(detail or '')
+    return m.group(1) if m else None
+
+
+def find_release(loadout: ServingLoadout, release_id: str) -> Optional[ServingRelease]:
+    """``ServingLoadout.get`` without the KeyError, over anything with a ``releases`` list."""
+    for release in loadout.releases:
+        if release.release_id == release_id:
+            return release
+    for release in loadout.releases:
+        if release.model_id == release_id:
+            return release
+    return None
+
+
+def release_for(state: ServingState, loadout: ServingLoadout, hotkey: str) -> ServingRelease:
+    """The loadout release this hotkey is known to serve; the primary until it has said otherwise (or a release it
+    named has since left the loadout)."""
+    known = state.miner_release.get(hotkey)
+    if known:
+        release = find_release(loadout, known)
+        if release is not None:
+            return release
+        state.miner_release.pop(hotkey, None)
+    return loadout.releases[0]
+
+
+def members(
+    state: ServingState, loadout: ServingLoadout, release: ServingRelease, active: Sequence[Tuple[int, str, Any]]
+) -> List[Tuple[int, str, Any]]:
+    """The active miners a release's round concerns: those known to serve it, plus every miner that has not yet
+    declared a release when this is the primary (it gets primary baseline prompts until it says otherwise)."""
+    return [
+        (uid, hotkey, axon)
+        for uid, hotkey, axon in active
+        if release_for(state, loadout, hotkey).release_id == release.release_id
+    ]
+
+
 async def baseline_round(
     state: ServingState,
     dendrite: bt.Dendrite,
     serving: Sequence[Tuple[int, str, bt.AxonInfo]],
-    release: ServingRelease,
+    loadout: Union[ServingLoadout, ServingRelease],
     window_s: float,
     per_miner: int = SERVING_BASELINE_PER_ROUND,
     rng: Optional[random.Random] = None,
 ) -> int:
     """Send every serving axon ``per_miner`` baseline prompts at random moments within ``window_s``.
 
-    The requests take the same path as user traffic and are queued as served requests, so the next round verifies
-    them like anything else. Quarantined and dormant hotkeys are skipped. Returns the number of requests sent.
+    Each miner is prompted for the release it is known to serve (``release_for``): the primary until it refuses
+    with the release it does run, which is recorded and targeted from the next round on — so a miner blessed for a
+    second release goes READY for that release instead of collecting misses on the primary's window. The requests
+    take the same path as user traffic and are queued as served requests, so the next round verifies them like
+    anything else. Quarantined and dormant hotkeys are skipped. Returns the number of requests sent.
     """
+    if isinstance(loadout, ServingRelease):
+        loadout = ServingLoadout(releases=[loadout])
     rng = rng or random.Random()
     targets = [
-        (uid, hotkey, axon)
+        (uid, hotkey, axon, release)
         for uid, hotkey, axon in serving
+        for release in [release_for(state, loadout, hotkey)]
         if state.audits.quarantined_until(hotkey, release.release_id) == 0.0 and not skip_baseline(state, hotkey)
     ]
 
-    async def one(uid: int, hotkey: str, axon: bt.AxonInfo, delay_s: float) -> None:
+    async def one(uid: int, hotkey: str, axon: bt.AxonInfo, release: ServingRelease, delay_s: float) -> None:
         await asyncio.sleep(delay_s)
         messages = make_baseline_prompt(rng)
         max_tokens = baseline_max_tokens(rng, min(SERVING_MAX_TOKENS, max(release.max_tokens, 512)))
@@ -375,6 +428,15 @@ async def baseline_round(
             err = ''
         ok = response is not None and response.completion is not None and response.served_model_id == release.model_id
         status = getattr(getattr(response, 'dendrite', None), 'status_message', None) if response is not None else None
+        if ok:
+            state.miner_release[hotkey] = release.release_id
+        declared = refused_release(status) if not ok else None
+        if declared and declared != release.release_id and find_release(loadout, declared) is not None:
+            # discovery, not a miss: next round's baseline prompts target the release it serves. A release we do
+            # not bless falls through and the refusal stands as this miner's miss.
+            state.miner_release[hotkey] = declared
+            bt.logging.info(f'Serving: UID {uid} serves release {declared}, not {release.release_id}; re-targeting')
+            return
         if (
             response is not None and not ok
         ):  # the axon answered but served nothing: not a compute miner (or a broken one)
@@ -411,8 +473,8 @@ async def baseline_round(
         )
 
     jobs = [
-        one(uid, hotkey, axon, rng.uniform(0.0, max(0.0, window_s)))
-        for uid, hotkey, axon in targets
+        one(uid, hotkey, axon, release, rng.uniform(0.0, max(0.0, window_s)))
+        for uid, hotkey, axon, release in targets
         for _ in range(per_miner)
     ]
     await asyncio.gather(*jobs)
@@ -441,6 +503,9 @@ async def audit_round(
     update_dormancy(state, serving, served)
     active = [(uid, hotkey, axon) for uid, hotkey, axon in serving if not is_dormant(state, hotkey)]
     dormant = len(serving) - len(active)
+    for req in served:  # a completion served for a release is that miner declaring it (gateway routes by release)
+        if req.ok and req.release_id:
+            state.miner_release[req.hotkey] = req.release_id
 
     # Per admitted hotkey, the release it is READY for: (pay, routing weight, release_id), best pay first.
     admitted: Dict[str, Tuple[float, float, str]] = {}
@@ -464,7 +529,7 @@ async def audit_round(
             state, reference, release, served, summary, last_miss, staked_caller=staked_caller, prompt_tokens=prompt
         )
         passing: List[Tuple[int, str, bt.AxonInfo, float]] = []
-        for uid, hotkey, axon in active:
+        for uid, hotkey, axon in members(state, loadout, release, active):
             window = state.audits.verdict(hotkey, release.release_id)
             round_speeds = speeds.get(hotkey) or []
             if round_speeds:
@@ -542,15 +607,19 @@ async def audit_round(
     quarantined = sum(1 for w in windows.values() if w['status'] == 'quarantined')
     summary.update(ready=len(ready), probation=len(probation), quarantined=quarantined, dormant=dormant)
     state.publish_round(ready, scores, list(probation.values()), {**summary, 'windows': windows})
+    paid = ' + '.join(
+        f'{release.release_id}: {sum(w["tokens"] for w in windows.values() if w["release_id"] == release.release_id)} '
+        f'output tokens at ${token_rate_usd(release) * 1e6:.3f}/M + '
+        f'{sum(w.get("prompt_tokens", 0) for w in windows.values() if w["release_id"] == release.release_id)} '
+        f'prompt tokens at ${prompt_token_rate_usd(release) * 1e6:.4f}/M'
+        for release in loadout.releases
+    )
     bt.logging.info(
         f'Serving round: served {summary.get("served", 0)} (gateway {summary.get("gateway", 0)} / baseline '
         f'{summary.get("baseline", 0)}) · pass {summary.get("pass", 0)} · miss {summary.get("miss", 0)} · '
         f'strike {summary.get("strike", 0)} · neutral {summary.get("neutral", 0)} · READY {len(ready)} '
         f'{[m.uid for m in ready]} · probation {len(probation)} · quarantined {quarantined} · dormant {dormant} · '
-        f'paid {sum(w["tokens"] for w in windows.values())} output tokens at '
-        f'${token_rate_usd(loadout.releases[0]) * 1e6:.3f}/M + '
-        f'{sum(w.get("prompt_tokens", 0) for w in windows.values())} prompt tokens at '
-        f'${prompt_token_rate_usd(loadout.releases[0]) * 1e6:.4f}/M'
+        f'paid {paid}'
     )
     return scores
 
@@ -584,12 +653,12 @@ def seed_ready_from_store(validator: 'Validator', state: ServingState, loadout=N
                 best[hotkey] = (credit, release.release_id)
     ready: List[ReadyMiner] = []
     probation: List[ReadyMiner] = []
-    fallback_release = loadout.primary.release_id
     for uid, hotkey, axon in active:
         credit, release_id = best.get(hotkey, (0.0, ''))
         if credit > 0.0:
             ready.append(ReadyMiner(uid=uid, hotkey=hotkey, axon=axon, score=credit, release_id=release_id))
         elif hotkey not in quarantined:
+            fallback_release = release_for(state, loadout, hotkey).release_id
             probation.append(ReadyMiner(uid=uid, hotkey=hotkey, axon=axon, score=0.0, release_id=fallback_release))
     if ready or probation:
         state.seed_ready(ready, probation)
@@ -726,10 +795,14 @@ class ServingAuditThread:
             # marks the round boundary; they are verified next round alongside any user traffic.
             remaining = max(0.0, self.interval_s - (time.monotonic() - started))
             try:
-                release = load_serving_loadout().primary
                 sent = loop.run_until_complete(
                     baseline_round(
-                        self.state, dendrite, serving, release, max(0.0, remaining - 5.0), self.baseline_per_round
+                        self.state,
+                        dendrite,
+                        serving,
+                        load_serving_loadout(),
+                        max(0.0, remaining - 5.0),
+                        self.baseline_per_round,
                     )
                 )
                 bt.logging.debug(f'Serving: sent {sent} baseline request(s)')

@@ -13,7 +13,18 @@ services:
     container_name: gt-miner-runtime
     restart: unless-stopped
     environment:
-      MODEL_SHA256: ${MODEL_SHA256:?model sha256 from the Current release card on gittensor.io/compute}
+      # The release card names ONE artifact: a GGUF (MODEL_SHA256, optionally MODEL_REPO/MODEL_FILE) or a pinned
+      # Hugging Face model directory (MODEL_DIR_REPO + MODEL_DIR_REVISION + MODEL_DIR_SHA256). Copy exactly the
+      # values it shows; docker/sparkinfer-entrypoint.sh refuses to serve anything else.
+      MODEL_SHA256: ${MODEL_SHA256:-}
+      MODEL_REPO: ${MODEL_REPO:-}
+      MODEL_FILE: ${MODEL_FILE:-}
+      MODEL_DIR_REPO: ${MODEL_DIR_REPO:-}
+      MODEL_DIR_REVISION: ${MODEL_DIR_REVISION:-}
+      MODEL_DIR_SHA256: ${MODEL_DIR_SHA256:-}
+      TOK_REPO: ${TOK_REPO:-}
+      MODEL_NAME: ${MODEL_NAME:-}
+      CTX: ${CTX:-}
       # already baked into the image; repeated here so nobody turns it off by accident (contract D1)
       SPARKINFER_DETERMINISTIC: "1"
     ports:

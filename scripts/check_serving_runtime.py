@@ -6,7 +6,7 @@
 
 Point it at a running runtime and it exercises every MUST/SHOULD in the contract:
 
-    uv run python scripts/check_serving_runtime.py --base-url http://127.0.0.1:8080 --model-id qwen3.6-35b-a3b
+    uv run python scripts/check_serving_runtime.py --base-url http://127.0.0.1:8080 --model-id qwen3.8-27b
 
 Prints PASS/FAIL/WARN per check, the measured greedy-stability distribution (D1) and whether the
 server 429s under overload instead of queueing (R6). Exit code 1 if any MUST fails. Runtime
@@ -57,6 +57,7 @@ def get_json(url: str, timeout: float, api_key: Optional[str] = None) -> Tuple[O
 
 
 API_KEY: Optional[str] = None
+THINKING: Optional[bool] = None  # --thinking on|off: sent as `enable_thinking` on every request, as the release will
 
 
 def chat(base_url: str, body: Dict, timeout: float) -> requests.Response:
@@ -91,6 +92,7 @@ def check_completion_shape(rep: Report, base_url: str, model_id: str, max_tokens
         'messages': [{'role': 'user', 'content': 'Explain TCP congestion control in two sentences.'}],
         'max_tokens': max_tokens,
         'temperature': 0,
+        **({'enable_thinking': THINKING} if THINKING is not None else {}),
         'stream': False,
         'logprobs': True,
         'top_logprobs': 1,
@@ -180,11 +182,16 @@ def check_determinism(
 def check_score(rep: Report, base_url: str, model_id: str, max_tokens: int, timeout: float) -> None:
     """R8: /v1/score must exist and reproduce, for the model's own greedy output, the logprobs generation reported."""
     messages = make_prompts(1, seed=11)[0]
-    gen = greedy(base_url, model_id, messages, max_tokens, timeout, API_KEY)
+    gen = greedy(base_url, model_id, messages, max_tokens, timeout, API_KEY, enable_thinking=THINKING)
     try:
-        sc = score(base_url, model_id, messages, gen['reference_completion'], timeout, API_KEY)
+        sc = score(
+            base_url, model_id, messages, gen['reference_completion'], timeout, API_KEY, enable_thinking=THINKING
+        )
     except requests.HTTPError as e:
-        rep.add('R8 POST /v1/score', MUST, False, f'HTTP {e.response.status_code if e.response else "?"}')
+        # `if e.response` is False for any 4xx/5xx (Response.__bool__ is .ok): test for None, and show the body.
+        r = e.response
+        detail = f'HTTP {r.status_code}: {r.text[:300]!r}' if r is not None else repr(e)
+        rep.add('R8 POST /v1/score', MUST, False, detail)
         return
     rep.add('R8 POST /v1/score', MUST, True, f'{len(sc["tokens"])} tokens')
     same_tok = sc['tokens'] == gen['reference_tokens']
@@ -209,16 +216,30 @@ def check_score(rep: Report, base_url: str, model_id: str, max_tokens: int, time
         reference_url=base_url,
         reference_api_key=API_KEY,
         request_timeout=timeout,
+        enable_thinking=THINKING,
     )
     ref = LiveReference(release)
+    # As the validator does on served traffic: force the runtime's own token ids, never re-tokenized text.
     verdict = verify_served(
-        ref, messages, gen['reference_completion'], gen['reference_tokens'], gen['reference_logprobs']
+        ref,
+        messages,
+        gen['reference_completion'],
+        gen['reference_tokens'],
+        gen['reference_logprobs'],
+        token_ids=gen.get('reference_token_ids'),
     )
     rep.add("R8 verify_served passes the model's own greedy output", MUST, verdict.passed, verdict.reason)
     for i in range(3):  # and on longer, traffic-shaped prompts
         msgs = make_baseline_prompt(random.Random(100 + i))
-        g = greedy(base_url, model_id, msgs, 256, timeout, API_KEY)
-        v = verify_served(ref, msgs, g['reference_completion'], g['reference_tokens'], g['reference_logprobs'])
+        g = greedy(base_url, model_id, msgs, 256, timeout, API_KEY, enable_thinking=THINKING)
+        v = verify_served(
+            ref,
+            msgs,
+            g['reference_completion'],
+            g['reference_tokens'],
+            g['reference_logprobs'],
+            token_ids=g.get('reference_token_ids'),
+        )
         rep.add(
             f'R8 verify_served on baseline prompt #{i + 1} ({len(g["reference_tokens"])} tok)', MUST, v.passed, v.reason
         )
@@ -231,6 +252,7 @@ def check_overload(rep: Report, base_url: str, model_id: str, parallel: int, max
         'messages': [{'role': 'user', 'content': 'Write a long essay about the history of computing.'}],
         'max_tokens': max_tokens,
         'temperature': 0,
+        **({'enable_thinking': THINKING} if THINKING is not None else {}),
         'stream': False,
     }
 
@@ -273,6 +295,7 @@ def _stream_once(base_url: str, model_id: str, messages, max_tokens: int, timeou
         'messages': messages,
         'max_tokens': max_tokens,
         'temperature': 0,
+        **({'enable_thinking': THINKING} if THINKING is not None else {}),
         'stream': True,
         'stream_options': {'include_usage': True},
     }
@@ -302,6 +325,7 @@ def _prefill_once(base_url: str, model_id: str, messages, timeout: float) -> Tup
         'messages': messages,
         'max_tokens': 1,
         'temperature': 0,
+        **({'enable_thinking': THINKING} if THINKING is not None else {}),
         'stream': True,
         'stream_options': {'include_usage': True},
     }
@@ -459,6 +483,12 @@ def main() -> int:
     )
     ap.add_argument('--overload-max-tokens', type=int, default=512)
     ap.add_argument('--api-key', default=None, help='bearer for a remote runtime (sparkinfer --api-key)')
+    ap.add_argument(
+        '--thinking',
+        choices=('runtime', 'on', 'off'),
+        default='runtime',
+        help="send enable_thinking on every request (the release's `enable_thinking`); runtime = the server default",
+    )
     ap.add_argument('--attest-url', default=None, help='the attest container (default: the runtime host, port 8081)')
     ap.add_argument(
         '--speed-json',
@@ -472,6 +502,8 @@ def main() -> int:
     args = ap.parse_args()
     global API_KEY
     API_KEY = args.api_key
+    global THINKING
+    THINKING = {'on': True, 'off': False}.get(args.thinking)
     base_url = args.base_url.rstrip('/')
 
     rep = Report()

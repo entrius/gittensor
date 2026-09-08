@@ -1,42 +1,51 @@
 {
   "releases": [
     {
-      "release_id": "qwen3.6-35b-a3b-sparkinfer-7498736",
-      "model_id": "qwen3.6-35b-a3b",
+      "release_id": "qwen3.8-27b-nvfp4-sparkinfer-19ef39ec2",
+      "model_id": "qwen3.8-27b",
       "backend": "openai-compat",
       "base_url": "http://127.0.0.1:8080",
       "max_tokens": 64,
-      "context_tokens": 36864,
-      "end_of_turn_token_id": 151645,
+      "context_tokens": 65536,
+      "end_of_turn_token_id": 248046,
+      "enable_thinking": false,
       "request_timeout": 300,
-      "runtime_pin": "gittensor-ai-lab/sparkinfer@7498736",
-      "runtime_image": "entrius/sparkinfer:7498736@sha256:2ab51deb56af16d94ac0cd6c92756df5e5a42facb4c5ab8c5eb39224937e16a2",
-      "model_file": "unsloth/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
-      "model_sha256": "ac0e2c1189e055faa36eff361580e79c5bd6f8e76bffb4ce547f167d53e31a61",
-      "audit_bank": "serving_audit_bank.json",
+      "runtime_pin": "gittensor-ai-lab/sparkinfer@19ef39ec2",
+      "runtime_image": "entrius/sparkinfer:19ef39ec2@sha256:d35719b03f320f7c30abcb7f6b495e64fb7edbe4187c8744775277dc661a23bb",
+      "model_file": "gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090@8e2c0cd25468ac5c1f85f621c2b8edb15ea1f03a",
+      "model_sha256": null,
+      "model_dir": {
+        "repo": "gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090",
+        "revision": "8e2c0cd25468ac5c1f85f621c2b8edb15ea1f03a",
+        "sha256": "model-00001-of-00002.safetensors=cdd37b0e61eccc8a3d7d08f9d1a4f52856a9d88e4e8b42089bd18a970e3a01ec,model-00002-of-00002.safetensors=713b84b8287e2193290214766c5384fa6475c5626a628e4021c2c9ca90aa61df"
+      },
+      "runtime_env": {
+        "CTX": "131072",
+        "MODEL_NAME": "qwen3.8-27b",
+        "TOK_REPO": "Qwen/Qwen3.8-27B"
+      },
       "speed": {
-        "single_stream_decode_tps": 443.6,
-        "aggregate_decode_tps": 280.0,
-        "measured_on": "gittensor-ai-lab/sparkinfer@7498736 on a rented RTX 5090 (Lium brave-fox-20), 2026-08-27: 16-concurrent x 64 tokens aggregate 279-282 tok/s (6: 255, 24: 268, 32: 275 \u2014 queues past 16, wall 3.7 s -> 7 s). Per-request points 2-12 re-measured on-box on compute3 card 1 (RTX 5090), 2026-09-05, 64 tokens x 3 reps, median: single 408.2, aggregate flat 285-289 from 2 up (#1753)",
+        "single_stream_decode_tps": 99.4,
+        "aggregate_decode_tps": 338.0,
+        "prefill_tps": 7500.0,
+        "measured_on": "gittensor-ai-lab/sparkinfer@19ef39ec2, NVFP4 directory, SPARKINFER_DETERMINISTIC=1, CTX=131072, enable_thinking=false, logprobs on every request, on two rented RTX 5090s (Lium, 2026-09-08 00:30-01:30 UTC), scripts/check_serving_runtime.py --parallel 16 --speed-json: single 99.6 / 99.2, 16-concurrent aggregate 334.1 / 342.6 tok/s, per-request points the mean of the two runs made monotone. prefill_tps from cold unique prompts, engine ttft_ms: 7.6k tok/s at 10k prompt tokens, 9.7k at 41k, 7.8k at 102k (deterministic mode; the runtime's own bench reports ~14k in default mode).",
         "decode_per_request": {
-          "1": 443.6,
-          "2": 144.3,
-          "3": 96.7,
-          "4": 72.6,
-          "5": 58.5,
-          "6": 50.2,
-          "8": 37.8,
-          "12": 25.5,
-          "16": 19.4,
-          "24": 19.4,
-          "32": 19.5
+          "1": 99.4,
+          "2": 92.1,
+          "3": 74.0,
+          "4": 56.8,
+          "5": 56.8,
+          "6": 49.7,
+          "8": 39.6,
+          "12": 24.8,
+          "16": 23.4
         }
       },
       "attest": {
         "image": "entrius/gt-attest:v1",
         "iters": 3,
-        "vram_model_reserved_bytes": 24000000000,
-        "reference_wall_ms": 846.8
+        "vram_model_reserved_bytes": 26400000000,
+        "reference_wall_ms": 832.0
       }
     }
   ]

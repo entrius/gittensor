@@ -111,6 +111,14 @@ def build_app(
                     'model_id': release.model_id,
                     'runtime_pin': release.runtime_pin,
                     'model_sha256': release.model_sha256,
+                    'model_dir': {
+                        'repo': release.model_dir_repo,
+                        'revision': release.model_dir_revision,
+                        'sha256': release.model_dir_sha256,
+                    }
+                    if release.model_dir_repo
+                    else None,
+                    'runtime_env': release.runtime_env,
                     # OpenRouter's fields: agent harnesses size their context compaction from these, so a client
                     # that reads them never has to hit the 400 context_length_exceeded
                     'context_length': release.context_tokens or SERVING_CONTEXT_TOKENS_FALLBACK,
@@ -267,7 +275,7 @@ def build_app(
                 async def run(miner=miner, relay=relay, queue=queue) -> Optional[InferenceSynapse]:
                     try:
                         return await _dispatch(
-                            get_dendrite(), miner, messages, max_tokens, release, request_timeout, relay
+                            get_dendrite(), miner, messages, max_tokens, release, release.request_timeout, relay
                         )
                     finally:
                         await queue.put(_END)
@@ -305,7 +313,7 @@ def build_app(
                 return StreamingResponse(body_iter(), media_type='text/event-stream')
 
             try:
-                result = await _dispatch(get_dendrite(), miner, messages, max_tokens, release, request_timeout)
+                result = await _dispatch(get_dendrite(), miner, messages, max_tokens, release, release.request_timeout)
             except Exception:
                 result = None
             if _busy_refused(result):  # refused at capacity: try elsewhere

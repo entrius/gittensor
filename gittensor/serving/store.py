@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS dormant (hotkey TEXT PRIMARY KEY, rounds INTEGER);
 CREATE TABLE IF NOT EXISTS attest (hotkey TEXT PRIMARY KEY, status TEXT);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS last_credit (hotkey TEXT PRIMARY KEY, credit REAL);
+CREATE TABLE IF NOT EXISTS miner_release (hotkey TEXT PRIMARY KEY, release_id TEXT);
 """
 
 
@@ -67,9 +68,11 @@ class ServingStore:
                 'attest',
                 'meta',
                 'last_credit',
+                'miner_release',
             ):
                 db.execute(f'DELETE FROM {table}')
             db.executemany('INSERT INTO last_credit VALUES (?, ?)', list(state.last_credit.items()))
+            db.executemany('INSERT INTO miner_release VALUES (?, ?)', list(state.miner_release.items()))
             db.execute('INSERT INTO meta VALUES (?, ?)', ('attest_round', str(int(state.attest_round))))
             db.execute('INSERT INTO meta VALUES (?, ?)', ('last_round_ts', repr(float(state.last_round_ts))))
             db.executemany(
@@ -121,6 +124,8 @@ class ServingStore:
                         state.last_round_ts = float(value)
                 for hk, credit in db.execute('SELECT hotkey, credit FROM last_credit'):
                     state.last_credit[str(hk)] = float(credit)
+                for hk, rid in db.execute('SELECT hotkey, release_id FROM miner_release'):
+                    state.miner_release[str(hk)] = str(rid)
         except sqlite3.Error:
             pass
         return state

@@ -202,9 +202,10 @@ INSERT INTO serving_rounds (
     validator_hotkey, round_ts, served, gateway, baseline, passes, misses, strikes, neutral,
     ready, probation, quarantined, card_equivalents, pool_share, alpha_per_hour, alpha_usd,
     gpu_hour_usd, pool_cap, model_id, release_id, runtime_pin, model_sha256, model_file, runtime_image, attest_image,
-    tokens, usd_per_m_tokens, prompt_tokens, usd_per_m_prompt_tokens
+    tokens, usd_per_m_tokens, prompt_tokens, usd_per_m_prompt_tokens, model_dir_sha256, runtime_env
 ) VALUES (
-    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+    %s, %s
 )
 ON CONFLICT (validator_hotkey, round_ts) DO NOTHING
 """

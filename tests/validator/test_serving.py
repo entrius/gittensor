@@ -12,11 +12,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gittensor.constants import (
+    SERVING_AGGREGATE_DECODE_TPS_FALLBACK,
     SERVING_AUDIT_MAX_ABS_LOGPROB_DIFF,
     SERVING_AUDIT_MAX_MEAN_ABS_LOGPROB_DIFF,
     SERVING_AUDIT_MIN_PREFIX_AGREEMENT,
     SERVING_AUDIT_WINDOW,
     SERVING_AUDIT_WINDOW_THRESHOLDS,
+    SERVING_DECODE_PER_REQUEST_FALLBACK,
+    SERVING_PREFILL_TPS_FALLBACK,
     SERVING_PRICING_MAX_AGE_S,
 )
 from gittensor.serving.api import build_app, parse_api_keys
@@ -69,9 +72,15 @@ def test_echo_backend_matches_expected_completion():
 def test_default_loadout_targets_sparkinfer():
     release = load_serving_loadout().primary
     assert release.backend == 'openai-compat'
-    assert release.base_url and release.audit_bank
+    assert release.base_url and release.runtime_pin and release.runtime_image and '@sha256:' in release.runtime_image
     assert release.reference_url is None  # validators point SERVING_REFERENCE_URL at their own/rented runtime
     assert release.max_tokens > 0
+    # Qwen3.8-27B: a pinned model directory (HF commit + per-shard digests), thinking off, 64k prompts
+    assert release.model_id == 'qwen3.8-27b' and release.model_sha256 is None
+    assert release.model_dir_repo and len(release.model_dir_revision or '') == 40
+    assert (release.model_dir_sha256 or '').count('=') == 2
+    assert release.enable_thinking is False and release.end_of_turn_token_id == 248046
+    assert release.context_tokens == 65_536 and (release.runtime_env or {}).get('CTX') == '131072'
 
 
 def test_echo_loadout_loads_via_env(monkeypatch):
@@ -125,7 +134,7 @@ def test_live_reference_wins_over_bank(monkeypatch):
     assert isinstance(ref, audit.LiveReference)
     captured = {}
 
-    def fake_greedy(base_url, model_id, messages, max_tokens, timeout, api_key=None):
+    def fake_greedy(base_url, model_id, messages, max_tokens, timeout, api_key=None, **kw):
         captured['base_url'] = base_url
         captured['api_key'] = api_key
         return {
@@ -343,7 +352,7 @@ def test_gateway_requires_key(monkeypatch):
     assert r.status_code == 200 and set(r.json()['data'][0]) >= {'id', 'runtime_pin', 'model_sha256'}
     # OpenRouter's context fields: a harness reads these to size its compaction instead of hitting the 400
     model = r.json()['data'][0]
-    assert model['context_length'] == 36_864 and model['max_output_tokens'] == 4096
+    assert model['context_length'] == 65_536 and model['max_output_tokens'] == 4096
     assert client.get('/health').status_code == 200
 
 
@@ -929,7 +938,7 @@ def test_gateway_limits_the_prompt_by_context_window_not_characters(monkeypatch)
 
     assert SERVING_MAX_TOKENS == 4096 and SERVING_MAX_PROMPT_CHARS >= 4 * SERVING_CONTEXT_TOKENS_FALLBACK
     shipped = load_serving_loadout().primary
-    assert shipped.context_tokens == 36_864 and shipped.request_timeout >= 300.0  # 4096 tokens at ~19 tok/s fits
+    assert shipped.context_tokens == 65_536 and shipped.request_timeout >= 300.0  # 4096 tokens at ~23 tok/s fits
 
     good = _echo_release()
     state = ServingState()
@@ -947,10 +956,10 @@ def test_gateway_limits_the_prompt_by_context_window_not_characters(monkeypatch)
 
     monkeypatch.setattr(api_module, '_dispatch', dispatch)
     context = SERVING_CONTEXT_TOKENS_FALLBACK
-    long_prompt = [{'role': 'user', 'content': 'x' * (30_000 * 4)}]  # ~30k tokens: fits, with ~6.8k left
+    long_prompt = [{'role': 'user', 'content': 'x' * ((context - 6_800) * 4)}]  # fits, with ~6.8k tokens left
     r = client.post('/v1/chat/completions', headers=headers, json={'messages': long_prompt, 'max_tokens': 4096})
     assert r.status_code == 200 and seen['max_tokens'] == 4096
-    nearly_full = [{'role': 'user', 'content': 'x' * (35_000 * 4)}]  # ~35k tokens: the completion is clamped
+    nearly_full = [{'role': 'user', 'content': 'x' * ((context - 1_800) * 4)}]  # ~1.8k left: the completion is clamped
     r = client.post('/v1/chat/completions', headers=headers, json={'messages': nearly_full, 'max_tokens': 4096})
     assert r.status_code == 200 and seen['max_tokens'] == context - prompt_token_estimate(nearly_full)
     assert len(state.drain_served()) == 2  # both routed and recorded
@@ -1895,7 +1904,7 @@ def test_decode_speed_prices_served_requests_against_the_blessing_curve():
     # between points the aggregate (per-request x n) is interpolated, then divided by n: 6 -> 276, 16 -> 304 tok/s
     assert expected_decode_tps(curve, 11) == pytest.approx((276.0 + (304.0 - 276.0) * 0.5) / 11)
     assert expected_decode_tps(curve, 3) == pytest.approx((440.0 + (276.0 - 440.0) * 0.4) / 3)  # 124.8, not 282.4
-    assert expected_decode_tps(None, 6) == 46.0  # constants' fallback curve
+    assert expected_decode_tps(None, 6) == pytest.approx(SERVING_DECODE_PER_REQUEST_FALLBACK[1][1])  # fallback curve
     assert decode_credit(440.0, 440.0) == 1.0 and decode_credit(600.0, 440.0) == 1.0  # never more than one card
     assert decode_credit(352.0, 440.0) == 1.0  # 0.8x: inside the tolerance for WAN-observed decode
     assert decode_credit(264.0, 440.0) == pytest.approx(0.75)  # 0.6x -> 0.6 / 0.8
@@ -1959,9 +1968,7 @@ def test_token_pay_is_derived_from_the_release_speed(tmp_path):
     """Only the card-hour target is hand-set: the per-token rate is that target over what one card decodes in an
     hour, so a card flat out earns exactly the card-hour, 1.5 cards' worth of tokens earns 1.5, an idle card 0."""
     from gittensor.constants import (
-        SERVING_AGGREGATE_DECODE_TPS_FALLBACK,
         SERVING_GPU_HOUR_USD,
-        SERVING_PREFILL_TPS_FALLBACK,
         SERVING_PROMPT_TEMPLATE_TOKENS,
     )
     from gittensor.serving.loadout import load_serving_loadout
@@ -2095,8 +2102,12 @@ def test_round_pays_prefill_as_card_time(monkeypatch):
     assert scores['hk1'] == pytest.approx(card_equivalents(3 * 8, release, ROUND_S))
     assert scores['hk2'] == pytest.approx(card_equivalents(3 * 8, release, ROUND_S, 3 * 1000))
     assert scores['hk2'] > scores['hk1']
-    # 3000 prompt tokens at 24k tok/s is 0.125 s of card-time on top of 24 tokens' 0.086 s of decode
-    assert scores['hk2'] / scores['hk1'] == pytest.approx(1 + (3000 / 24_000.0) / (24 / 280.0))
+    # 3000 prompt tokens at the release's prefill rate is card-time on top of 24 tokens' decode at its aggregate rate
+    from gittensor.validator.serving.scoring import aggregate_decode_tps, prefill_tps
+
+    assert scores['hk2'] / scores['hk1'] == pytest.approx(
+        1 + (3000 / prefill_tps(release)) / (24 / aggregate_decode_tps(release))
+    )
     windows = state.last_round['windows']
     assert windows[1]['tokens'] == 24 and windows[1]['prompt_tokens'] == 0
     assert windows[2]['tokens'] == 24 and windows[2]['prompt_tokens'] == 3000
@@ -2125,8 +2136,12 @@ def test_round_rows_carry_prompt_tokens_and_both_rates():
     summary, miners = round_rows('vali', dt.datetime.now(dt.timezone.utc), last_round, {}, None, release)
     assert len(summary) == INSERT_SERVING_ROUND.count('%s')
     assert all(len(row) == BULK_INSERT_SERVING_MINER_ROUNDS.count('%s') for row in miners)
-    assert summary[-4:-2] == (1000, pytest.approx(0.694, abs=0.001))  # output tokens, $/M output
-    assert summary[-2] == 30_000 and summary[-1] == pytest.approx(0.0081, abs=0.0001)  # prompt tokens, $/M prompt
+    from gittensor.validator.serving.scoring import aggregate_decode_tps, prefill_tps
+
+    out_rate = 0.70 / (aggregate_decode_tps(release) * 3600) * 1e6
+    prompt_rate = 0.70 / (prefill_tps(release) * 3600) * 1e6
+    assert summary[25:27] == (1000, pytest.approx(out_rate))  # output tokens, $/M output
+    assert summary[27] == 30_000 and summary[28] == pytest.approx(prompt_rate)  # prompt tokens, $/M prompt
     assert sorted((row[2], row[-2], row[-1]) for row in miners) == [(1, 800, 30_000), (2, 200, 0)]
 
 
@@ -3431,21 +3446,261 @@ def test_inference_stream_clears_the_prefill_mark_at_the_first_content_delta():
 def test_shipped_curve_pays_an_honest_card_in_full_at_2_to_5_concurrent():
     """#1753: the blessed curve had points at 1 and 6 only, and the straight line between them sat far above what a
     5090 does at 2-5 streams, so an honest card read 0.32-0.48x expected there — under the floor, zero credit. The
-    curve now carries measured points 2-12 and interpolates on aggregate rate. The rows are the issue's on-box
-    measurement of an unshared, correctly pinned card."""
+    curve carries measured points 1-16 and interpolates on aggregate rate. The rows are the first of the two
+    2026-09-08 checker runs on Qwen3.8-27B NVFP4 (the loadout curve is the mean of both, made monotone)."""
     from gittensor.validator.serving.scoring import decode_credit, expected_decode_tps
 
     release = load_serving_loadout().primary
     assert release.decode_per_request is not None
-    miner_measured = {1: 426.8, 2: 148.2, 3: 91.8, 4: 74.7, 5: 59.9, 6: 49.6, 8: 37.5}
+    miner_measured = {1: 99.6, 2: 89.4, 3: 72.3, 4: 57.3, 5: 53.6, 6: 49.4, 8: 39.5, 12: 24.9, 16: 23.2}
     for n, observed in miner_measured.items():
         expected = expected_decode_tps(release.decode_per_request, n)
         assert observed / expected >= 0.8, (n, observed, expected)  # inside the WAN tolerance: full credit
         assert decode_credit(observed, expected) == 1.0
-    # and between the sparse tail points a queued stream is still expected at the last measured rate, not below it
-    assert expected_decode_tps(release.decode_per_request, 20) == pytest.approx(
-        (16 * 19.4 + (24 * 19.4 - 16 * 19.4) * 0.5) / 20
+    # past the last measured point a queued stream is still expected at the last measured rate, not below it
+    assert expected_decode_tps(release.decode_per_request, 20) == 23.4
+    assert expected_decode_tps(release.decode_per_request, 64) == 23.4
+    # A dense 27B barely slows at 2 streams (92 vs 99 tok/s), so two hotkeys on one card are NOT caught by decode
+    # speed the way the MoE's 144-vs-440 was; the same-instant attest fill is what catches sharing now. Four
+    # hotkeys on one card still read under the tolerance at 1 in flight.
+    assert decode_credit(92.1, expected_decode_tps(release.decode_per_request, 1)) == 1.0
+    assert decode_credit(56.8, expected_decode_tps(release.decode_per_request, 1)) < 0.8
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Two blessed releases at once (serving/multi-release): a miner runs one, the validator learns which and audits,
+# pays and routes it for that release only.
+
+
+def _two_release_dendrite(by_axon: Dict[int, ServingRelease]):
+    """Fake streaming dendrite for miners on different releases: an axon echoes its own release's completion when
+    asked for it and refuses like ``blacklist_caller`` does when asked for another. Counts calls per axon."""
+    from gittensor.serving.stream import result_to_sse
+
+    calls: Dict[int, list] = {}
+
+    async def call_stream(target_axon, synapse, timeout, deserialize):
+        mine = by_axon[id(target_axon)]
+        calls.setdefault(id(target_axon), []).append(synapse.release_id)
+        final = synapse.model_copy()
+        if synapse.release_id and synapse.release_id != mine.release_id:
+            final.dendrite.status_code = 403
+            final.dendrite.status_message = f'serving release {mine.release_id}, not {synapse.release_id}'
+            yield final
+            return
+        ref = expected_completion(synapse.messages, synapse.max_tokens, mine.model_id)
+        ref.model_id = mine.model_id
+        for chunk in result_to_sse(ref, 'chatcmpl-miner', 0, logprobs=True):
+            yield chunk
+        final.dendrite.process_time = 0.05
+        yield final
+
+    return SimpleNamespace(call_stream=call_stream), calls
+
+
+def test_refused_release_parses_the_miners_own_refusal():
+    from gittensor.validator.serving.forward import refused_release
+
+    assert refused_release('Forbidden. Key is blacklisted: serving release b-v0, not a-v0') == 'b-v0'
+    assert refused_release('busy: all backend slots in use') is None
+    assert refused_release(None) is None
+
+
+def test_baseline_discovers_a_miners_release_from_its_refusal_and_retargets():
+    """Round 1: every undeclared miner gets primary prompts; the second-release miner refuses naming its release,
+    which is recorded as discovery (no miss). Round 2: it is prompted for its own release and serves."""
+    from gittensor.validator.serving import forward as fwd
+
+    a = ServingRelease(model_id='echo-a', backend='echo', max_tokens=8, release_id='a-v0')
+    b = ServingRelease(model_id='echo-b', backend='echo', max_tokens=8, release_id='b-v0')
+    loadout = ServingLoadout(releases=[a, b])
+    ax1, ax2, ax3 = (SimpleNamespace(is_serving=True) for _ in range(3))
+    dendrite, calls = _two_release_dendrite(
+        {id(ax1): a, id(ax2): b, id(ax3): ServingRelease(model_id='x', backend='echo', release_id='not-blessed')}
     )
-    assert expected_decode_tps(release.decode_per_request, 64) == 19.5
-    # a card genuinely shared between two hotkeys still reads under the floor at 1 in flight
-    assert decode_credit(144.3, expected_decode_tps(release.decode_per_request, 1)) == 0.0
+    serving = [(1, 'hk1', ax1), (2, 'hk2', ax2), (3, 'hk3', ax3)]
+    state = ServingState()
+
+    sent = asyncio.run(fwd.baseline_round(state, dendrite, serving, loadout, 0.0, per_miner=1, rng=random.Random(1)))  # type: ignore[arg-type]
+    assert sent == 3 and calls[id(ax1)] == ['a-v0'] and calls[id(ax2)] == ['a-v0'] and calls[id(ax3)] == ['a-v0']
+    assert state.miner_release == {'hk1': 'a-v0', 'hk2': 'b-v0'}  # hk3 named a release we do not bless
+    served = state.drain_served()
+    assert {req.hotkey: (req.ok, req.release_id) for req in served} == {'hk1': (True, 'a-v0'), 'hk3': (False, 'a-v0')}
+    assert 'not-blessed' in served[-1].detail  # the unblessed refusal is that miner's miss, nothing is hidden
+
+    asyncio.run(fwd.baseline_round(state, dendrite, serving, loadout, 0.0, per_miner=1, rng=random.Random(2)))  # type: ignore[arg-type]
+    assert calls[id(ax2)] == ['a-v0', 'b-v0']
+    assert {(req.hotkey, req.ok, req.release_id) for req in state.drain_served()} >= {
+        ('hk2', True, 'b-v0'),
+        ('hk1', True, 'a-v0'),
+    }
+
+    # a miner that switches releases is rediscovered from its next refusal, not stranded on the stale mapping
+    by_axon = {id(ax1): b, id(ax2): b, id(ax3): a}
+    dendrite2, calls2 = _two_release_dendrite(by_axon)
+    asyncio.run(fwd.baseline_round(state, dendrite2, serving, loadout, 0.0, per_miner=1, rng=random.Random(3)))  # type: ignore[arg-type]
+    assert state.miner_release == {'hk1': 'b-v0', 'hk2': 'b-v0', 'hk3': 'a-v0'}
+    assert all(req.ok for req in state.drain_served())  # discovery rounds carry no misses
+
+    # release_for falls back to the primary when a declared release leaves the loadout
+    assert fwd.release_for(state, ServingLoadout(releases=[a]), 'hk2') is a and 'hk2' not in state.miner_release
+
+
+def test_audit_round_settles_two_live_releases_independently(monkeypatch):
+    """Miners on two blessed releases in one round: each is verified against its own reference, reported and paid
+    under its own release, READY for it alone; an undeclared miner sits in probation on the primary; a served
+    completion for a release declares the miner for it without a baseline refusal."""
+    from gittensor.validator.serving import forward as fwd
+
+    a = ServingRelease(model_id='echo-a', backend='echo', max_tokens=8, release_id='a-v0')
+    b = ServingRelease(model_id='echo-b', backend='echo', max_tokens=8, release_id='b-v0', request_timeout=123.0)
+    loadout = ServingLoadout(releases=[a, b])
+    ax1, ax2, ax3 = (SimpleNamespace(is_serving=True) for _ in range(3))
+    dendrite, _ = _two_release_dendrite({id(ax1): a, id(ax2): b, id(ax3): a})
+    state = ServingState(settlement_rounds=1)
+    state.miner_release['hk1'] = 'a-v0'  # hk2 is undeclared: its served completion for b-v0 declares it below
+    for uid, release in ((1, a), (2, b), (1, a), (2, b)):
+        req = _served(uid, release)
+        req.release_id = release.release_id  # as the gateway and baseline stamp it
+        state.enqueue_served(req)
+
+    scores = asyncio.run(
+        fwd.audit_round(state, dendrite, [(1, 'hk1', ax1), (2, 'hk2', ax2), (3, 'hk3', ax3)], loadout, round_s=ROUND_S)  # type: ignore[arg-type]
+    )
+    assert scores == {'hk1': pytest.approx(_pay(16, a)), 'hk2': pytest.approx(_pay(16, b)), 'hk3': 0.0}
+    assert state.miner_release == {'hk1': 'a-v0', 'hk2': 'b-v0'}
+    ready = {m.uid: m.release_id for m in state.ready_miners()}
+    assert ready == {1: 'a-v0', 2: 'b-v0'}
+    windows = state.last_round['windows']
+    assert windows[1]['release_id'] == 'a-v0' and windows[1]['status'] == 'ready' and windows[1]['tokens'] == 16
+    assert windows[2]['release_id'] == 'b-v0' and windows[2]['status'] == 'ready' and windows[2]['tokens'] == 16
+    assert windows[3]['release_id'] == 'a-v0' and windows[3]['status'] == 'probation'  # undeclared -> primary
+    assert state.audits.verdict('hk2', 'a-v0').n_audits == 0  # nothing of hk2's landed in the primary's window
+    # routing: each release acquires only its own miner; probation for the primary holds the undeclared one
+    assert state.acquire('a-v0').uid == 1 and state.acquire('b-v0').uid == 2  # type: ignore[union-attr]
+    assert state.acquire('a-v0', probation=True).uid == 3  # type: ignore[union-attr]
+    # the round's per-miner DB rows carry each miner's own release and rate
+    import datetime as dt
+
+    from gittensor.validator.serving.persist import round_rows
+
+    now = dt.datetime.now(dt.timezone.utc)
+    summary, miners = round_rows('vali', now, state.last_round, state.settled_scores(), None, a)
+    by_uid = {row[2]: row for row in miners}
+    assert by_uid[1][5] == 'a-v0' and by_uid[2][5] == 'b-v0' and by_uid[3][5] == 'a-v0'
+
+
+def test_serving_store_round_trips_miner_releases(tmp_path):
+    from gittensor.serving.store import ServingStore
+
+    store = ServingStore(tmp_path / 'serving.db')
+    state = ServingState()
+    state.miner_release = {'hk1': 'a-v0', 'hk2': 'b-v0'}
+    store.save(state)
+    assert store.load(ServingState()).miner_release == {'hk1': 'a-v0', 'hk2': 'b-v0'}
+    state.miner_release.pop('hk2')
+    store.save(state)
+    assert store.load(ServingState()).miner_release == {'hk1': 'a-v0'}  # replaced, never appended
+
+
+def test_seeded_probation_uses_the_miners_known_release(monkeypatch):
+    from gittensor.validator.serving import forward as fwd
+
+    a = ServingRelease(model_id='echo-a', backend='echo', max_tokens=8, release_id='a-v0')
+    b = ServingRelease(model_id='echo-b', backend='echo', max_tokens=8, release_id='b-v0')
+    state = ServingState()
+    state.last_round_ts = time.time()
+    state.miner_release['hk2'] = 'b-v0'
+    ax1, ax2 = SimpleNamespace(is_serving=True), SimpleNamespace(is_serving=True)
+    monkeypatch.setattr(fwd, 'get_serving_axons', lambda v: [(1, 'hk1', ax1), (2, 'hk2', ax2)])
+    fwd.seed_ready_from_store(SimpleNamespace(), state, ServingLoadout(releases=[a, b]))  # type: ignore[arg-type]
+    assert state.acquire('a-v0', probation=True).uid == 1 and state.acquire('b-v0', probation=True).uid == 2  # type: ignore[union-attr]
+
+
+def test_loadout_env_overrides_target_each_release(monkeypatch, tmp_path):
+    """SERVING_REFERENCE_URL names the primary's reference; SERVING_REFERENCE_URL__<RELEASE_ID> a second release's;
+    the miner-side SERVING_BASE_URL applies to the release named by SERVING_RELEASE."""
+    from gittensor.serving.loadout import env_suffix
+
+    path = tmp_path / 'loadout.json'
+    path.write_text(
+        json.dumps(
+            {
+                'releases': [
+                    {'model_id': 'echo-a', 'backend': 'echo', 'release_id': 'a-v0'},
+                    {'model_id': 'echo-b', 'backend': 'echo', 'release_id': 'qwen3.8-27b-nvfp4-sparkinfer-abc'},
+                ]
+            }
+        )
+    )
+    assert env_suffix('qwen3.8-27b-nvfp4-sparkinfer-abc') == 'QWEN3_8_27B_NVFP4_SPARKINFER_ABC'
+    monkeypatch.setenv('SERVING_REFERENCE_URL', 'http://ref-a:8080')
+    monkeypatch.setenv('SERVING_REFERENCE_URL__QWEN3_8_27B_NVFP4_SPARKINFER_ABC', 'http://ref-b:8080')
+    monkeypatch.setenv('SERVING_REFERENCE_API_KEY__QWEN3_8_27B_NVFP4_SPARKINFER_ABC', 'kb')
+    monkeypatch.setenv('SERVING_RELEASE', 'qwen3.8-27b-nvfp4-sparkinfer-abc')
+    monkeypatch.setenv('SERVING_BASE_URL', 'http://runtime:8080')
+    a, b = load_serving_loadout(path).releases
+    assert a.reference_url == 'http://ref-a:8080' and a.attest_reference_url == 'http://ref-a:8081'
+    assert a.reference_api_key is None and a.base_url is None
+    assert b.reference_url == 'http://ref-b:8080' and b.attest_reference_url == 'http://ref-b:8081'
+    assert b.reference_api_key == 'kb' and b.base_url == 'http://runtime:8080' and b.attest_url == 'http://runtime:8081'
+    monkeypatch.delenv('SERVING_RELEASE')
+    a, b = load_serving_loadout(path).releases
+    assert a.base_url == 'http://runtime:8080' and b.base_url is None  # no SERVING_RELEASE: the primary, as before
+
+
+def test_release_pins_thinking_and_a_model_directory(monkeypatch):
+    """A release's enable_thinking rides on every request the miner, the reference and the checker send, so served
+    text and its teacher-forced score template identically; a model-directory artifact is pinned by HF revision
+    plus per-shard digests and surfaces on /v1/models for the release card."""
+    from gittensor.serving import probe
+    from gittensor.serving.audit import LiveReference
+    from gittensor.serving.backends import OpenAICompatBackend
+
+    raw = {
+        'model_id': 'qwen3.8-27b',
+        'backend': 'openai-compat',
+        'base_url': 'http://runtime:8080',
+        'reference_url': 'http://ref:8080',
+        'enable_thinking': False,
+        'model_dir': {'repo': 'org/Model-NVFP4', 'revision': 'abc123', 'sha256': 'a.safetensors=00,b.safetensors=11'},
+    }
+    release = ServingRelease.from_dict(raw)
+    assert release.enable_thinking is False and release.model_sha256 is None
+    assert (release.model_dir_repo, release.model_dir_revision) == ('org/Model-NVFP4', 'abc123')
+    assert ServingRelease.from_dict({'model_id': 'x', 'backend': 'echo'}).enable_thinking is None
+
+    body = OpenAICompatBackend(release)._body(MSGS, 8, logprobs=True, stream=False)
+    assert body['enable_thinking'] is False
+    assert 'enable_thinking' not in OpenAICompatBackend(_echo_release_openai())._body(MSGS, 8, False, False)
+
+    sent = []
+
+    class _R:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                'choices': [{'message': {'content': 'x'}, 'logprobs': {'content': [{'token': 'x', 'logprob': -0.1}]}}],
+                'usage': {'completion_tokens': 1},
+                'tokens': ['x'],
+                'logprobs': [-0.1],
+            }
+
+    monkeypatch.setattr(probe.requests, 'post', lambda url, **kw: (sent.append((url, kw['json'])), _R())[1])
+    ref = LiveReference(release)
+    ref.case_for(MSGS)
+    ref.score(MSGS, 'x')
+    assert [u.rsplit('/', 1)[1] for u, _ in sent] == ['completions', 'score']
+    assert all(j['enable_thinking'] is False for _, j in sent)
+
+    with TestClient(build_app(ServingState(), ServingLoadout(releases=[release]), {'k'}, lambda: None, 60.0)) as c:
+        model = c.get('/v1/models', headers={'Authorization': 'Bearer k'}).json()['data'][0]
+    assert model['model_dir'] == raw['model_dir'] and model['model_sha256'] is None
+
+
+def _echo_release_openai() -> ServingRelease:
+    return ServingRelease(model_id='echo-v0', backend='openai-compat', base_url='http://runtime:8080')

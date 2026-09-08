@@ -24,6 +24,7 @@ traffic-driven schedule (Gepetto-lite) is the planned upgrade path.
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -54,12 +55,25 @@ class ServingRelease:
     runtime_image: Optional[str] = None  # the blessed image by digest (entrius/sparkinfer:<tag>@sha256:...)
     model_sha256: Optional[str] = None  # digest of the model file; runtime_pin + model_sha256 = the release
     model_file: Optional[str] = None  # HF path of the model file, informational (the digest is what is enforced)
+    # A release whose artifact is a Hugging Face model DIRECTORY (compressed-tensors NVFP4/FP8 safetensors) instead of
+    # one GGUF: the repo, the commit it is pinned at (HF repos are mutable) and "file=sha256,..." for its weight shards.
+    # docker/sparkinfer-entrypoint.sh fetches and verifies exactly this; model_sha256 is then None.
+    model_dir_repo: Optional[str] = None
+    model_dir_revision: Optional[str] = None
+    model_dir_sha256: Optional[str] = None
+    # Env the runtime container needs beyond the artifact pins (CTX, MODEL_NAME, TOK_REPO): informational for the release
+    # card and compose files; nothing enforces it.
+    runtime_env: Optional[Dict[str, str]] = None
     audit_bank: Optional[str] = None  # validator side: snapshot reference, filename under weights/
     reference_url: Optional[str] = (
         None  # validator side: live reference runtime (own GPU or a rented one); wins over audit_bank
     )
     reference_api_key: Optional[str] = None  # bearer for a remote reference (sparkinfer --api-key)
     request_timeout: float = 60.0
+    # Whether the runtime renders the chat template with thinking on (None = the runtime's default). A hybrid-thinking
+    # model (Qwen3.8) thinks by default; a release that serves answers, not reasoning, pins False and the miner,
+    # the reference and the checker all send it, so served text and its teacher-forced score template identically.
+    enable_thinking: Optional[bool] = None
     # Speed of one honest card on this exact runtime, measured at blessing time (scripts/check_serving_runtime.py
     # --speed-json on the conformance GPU) and written by the pin-bump PR. The validator credits speed against the
     # curve and prices tokens against the aggregate, so the "one card" bar tracks the runtime as it gets faster and
@@ -112,6 +126,7 @@ class ServingRelease:
         speed = raw.get('speed') or {}
         attest = raw.get('attest') or {}
         audit = raw.get('audit') or {}
+        model_dir = raw.get('model_dir') or {}
         return cls(
             model_id=raw['model_id'],
             backend=raw['backend'],
@@ -125,10 +140,15 @@ class ServingRelease:
             runtime_image=raw.get('runtime_image'),
             model_file=raw.get('model_file'),
             model_sha256=raw.get('model_sha256'),
+            model_dir_repo=model_dir.get('repo'),
+            model_dir_revision=model_dir.get('revision'),
+            model_dir_sha256=model_dir.get('sha256'),
+            runtime_env={str(k): str(v) for k, v in (raw.get('runtime_env') or {}).items()} or None,
             audit_bank=raw.get('audit_bank'),
             reference_url=raw.get('reference_url'),
             reference_api_key=raw.get('reference_api_key'),
             request_timeout=float(raw.get('request_timeout', 60.0)),
+            enable_thinking=bool(raw['enable_thinking']) if raw.get('enable_thinking') is not None else None,
             context_tokens=int(raw['context_tokens']) if raw.get('context_tokens') else None,
             decode_per_request={int(k): float(v) for k, v in (speed.get('decode_per_request') or {}).items()} or None,
             aggregate_decode_tps=_optional_float(speed.get('aggregate_decode_tps')),
@@ -192,6 +212,11 @@ class ServingLoadout:
         raise KeyError(f'release {release_id!r} not in serving loadout: {[r.release_id for r in self.releases]}')
 
 
+def env_suffix(release_id: str) -> str:
+    """``qwen3.8-27b-nvfp4`` -> ``QWEN3_8_27B_NVFP4``: how a non-primary release is named in env overrides."""
+    return re.sub(r'[^A-Za-z0-9]', '_', release_id).upper()
+
+
 def resolve_loadout_path(path: Optional[Path] = None) -> Path:
     if path is not None:
         return path
@@ -206,26 +231,37 @@ def load_serving_loadout(path: Optional[Path] = None) -> ServingLoadout:
     entries = raw['releases'] if isinstance(raw, dict) and 'releases' in raw else [raw]
     loadout = ServingLoadout(releases=[ServingRelease.from_dict(entry) for entry in entries])
 
+    # Miner side: the runtime/sidecar overrides apply to the release this miner serves (SERVING_RELEASE), else the
+    # primary. Validator side: SERVING_REFERENCE_URL & co. name the primary's reference; every other release's is
+    # SERVING_REFERENCE_URL__<RELEASE_ID> (release_id upper-cased, non-alphanumerics as '_'), same for the api keys
+    # and the attest sidecar, so a validator hosts one reference per release without committing its endpoints.
+    wanted = os.getenv('SERVING_RELEASE')
+    try:
+        mine = loadout.get(wanted) if wanted else loadout.primary
+    except KeyError:
+        mine = loadout.primary
     base_override = os.getenv('SERVING_BASE_URL')
     if base_override:
-        loadout.primary.base_url = base_override
-        loadout.primary.attest_url = _sidecar_url(base_override)
+        mine.base_url = base_override
+        mine.attest_url = _sidecar_url(base_override)
     attest_override = os.getenv('SERVING_ATTEST_URL')
     if attest_override:
-        loadout.primary.attest_url = attest_override
+        mine.attest_url = attest_override
 
-    reference_override = os.getenv('SERVING_REFERENCE_URL')
-    if reference_override:
-        loadout.primary.reference_url = reference_override
-        loadout.primary.attest_reference_url = os.getenv('SERVING_ATTEST_REFERENCE_URL') or _sidecar_url(
-            reference_override
-        )
-    key_override = os.getenv('SERVING_REFERENCE_API_KEY')
-    if key_override:
-        loadout.primary.reference_api_key = key_override
-    attest_key_override = os.getenv('SERVING_ATTEST_REFERENCE_API_KEY')
-    if attest_key_override:
-        loadout.primary.attest_reference_api_key = attest_key_override
+    for release in loadout.releases:
+        suffix = '' if release is loadout.primary else '__' + env_suffix(release.release_id)
+        reference_override = os.getenv('SERVING_REFERENCE_URL' + suffix)
+        if reference_override:
+            release.reference_url = reference_override
+            release.attest_reference_url = os.getenv('SERVING_ATTEST_REFERENCE_URL' + suffix) or _sidecar_url(
+                reference_override
+            )
+        key_override = os.getenv('SERVING_REFERENCE_API_KEY' + suffix)
+        if key_override:
+            release.reference_api_key = key_override
+        attest_key_override = os.getenv('SERVING_ATTEST_REFERENCE_API_KEY' + suffix)
+        if attest_key_override:
+            release.attest_reference_api_key = attest_key_override
 
     lines = [
         f'Serving release {release.release_id}: model={release.model_id} backend={release.backend} pin={release.runtime_pin} '

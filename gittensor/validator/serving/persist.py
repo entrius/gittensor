@@ -12,6 +12,7 @@ and dropped — persistence must never stall or fail a round.
 """
 
 import datetime as dt
+import json
 from typing import Any, Dict, Optional
 
 import bittensor as bt
@@ -80,6 +81,9 @@ def round_rows(
         token_rate_usd(release) * 1e6 if release else None,
         sum(int(w.get('prompt_tokens', 0)) for w in windows.values()),
         prompt_token_rate_usd(release) * 1e6 if release else None,
+        # a model-directory release: its shard digests and the runtime env the card must show (JSON), else NULL
+        release.model_dir_sha256 if release else None,
+        json.dumps(release.runtime_env, sort_keys=True) if release and release.runtime_env else None,
     )
     miners = []
     for uid, w in windows.items():

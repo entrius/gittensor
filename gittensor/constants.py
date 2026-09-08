@@ -217,7 +217,9 @@ SERVING_READY_TTL_S = 900.0  # gateway stops routing when the last audit round i
 # resident; a hotkey passes with any passing card. Never a strike: not READY that round, re-challenged next.
 SERVING_ATTEST_COHORT_FRACTION = 0.5
 SERVING_ATTEST_ITERS = 3
-SERVING_ATTEST_BUDGET_RATIO = 1.6
+SERVING_ATTEST_BUDGET_RATIO = (
+    1.6  # a release may carry its own attest.budget_ratio (the 27B: 2.0, dense decode saturates the card)
+)
 SERVING_ATTEST_MIN_FILL_RATIO = 0.6
 SERVING_ATTEST_TIMEOUT = 45.0  # seconds: fill + chain on a 5090 is ~1.5 s; queued challenges show up as slow
 SERVING_ATTEST_MEMORY_ROUNDS = 12  # a verdict older than this admits nothing until renewed

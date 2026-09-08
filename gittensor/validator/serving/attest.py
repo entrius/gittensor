@@ -230,6 +230,8 @@ def judge(
         return AttestVerdict(False, f'no attestation ({detail or "timeout"})')
     if not response.devices:
         return AttestVerdict(False, 'no devices')
+    if release.attest_budget_ratio:  # the release's own budget wins over the constant (a dense model under load)
+        budget_ratio = release.attest_budget_ratio
     budget = budget_ratio * ref_wall_ms if ref_wall_ms > 0 else float('inf')
     if elapsed_ms is not None and elapsed_ms > budget + rtt_slack_ms:
         return AttestVerdict(False, f'too slow: {elapsed_ms:.0f} ms round trip > {budget + rtt_slack_ms:.0f} ms')

@@ -45,7 +45,9 @@
         "image": "entrius/gt-attest:v1",
         "iters": 3,
         "vram_model_reserved_bytes": 26400000000,
-        "reference_wall_ms": 832.0
+        "reference_wall_ms": 832.0,
+        "budget_ratio": 2.0,
+        "budget_note": "2.0x: on mainnet 2026-09-08 the 27B card under 20+ concurrent gateway requests ran the attest chain at 1264-1280 ms vs the reference's 740 (1.7x) and failed the 1.6x constant on ~1 round in 7 while serving; idle it reads 720-795 ms"
       }
     }
   ]

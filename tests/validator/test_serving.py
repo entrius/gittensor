@@ -3704,3 +3704,25 @@ def test_release_pins_thinking_and_a_model_directory(monkeypatch):
 
 def _echo_release_openai() -> ServingRelease:
     return ServingRelease(model_id='echo-v0', backend='openai-compat', base_url='http://runtime:8080')
+
+
+def test_release_attest_budget_ratio_overrides_the_constant():
+    """A dense model under load runs the attest chain ~1.7x the reference; its release carries budget_ratio 2.0 and
+    the verdict uses it, while a release without one keeps the constant."""
+    from gittensor.constants import SERVING_ATTEST_BUDGET_RATIO
+    from gittensor.validator.serving.attest import judge
+
+    reply = _attest_reply(wall_ms=1270.0)
+    plain = _attest_release()
+    assert judge(reply, 'd', 740.0, plain).reason.startswith('too slow')  # 1270 > 1.6 x 740
+    dense = _attest_release()
+    dense.attest_budget_ratio = 2.0
+    assert judge(reply, 'd', 740.0, dense).passed  # 1270 < 2.0 x 740
+    assert (
+        ServingRelease.from_dict(
+            {'model_id': 'm', 'backend': 'echo', 'attest': {'budget_ratio': 2.0}}
+        ).attest_budget_ratio
+        == 2.0
+    )
+    shipped = load_serving_loadout().primary
+    assert shipped.attest_budget_ratio == 2.0 and SERVING_ATTEST_BUDGET_RATIO == 1.6

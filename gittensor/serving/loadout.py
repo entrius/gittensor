@@ -90,6 +90,10 @@ class ServingRelease:
     attest_reference_url: Optional[str] = None
     attest_reference_api_key: Optional[str] = None  # bearer for a keyed reference sidecar (ATTEST_API_KEY there)
     attest_iters: Optional[int] = None
+    # Wall-time budget for the attest GEMM chain as a multiple of the reference's, for this release (None -> the
+    # constant). A dense model saturates the card under load, so its chain runs ~1.7x slower than idle while the
+    # MoE's stayed near 1.0x; the release carries what its own serving load leaves the sidecar.
+    attest_budget_ratio: Optional[float] = None
     vram_model_reserved_bytes: Optional[float] = None
     ttft_full_ms: Optional[float] = None  # validator-observed TTFT up to which latency credit is 1.0
     ttft_zero_ms: Optional[float] = None  # ... and at which it reaches 0.0
@@ -159,6 +163,7 @@ class ServingRelease:
             attest_reference_url=attest.get('reference_url') or _sidecar_url(raw.get('reference_url')),
             attest_reference_api_key=attest.get('reference_api_key'),
             attest_iters=int(attest['iters']) if attest.get('iters') else None,
+            attest_budget_ratio=_optional_float(attest.get('budget_ratio')),
             vram_model_reserved_bytes=_optional_float(attest.get('vram_model_reserved_bytes')),
             ttft_full_ms=_optional_float(speed.get('ttft_full_ms')),
             ttft_zero_ms=_optional_float(speed.get('ttft_zero_ms')),

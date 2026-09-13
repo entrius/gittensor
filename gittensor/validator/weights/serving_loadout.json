@@ -44,7 +44,8 @@
       "attest": {
         "image": "entrius/gt-attest:v1",
         "iters": 3,
-        "vram_model_reserved_bytes": 26400000000,
+        "vram_model_reserved_bytes": 29200000000,
+        "reserved_note": "29.2 GB, the busy footprint, not the idle 25.1 GiB: attest fills what the runtime leaves free, and a serving 27B card holds up to ~3.5 GB of prompt scratch above idle. On mainnet 2026-09-11..13 UID 111 passed 590 challenges filling 4.4-6.1 GB and failed 21 as under-filled at 2.9-4.2 GB against the 26.4 GB reservation (pass line 4.4 GB), every failure in a heavy-prompt round. 29.2 GB puts the line at ~2.7 GB; the model-resident check still requires ~23.4 GB held before the fill.",
         "reference_wall_ms": 832.0,
         "budget_ratio": 2.0,
         "budget_note": "2.0x: on mainnet 2026-09-08 the 27B card under 20+ concurrent gateway requests ran the attest chain at 1264-1280 ms vs the reference's 740 (1.7x) and failed the 1.6x constant on ~1 round in 7 while serving; idle it reads 720-795 ms"

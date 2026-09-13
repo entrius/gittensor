@@ -3726,3 +3726,34 @@ def test_release_attest_budget_ratio_overrides_the_constant():
     )
     shipped = load_serving_loadout().primary
     assert shipped.attest_budget_ratio == 2.0 and SERVING_ATTEST_BUDGET_RATIO == 1.6
+
+
+def test_shipped_27b_reservation_admits_a_busy_card():
+    """Attest fills what the runtime leaves free, and a 27B card mid-prompt holds scratch above its idle footprint.
+    Against the idle 26.4 GB reservation mainnet UID 111 failed ~1 challenge in 30 as under-filled (2.9-4.2 GB of
+    7.3 GB) in heavy-prompt rounds. The shipped release reserves the busy footprint, so those fills pass, while an
+    empty card and a card with nothing loaded still fail."""
+    from gittensor.synapses import AttestSynapse
+    from gittensor.validator.serving.attest import judge
+
+    total = 33.67e9  # a 5090 as the sidecar reports it (32110 MiB)
+
+    def reply(filled: float, free_before: float) -> AttestSynapse:
+        dev = {
+            'uuid': 'GPU-a',
+            'digest': 'd',
+            'wall_ms': 1270.0,
+            'filled_bytes': int(filled),
+            'vram_total': total,
+            'vram_free_before': free_before,
+        }
+        return AttestSynapse(seed=1, devices=[dev], wall_ms=1270.0)
+
+    shipped = load_serving_loadout().primary
+    assert shipped.vram_model_reserved_bytes == 29.2e9
+    assert judge(reply(2.9e9, 6.4e9), 'd', 740.0, shipped).passed  # the smallest busy fill seen on mainnet
+    idle = load_serving_loadout().primary
+    idle.vram_model_reserved_bytes = 26.4e9
+    assert judge(reply(2.9e9, 6.4e9), 'd', 740.0, idle).reason.startswith('under-filled')  # the old line, 4.4 GB
+    assert judge(reply(1.5e9, 6.4e9), 'd', 740.0, shipped).reason.startswith('under-filled')
+    assert judge(reply(20e9, 32e9), 'd', 740.0, shipped).reason.startswith('model not resident')  # a bare card

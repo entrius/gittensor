@@ -5,18 +5,22 @@ chain key. The CA private key, the state directory and the GPU-proof provider ar
 
 ```bash
 docker build -f docker/controller/Dockerfile --build-arg EXTRA_PIP_PACKAGES="pynacl==1.6.0" \
+    --build-arg CONTROLLER_UID="$(id -u)" --build-arg CONTROLLER_GID="$(id -g)" \
     -t entrius/gt-controller:dev .
 ```
 
+It runs as the image's `controller` user (uid/gid from the build args). Do not pass an arbitrary `--user`: ssh and
+ssh-keygen refuse a uid with no passwd entry.
+
 | Mount | In the container | What |
 |---|---|---|
-| state dir (owned by `--user`) | `/state` | `boxes.json`, `known_hosts`, `nvml_allowlist.json` |
+| state dir (owned by `CONTROLLER_UID`) | `/state` | `boxes.json`, `known_hosts`, `nvml_allowlist.json` |
 | SSH CA private key | `/secrets/gt_ca` (read-only) | signs the ~5-minute per-visit certificates |
 | proof provider source | `/opt/proof` (read-only, on `PYTHONPATH`) | the private `GpuProof` implementation |
 | proof binary + secret store | `/opt/proof-dist` (read-only) | e.g. `gt_proof`, `gt_proof.version`, `secret_store.json` |
 
 ```bash
-docker run --rm --user "$(id -u):$(id -g)" \
+docker run --rm \
     -v ~/.gittensor/controller:/state \
     -v /path/to/gt_ca:/secrets/gt_ca:ro \
     -v /path/to/provider:/opt/proof:ro -e PYTHONPATH=/opt/proof \

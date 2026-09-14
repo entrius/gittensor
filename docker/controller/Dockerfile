@@ -30,7 +30,13 @@ RUN pip install .
 ARG EXTRA_PIP_PACKAGES=""
 RUN if [ -n "$EXTRA_PIP_PACKAGES" ]; then pip install $EXTRA_PIP_PACKAGES; fi
 
-# Runs as whatever --user the operator passes (the owner of the mounted state dir); HOME only has to be writable.
-ENV HOME=/tmp
+# A real user, not an arbitrary --user: ssh-keygen and ssh refuse a uid with no passwd entry ("No user exists for uid",
+# found running this image against the first real box, 9/14). Build with the uid/gid that owns the mounted state dir.
+ARG CONTROLLER_UID=1000
+ARG CONTROLLER_GID=1000
+RUN groupadd -g "$CONTROLLER_GID" controller \
+    && useradd -u "$CONTROLLER_UID" -g "$CONTROLLER_GID" -d /home/controller -m -s /usr/sbin/nologin controller
+USER controller
+ENV HOME=/home/controller
 WORKDIR /state
 ENTRYPOINT ["gitt", "controller"]

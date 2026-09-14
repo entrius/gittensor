@@ -36,6 +36,7 @@ class BoxState:
     last_check_at: Optional[float] = None
     last_failed: List[str] = field(default_factory=list)
     admitted_at: Optional[float] = None
+    unreachable_count: int = 0  # consecutive rounds with no verdict because SSH failed; reset by any verdict
     # Where the box's agent sshd answers, and its host key pinned at admission (``gitt controller admit``). Files
     # written before these fields existed load with the defaults.
     host: str = ''
@@ -68,6 +69,7 @@ def apply_verdict(
     new = BoxState.from_dict(state.as_dict())
     new.last_check_at = now
     new.last_failed = list(verdict.failed)
+    new.unreachable_count = 0
     if verdict.admitted:
         if new.status == ADMIT:
             new.pinned_uuids = list(verdict.gpu_uuids)
@@ -84,6 +86,29 @@ def apply_verdict(
     new.bench_until = now + backoff_seconds(new.bench_count, ladder)
     new.pinned_uuids = []
     new.admitted_at = None
+    return new
+
+
+UNREACHABLE = 'ssh_unreachable'
+
+
+def apply_unreachable(
+    state: BoxState,
+    now: float,
+    bench_after: int = cfg.UNREACHABLE_BENCH_AFTER,
+    bench_s: float = cfg.UNREACHABLE_BENCH_S,
+) -> BoxState:
+    """The state after a round in which SSH could not reach the box: no verdict, the count goes up, and at
+    ``bench_after`` in a row the box is BENCHED for a flat ``bench_s`` without climbing the fraud ladder. Pure."""
+    new = BoxState.from_dict(state.as_dict())
+    new.unreachable_count += 1
+    if new.unreachable_count >= bench_after and new.status != BENCHED:
+        new.status = BENCHED
+        new.benched_at = now
+        new.bench_until = now + bench_s
+        new.last_failed = [UNREACHABLE]
+        new.pinned_uuids = []
+        new.admitted_at = None
     return new
 
 

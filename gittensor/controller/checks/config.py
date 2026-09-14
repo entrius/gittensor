@@ -72,4 +72,9 @@ NVML_ALLOWLIST_LOCATION = ''
 # and the ladder resets after a long clean stretch.
 FULL_CHECK_INTERVAL_S = 1200.0
 BENCH_BACKOFF_LADDER_S = (3_600, 14_400, 57_600, 230_400)  # 1 h -> 4 h -> 16 h -> 64 h (vault `23` §5)
+# A box SSH cannot reach gets no verdict (and no idle pay for that round: idle pay needs a passing proof). After
+# this many consecutive unreachable rounds it is BENCHED for a flat UNREACHABLE_BENCH_S, off the fraud ladder: a
+# dead link is not a caught cheat, but a box must not dodge a bench by dropping SSH forever (Kimbo 9/14).
+UNREACHABLE_BENCH_AFTER = 3
+UNREACHABLE_BENCH_S = 12 * 3_600
 BENCH_LADDER_RESET_AFTER_S = 7 * 86_400

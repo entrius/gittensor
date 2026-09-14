@@ -69,6 +69,7 @@ from gittensor.controller.checks.state import (
     IDLE,
     BoxState,
     StateStore,
+    apply_unreachable,
     apply_verdict,
     release_from_bench,
 )
@@ -403,7 +404,8 @@ def run_round(setup: CheckSetup, proof: GpuProof, clock: Callable[[], float] = t
     Phase 1: connect and scrape every box in parallel; judge identity with fleet-wide UUID uniqueness over every pin
     and every card reported this round; stage the proof on every box that passed, in parallel. Phase 2: one start
     signal — every staged box fires at once (a thread per box, cards parallel inside ``fire_box``). Then clean up,
-    judge, ``apply_verdict``. A box lost to SSH gets no verdict and keeps its state."""
+    judge, ``apply_verdict``. A box lost to SSH gets no verdict; its unreachable count goes up and three in a row
+    bench it for 12 h (``apply_unreachable``)."""
     store = setup.state.store()
     now = time.time()
     rows: list[BoxRound] = []
@@ -484,6 +486,8 @@ def run_round(setup: CheckSetup, proof: GpuProof, clock: Callable[[], float] = t
     now = time.time()
     for r in rows:
         if r.scrape is None:
+            if r.transport_error:
+                r.after = store.boxes[r.box.box_id] = apply_unreachable(r.box, now)
             continue
         if not identity_passed(r.checks):
             r.checks.append(proof_skipped(r.checks))
@@ -819,13 +823,19 @@ def admit_command(hotkey, host, port, force_rekey, state_dir, json_mode):
 
 @controller_group.command('check')
 @click.argument('hotkey')
+@click.option(
+    '--force',
+    is_flag=True,
+    default=False,
+    help='Check a BENCHED box anyway (operator debugging). The verdict is shown but NOT applied; the bench stands.',
+)
 @_check_options
 @_state_options
-def check_command(hotkey, state_dir, json_mode, **opts):
+def check_command(hotkey, force, state_dir, json_mode, **opts):
     """One full check of one admitted box: scrape, judge, the GPU proof on every card, then apply the verdict.
 
     \b
-    Exit 0 ADMIT, 1 BENCH, 2 no verdict (transport failure; state unchanged).
+    Exit 0 ADMIT, 1 BENCH, 2 no verdict (transport failure: the unreachable count goes up; 3 in a row benches 12 h).
     Example (dev box, sealed proof):
         gitt controller check 5F... --agent-image-id sha256:... \\
             --proof gittensor_proof.provider:SealedProof \\
@@ -838,11 +848,17 @@ def check_command(hotkey, state_dir, json_mode, **opts):
     _require_ca_key(setup.ca_key, json_mode)
     now = time.time()
     released = release_from_bench(box, now)
-    if released.status == BENCHED:
+    forced = released.status == BENCHED and force
+    if released.status == BENCHED and not force:
         _fail(
-            f'{hotkey} is BENCHED until {_when(box.bench_until)} ({", ".join(box.last_failed) or "?"}); not checked',
+            f'{hotkey} is BENCHED until {_when(box.bench_until)} ({", ".join(box.last_failed) or "?"}); not checked'
+            ' (--force to check anyway without touching the bench)',
             json_mode,
             EXIT_BENCH,
+        )
+    if forced and not json_mode:
+        err_console.print(
+            f'[yellow]--force: {hotkey} is BENCHED until {_when(box.bench_until)}; the verdict will not be applied[/yellow]'
         )
     try:
         proof = setup.proof()
@@ -856,16 +872,24 @@ def check_command(hotkey, state_dir, json_mode, **opts):
         runner.close()
     timings = phase_timings(runner.log)
     if outcome.verdict is None:
+        after = released if forced else apply_unreachable(released, now)
+        if not forced:
+            store.put(after)
+        benched = ' — BENCHED for 12 h' if after.status == BENCHED and released.status != BENCHED else ''
         _fail(
-            f'no verdict, state unchanged — transport failure: {outcome.transport_error}',
+            f'no verdict — transport failure: {outcome.transport_error} '
+            f'(unreachable {after.unreachable_count} round(s) in a row{benched})',
             json_mode,
             EXIT_NO_VERDICT,
             hotkey=hotkey,
+            unreachable_count=after.unreachable_count,
+            status=after.status,
             timings_ms=timings,
         )
     verdict = outcome.verdict
-    after = apply_verdict(released, verdict, now)
-    store.put(after)
+    after = released if forced else apply_verdict(released, verdict, now)
+    if not forced:
+        store.put(after)
     per_check = check_timings(runner.log)
     if json_mode:
         emit_json(

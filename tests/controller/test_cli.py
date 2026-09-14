@@ -195,22 +195,57 @@ def test_no_provider_benches_with_the_reason_named(state):
     assert not proof['pass'] and 'no GPU proof provider configured' in proof['evidence']['reason']
 
 
-def test_transport_failure_exits_2_and_changes_nothing(state):
+def test_transport_failure_exits_2_counts_and_benches_after_three(state):
     admit(state)
     dead = FakeRunner().on('true', SshTransportError('10.0.0.1:2200: Connection refused'))
     with runners({HK_A: dead}):
         result = check(state, '--proof', FAKE_PROOF, '--agent-image-digest', AGENT_DIGEST)
-    assert result.exit_code == 2 and 'Connection refused' in result.output
+    assert result.exit_code == 2 and 'Connection refused' in result.output and '1 round(s)' in result.output
     box = store(state).get(HK_A)
-    assert box.status == ADMIT and box.last_check_at is None
-    # lost mid-scrape is the same: no verdict, no bench
+    assert box.status == ADMIT and box.last_check_at is None and box.unreachable_count == 1
+    # lost mid-scrape is the same: no verdict, the count goes up
     flaky = box_runner().on(
         r'nvidia-smi --query-gpu=uuid,name,driver_version,memory.total,power.limit,power.default_limit,power.max_limit,pci.bus_id,compute_cap --format=csv,noheader,nounits',
         SshTransportError('reset'),
     )
     with runners({HK_A: flaky}):
         result = check(state, '--proof', FAKE_PROOF, '--agent-image-digest', AGENT_DIGEST, '--json')
-    assert result.exit_code == 2 and 'reset' in result.stdout and store(state).get(HK_A).status == ADMIT
+    assert result.exit_code == 2 and 'reset' in result.stdout and store(state).get(HK_A).unreachable_count == 2
+    # third in a row: BENCHED for a flat 12 h, no fraud-ladder rung consumed
+    with runners({HK_A: dead}):
+        result = check(state, '--proof', FAKE_PROOF, '--agent-image-digest', AGENT_DIGEST)
+    assert result.exit_code == 2 and 'BENCHED for 12 h' in result.output
+    box = store(state).get(HK_A)
+    assert box.status == BENCHED and box.last_failed == ['ssh_unreachable'] and box.bench_count == 0
+    assert box.bench_until - box.benched_at == 12 * 3600
+    # a verdict resets the count
+    s = store(state)
+    s.put(BoxState.from_dict({**box.as_dict(), 'status': ADMIT, 'bench_until': None}))
+    with runners({HK_A: box_runner()}):
+        assert check(state, '--proof', FAKE_PROOF, '--agent-image-digest', AGENT_DIGEST).exit_code == 0
+    assert store(state).get(HK_A).unreachable_count == 0
+
+
+def test_force_checks_a_benched_box_without_touching_the_bench(state):
+    admit(state)
+    s = store(state)
+    benched = BoxState.from_dict(
+        {
+            **s.get(HK_A).as_dict(),
+            'status': BENCHED,
+            'bench_until': 9e12,
+            'bench_count': 1,
+            'last_failed': ['gpu_proof'],
+        }
+    )
+    s.put(benched)
+    with runners({HK_A: box_runner()}):
+        refused = check(state, '--proof', FAKE_PROOF, '--agent-image-digest', AGENT_DIGEST)
+        forced = check(state, '--proof', FAKE_PROOF, '--agent-image-digest', AGENT_DIGEST, '--force')
+    assert refused.exit_code == 1 and 'not checked' in refused.output
+    assert forced.exit_code == 0 and '--force' in forced.output and 'ADMIT' in forced.output
+    after = store(state).get(HK_A)
+    assert after.status == BENCHED and after.bench_until == 9e12 and after.last_failed == ['gpu_proof']
 
 
 def test_unadmitted_box_and_missing_ca_key_exit_2(state):

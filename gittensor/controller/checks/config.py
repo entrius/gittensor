@@ -33,7 +33,11 @@ POWER_LIMIT_MIN_RATIO = 0.9
 # fixes here is the image its job runs in, the wall-clock budget for one card's job, and the fill the provider must
 # demand: the FILL comes from OUR 5090 spec table (CardSpec.vram_total_mib_min), never from the box's self-report,
 # so a 24 GB card cannot answer a 5090's challenge. Timing bands are the provider's own.
-PROOF_FILL_RATIO = 0.9  # 0.9 of a 32 GB card is ~29 GiB: only an empty 5090 can give it
+PROOF_FILL_RATIO = 0.9  # what the binary fills: 0.9 of the total CUDA reports (~30.3 GB on a 5090, ~3 GB left, like Lium's total − 2 GB)
+# What the verdict demands, against OUR spec table: 0.85 × 32,000 MiB ≈ 28.5 GB. Measured 9/14: CUDA reports ~500 MiB
+# less total than nvidia-smi, so judging at 0.9 of spec left a 100 MB margin on an honest 5090; 0.85 leaves ~2 GB
+# (Kimbo 9/14) and is still 4.5 GB above anything a 24 GB card can fill.
+PROOF_FILL_FLOOR_RATIO = 0.85
 # The SSH command timeout for one card's `docker start -a`. The proof's own verdict limit is the provider's flat
 # 30 s on our stopwatch (trust-the-seal, no 5090 speed band; Kimbo 9/14); this is only the hard stop after which we
 # give up waiting for an answer at all, kept above the verdict limit so a late answer is judged, not lost.

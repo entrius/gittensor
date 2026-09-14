@@ -218,6 +218,11 @@ from gittensor.cli.up_commands import register_up_commands  # noqa: E402
 
 register_up_commands(cli)
 
+# Register compute controller commands (gitt controller ...)
+from gittensor.controller.cli import register_controller_commands  # noqa: E402
+
+register_controller_commands(cli)
+
 
 def main():
     """Main entry point for the CLI"""

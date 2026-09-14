@@ -132,6 +132,30 @@ class TestSshRunner:
             workdir = cred.workdir
         assert not workdir.exists()  # discarded on exit
 
+    def test_one_master_connection_per_visit(self, ca_key, tmp_path):
+        calls = []
+        with self._runner(ca_key, tmp_path, calls) as r:
+            r.run('true')
+            r.run('nvidia-smi -L')
+            control = r.control_path()
+            assert str(control).startswith('/tmp/gt-ssh-') and len(str(control)) < 60  # socket paths cap near 104
+            for argv, _, _ in calls:
+                assert 'ControlMaster=auto' in argv and f'ControlPath={control}' in argv
+                assert any(a.startswith('ControlPersist=') for a in argv)
+                assert argv.index('-p') > argv.index(f'ControlPath={control}')  # options before the destination
+            control.touch()  # stand in for the master's socket
+            control_dir = control.parent
+        assert calls[-1][0][-5:] == ['-O', 'exit', '-p', '2200', 'root@203.0.113.7']  # stops the master
+        assert not control_dir.exists()
+        calls.clear()
+        with self._runner(ca_key, tmp_path, calls) as r:
+            r.run('true')
+        assert len(calls) == 1  # no socket, no master to stop
+        r = self._runner(ca_key, tmp_path, calls)
+        r.multiplex = False
+        assert r.control_path() is None and not any('Control' in a for a in r.ssh_argv(r.credential(), 'true'))
+        r.close()
+
     def test_stdin_is_forwarded(self, ca_key, tmp_path):
         calls = []
         with self._runner(ca_key, tmp_path, calls) as r:

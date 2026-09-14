@@ -4,16 +4,26 @@
 """``SshRunner``: the real ``HostRunner`` — run one command on a miner box as root over SSH with a per-visit
 certificate, against the host key pinned at ADMIT.
 
-Every ``run`` is one ``ssh`` process. The credential is minted on first use and re-minted when it nears expiry, so a
-long visit (a lease start that waits on a model load, a fleet-wide probe) never fails on a stale certificate. A
-transport failure (no route, refused, host key mismatch, certificate refused: ssh exit 255) raises
-``SshTransportError``; a command that ran and failed returns its exit code like any ``CommandResult``.
+Every ``run`` is one ``ssh`` process, multiplexed over one authenticated connection per visit (OpenSSH
+``ControlMaster``): the first command pays the login, later ones only open a channel. Measured on the first real box
+(9/14, over the WAN): a fresh login per command cost ~1.3 s, so an 8-step scrape took 11 s, and the proof's
+``docker start -a`` — timed on our stopwatch against the flat 30 s limit, and fired after the fleet-wide start
+signal — carried a whole login inside its clock. The master outlives certificate expiry (open sessions keep working,
+``26`` §5), exits on its own after ``CONTROL_PERSIST_S`` idle, and is closed with the runner.
+
+The credential is minted on first use and re-minted when it nears expiry, so a long visit (a lease start that waits
+on a model load, a fleet-wide probe) never fails on a stale certificate. A transport failure (no route, refused, host
+key mismatch, certificate refused: ssh exit 255) raises ``SshTransportError``; a command that ran and failed returns
+its exit code like any ``CommandResult``.
 """
 
 from __future__ import annotations
 
+import os
 import shlex
+import shutil
 import subprocess
+import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -24,6 +34,7 @@ from gittensor.controller.ssh.certs import CertificateAuthority, VisitCredential
 
 SSH_EXIT_TRANSPORT = 255
 CONNECT_TIMEOUT_S = 10
+CONTROL_PERSIST_S = 60  # an idle master exits by itself if the controller dies without closing the runner
 
 
 class SshTransportError(Exception):
@@ -71,6 +82,7 @@ class SshRunner:
         ssh: str = 'ssh',
         run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
         clock: Callable[[], float] = time.time,
+        multiplex: bool = True,
     ):
         self.host, self.port, self.user = host, port, user
         self.ca, self.known_hosts, self.key_id = ca, Path(known_hosts), key_id
@@ -78,6 +90,8 @@ class SshRunner:
         self._ssh, self._run, self._clock = ssh, run, clock
         self._credential: VisitCredential | None = None
         self.minted = 0
+        self.multiplex = multiplex
+        self._control_dir: Path | None = None
 
     # -- credential -----------------------------------------------------------------------------------------------
 
@@ -90,7 +104,38 @@ class SshRunner:
             self.minted += 1
         return self._credential
 
+    def control_path(self) -> Path | None:
+        """The master connection's socket, in a per-runner directory. Unix socket paths are capped near 104 bytes, so
+        the directory sits under /tmp whatever TMPDIR says."""
+        if not self.multiplex:
+            return None
+        if self._control_dir is None:
+            self._control_dir = Path(tempfile.mkdtemp(prefix='gt-ssh-', dir='/tmp' if os.path.isdir('/tmp') else None))
+        return self._control_dir / 'cm'
+
     def close(self) -> None:
+        if self._control_dir is not None:
+            control = self._control_dir / 'cm'
+            if control.exists():  # a master is up: stop it now rather than after CONTROL_PERSIST_S
+                try:
+                    self._run(
+                        [
+                            self._ssh,
+                            '-o',
+                            f'ControlPath={control}',
+                            '-O',
+                            'exit',
+                            '-p',
+                            str(self.port),
+                            f'{self.user}@{self.host}',
+                        ],
+                        capture_output=True,
+                        timeout=5,
+                    )
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+            shutil.rmtree(self._control_dir, ignore_errors=True)
+            self._control_dir = None
         if self._credential is not None:
             self._credential.discard()
             self._credential = None
@@ -122,11 +167,25 @@ class SshRunner:
             f'ConnectTimeout={CONNECT_TIMEOUT_S}',
             '-o',
             'ServerAliveInterval=15',
+            *self._multiplex_options(),
             '-p',
             str(self.port),
             f'{self.user}@{self.host}',
             '--',
             command,
+        ]
+
+    def _multiplex_options(self) -> list[str]:
+        control = self.control_path()
+        if control is None:
+            return []
+        return [
+            '-o',
+            'ControlMaster=auto',
+            '-o',
+            f'ControlPath={control}',
+            '-o',
+            f'ControlPersist={CONTROL_PERSIST_S}s',
         ]
 
     def run(self, command: str, timeout: float | None = None, stdin: bytes | None = None) -> CommandResult:

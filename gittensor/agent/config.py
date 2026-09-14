@@ -23,12 +23,11 @@ AGENT_VERSION = __version__
 # 2. The release-signing key. Its public half is what `gitt up` and the runner verify the release channel with
 #    (docker/agent/channel: stable.json + stable.json.sig, `ssh-keygen -Y sign`). The private half lives in CI.
 #
-# RELEASE_PUBKEY_OPENSSH is EMPTY on this branch: no release key exists yet. With it empty `gitt up` refuses to start
-# a runner (it would be following an unverifiable channel) and only `--no-update` with a locally built image works.
-# Fill it with the real `ssh-ed25519 AAAA...` line before the first published image. Dev keys come from
-# docker/agent/keys/make-dev-keys.sh; they carry DEV_KEY_MARKER in their comment and the agent refuses to start on one
-# unless GT_AGENT_ALLOW_DEV_KEYS=1.
-RELEASE_PUBKEY_OPENSSH = ''
+# RELEASE_PUBKEY_OPENSSH is the real release public key (ceremony 2026-09-14, fingerprint
+# SHA256:NFES+v4hRuN2GMTeGBnTFch3jIBP/oEtNzQmi+pqNns). Its private half is the GT_RELEASE_KEY Actions secret. With it
+# empty `gitt up` would refuse to start a runner. Dev keys come from docker/agent/keys/make-dev-keys.sh; they carry
+# DEV_KEY_MARKER in their comment and the agent refuses to start on one unless GT_AGENT_ALLOW_DEV_KEYS=1.
+RELEASE_PUBKEY_OPENSSH = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGqwZgf8OHuUQmyeVLxDXXjLAcjMJwypNEKDEv7ltaLr gittensor-release'
 RELEASE_SIGNER_IDENTITY = 'gittensor-release'  # the principal in the runner's allowed_signers file
 RELEASE_SIGN_NAMESPACE = 'gt-agent-channel'  # `ssh-keygen -Y sign -n`; a signature for another purpose does not verify
 DEV_KEY_MARKER = 'DO-NOT-SHIP'  # in a dev key's comment; images built on one refuse to start without the override

@@ -19,7 +19,7 @@ from gittensor.controller.checks.scrape import (
     parse_repo_digests,
     scrape_host,
 )
-from tests.controller.conftest import DRIVER, NVML_MD5, UUID_5090, UUID_5090_B, fixture, make_bank, passing_runner
+from tests.controller.conftest import DRIVER, NVML_MD5, UUID_5090, UUID_5090_B, fixture, passing_runner
 
 
 def test_nvidia_smi_command_names_every_field():
@@ -70,19 +70,14 @@ def test_parse_repo_digests_df_and_curl():
 
 
 def test_commands_quote_arguments():
-    assert "'gittensor-agent'" in agent_image_command() or 'gittensor-agent' in agent_image_command()
+    assert "'gt-agent'" in agent_image_command() or 'gt-agent' in agent_image_command()
     assert 'https://x.example/a' in network_command('https://x.example/a') and '-m 10' in network_command(
         'https://x.example/a'
     )
 
 
 def test_scrape_host_collects_everything_and_records_errors(tmp_path):
-    from gittensor.controller.challenge.bank import BankConsumer
-
-    bank = BankConsumer(make_bank(), tmp_path / 'used.json')
-    scrape = scrape_host(
-        passing_runner(bank), network_targets=('https://registry.example/v2/', 'https://hub.example/api')
-    )
+    scrape = scrape_host(passing_runner(), network_targets=('https://registry.example/v2/', 'https://hub.example/api'))
     assert scrape.uuids == [UUID_5090] and scrape.driver == DRIVER and scrape.kernel_driver == DRIVER
     assert scrape.nvml_md5 == NVML_MD5 and scrape.nvml_path.endswith('libnvidia-ml.so.580.65.06')
     assert scrape.agent_image_digests == ['sha256:' + 'a' * 64]

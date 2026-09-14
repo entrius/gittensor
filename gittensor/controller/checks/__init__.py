@@ -1,10 +1,10 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-"""The full hardware check (``24`` §3 WS-C): scrape a box over SSH, judge it against the pinned spec, prove the GPU
-with a bank seed, and say ADMIT or BENCH with the failing checks named.
+"""The full hardware check (``24`` §3 WS-C): scrape a box over SSH, judge it against the pinned spec, run the GPU
+proof in the slot on every card at once, and say ADMIT or BENCH with the failing checks named.
 
-The heavy names are resolved lazily: ``challenge.bank`` imports ``checks.config`` for its tunables, and importing
+The heavy names are resolved lazily: ``proof.slot`` imports ``checks.config`` and ``checks.scrape``, and importing
 ``full_check`` here eagerly would close that loop."""
 
 import importlib

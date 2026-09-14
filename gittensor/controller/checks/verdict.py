@@ -13,9 +13,9 @@ BENCH = 'BENCH'
 
 @dataclass
 class CheckResult:
-    """``skipped`` marks a check that did not run because an earlier one failed (the GPU proof spends a bank seed,
-    so it is not run on a box that already failed identity). A skipped check is not a named failure, but a verdict
-    with any skipped check is never ADMIT."""
+    """``skipped`` marks a check that did not run because an earlier one failed (the GPU proof fills ~30 GB of VRAM
+    per card, so it is not run on a box that already failed identity). A skipped check is not a named failure, but a
+    verdict with any skipped check is never ADMIT."""
 
     name: str
     passed: bool

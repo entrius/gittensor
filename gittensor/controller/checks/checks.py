@@ -2,25 +2,18 @@
 # Copyright © 2025 Entrius
 
 """The sub-checks of the full check: each judges one slice of the scrape against the pinned spec and yields a
-``CheckResult`` with its evidence. ``check_gpu_proof`` is the one that runs something on the box — the one-shot
-challenge job, per pinned card, judged against the bank."""
+``CheckResult`` with its evidence. ``check_gpu_proof`` is the one that runs something on the box — the two-phase
+GPU proof on every card at once, through whatever provider fills the slot (``gittensor.controller.proof``)."""
 
-import json
 import re
 import time
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-from gittensor.controller.challenge.bank import (
-    BankConsumer,
-    BankDepleted,
-    ChallengeParams,
-    job_command_str,
-    judge_answer,
-)
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import HostRunner
 from gittensor.controller.checks.scrape import GpuInfo, HostScrape
 from gittensor.controller.checks.verdict import CheckResult
+from gittensor.controller.proof.slot import GpuProof, probe_box
 
 GPU_SPEC = 'gpu_spec'
 GPU_UUID_PIN = 'gpu_uuid_pin'
@@ -154,65 +147,20 @@ def check_network(results: Dict[str, Tuple[int, float]], targets: Sequence[str])
 def check_gpu_proof(
     runner: HostRunner,
     gpus: Sequence[GpuInfo],
-    bank: BankConsumer,
-    params: ChallengeParams,
-    image: str,
-    budget_ratio: float = cfg.CHALLENGE_BUDGET_RATIO,
-    min_fill_ratio: float = cfg.CHALLENGE_MIN_FILL_RATIO,
-    timeout: float = cfg.CHALLENGE_JOB_TIMEOUT_S,
-    clock=time.monotonic,
-    rtt_slack_ms: float = cfg.CHALLENGE_RTT_SLACK_MS,
+    proof: GpuProof,
+    image: str = '',
+    timeout: float = cfg.PROOF_JOB_TIMEOUT_S,
+    clock: Callable[[], float] = time.monotonic,
 ) -> CheckResult:
-    """One bank seed per card: run the challenge image on that card alone (``--gpus device=<uuid>``), parse the JSON
-    it prints, judge it against the entry. Every card must pass. Our own clock around the whole ``docker run`` is
-    judged against the bank's outer clock plus slack (a relay to a card elsewhere pays the round trip). Bank depletion is a failed check that says so."""
-    cards = []
-    failures: List[str] = []
-    for g in gpus:
-        try:
-            entry = bank.checkout()
-        except BankDepleted as e:
-            return CheckResult(
-                GPU_PROOF, False, {'reason': f'challenge bank depleted: {e}', 'cards': cards, 'bank': bank.status()}
-            )
-        command = job_command_str(entry.seed, params, image, g.uuid)
-        started = clock()
-        try:
-            result = runner.run(command, timeout=timeout)
-            elapsed_ms = (clock() - started) * 1000.0
-            answer = (
-                json.loads(result.stdout) if result.ok else {'error': (result.stderr or result.stdout).strip()[:300]}
-            )
-        except Exception as e:  # transport died or the job printed no JSON
-            elapsed_ms = (clock() - started) * 1000.0
-            answer = {'error': f'{type(e).__name__}: {e}'[:300]}
-        verdict = judge_answer(
-            entry,
-            answer,
-            params,
-            budget_ratio=budget_ratio,
-            min_fill_ratio=min_fill_ratio,
-            expected_uuid=g.uuid,
-            vram_total_bytes=g.memory_total_bytes,
-            elapsed_ms=elapsed_ms,
-            rtt_slack_ms=rtt_slack_ms,
-        )
-        cards.append(
-            {
-                'uuid': g.uuid,
-                'seed': entry.seed,
-                'bank_wall_ms': entry.wall_ms,
-                'bank_run_ms': entry.run_ms,
-                **verdict.as_dict(),
-            }
-        )
-        if not verdict.passed:
-            failures.append(f'{g.uuid}: {verdict.reason}')
-    evidence = {'cards': cards, 'bank': bank.status()}
-    if not gpus:
-        return CheckResult(GPU_PROOF, False, {**evidence, 'reason': 'no GPUs to challenge'})
-    if failures:
-        return CheckResult(GPU_PROOF, False, {**evidence, 'reason': '; '.join(failures)[:500]})
+    """Stage the provider's proof on the box, fire it on every card at the same instant, judge each card. Every card
+    must pass. No provider (``UnconfiguredProof``), a staging failure, a dead transport or an empty box all fail
+    closed with the reason named."""
+    probe = probe_box(runner, gpus, proof, image, timeout, clock)
+    evidence = {'provider': probe.provider, 'cards': probe.cards}
+    if probe.error:
+        return CheckResult(GPU_PROOF, False, {**evidence, 'reason': probe.error})
+    if probe.failures:
+        return CheckResult(GPU_PROOF, False, {**evidence, 'reason': '; '.join(probe.failures)[:500]})
     return CheckResult(GPU_PROOF, True, evidence)
 
 

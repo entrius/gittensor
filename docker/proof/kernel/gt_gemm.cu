@@ -1,19 +1,22 @@
-// gt_challenge — the GPU proof as a one-shot job (Gittensor compute pool, vault `23` §3 / `24` §3 WS-C).
+// gt_gemm — the PUBLIC GPU-proof kernel the sealed binary wraps (Gittensor compute pool, vault `23` §3a).
 //
-// A copy of docker/attest/gt_attest.cu (the phase-0 attest sidecar's kernel) reduced to one run on one EMPTY card:
-// fill a fraction of the card's total VRAM with a seeded stream, run a seeded chain of fp32 matrix products through
-// tanh over a working set carved from that fill, hash the first 64 KiB of every matrix after each iteration into one
-// SHA-256 digest, print one JSON object, exit. Deterministic for a given seed on any sm_120 card (hand-written tiled
-// GEMM, no atomics, no reductions, no TF32, no fast-math, -fmad=false), so a digest computed once on a card we own
-// (the challenge bank) is the expected answer for every 5090 — no live reference. The digest depends only on
-// (seed, iters, dim, matrices); the wall time also depends on the fill, so the bank records the fill ratio it used.
+// This is the workload, not the proof. The sealed, rotating binary (its own private repo: key derived from the box's
+// claimed identity, an encrypted challenge, a sealed result, per-version CI secrets) wraps this kernel in its
+// key/seal layer; only that layer is ever obfuscated. The kernel stays here in the open so anyone can read what a
+// card is asked to do. It is a copy of docker/attest/gt_attest.cu (the phase-0 attest sidecar's kernel) reduced to
+// one run on one EMPTY card: fill a fraction of the card's total VRAM with a seeded stream, run a seeded chain of
+// fp32 matrix products through tanh over a working set carved from that fill, hash the first 64 KiB of every
+// matrix after each iteration into one SHA-256 digest, print one JSON object, exit. Deterministic for a given seed
+// on any sm_120 card (hand-written tiled GEMM, no atomics, no reductions, no TF32, no fast-math, -fmad=false).
 //
-//   gt_challenge --seed <u64> [--fill-ratio 0.9] [--iters 3] [--device 0] [--dim 1024] [--matrices 512]
+//   gt_gemm --seed <u64> [--fill-ratio 0.9] [--iters 3] [--device 0] [--dim 1024] [--matrices 512]
 //
 // prints {"seed","device","uuid","name","driver","sm_count","vram_total","vram_free_before","filled_bytes","fill_ratio",
 // "dim","matrices","iters","digest","wall_ms"} and exits 0; exit 2 = bad args, 3 = allocation / CUDA failure.
-// --fill-ratio 0.9 on a 32 GB card asks for ~29 GiB, which only an empty card can give. Unlike gt_attest there is no
-// --device all: the controller runs the job once per pinned card with `docker run --gpus device=<uuid>`.
+// --fill-ratio 0.9 on a 32 GB card asks for ~29 GiB, which only an empty card can give. No --device all: the
+// controller runs one job per pinned card (`docker create --gpus device=<uuid>`, then `docker start`).
+//
+//   nvcc -O3 -fmad=false -gencode arch=compute_120,code=sm_120 -o gt_gemm gt_gemm.cu -lnvidia-ml
 #include <cuda_runtime.h>
 #include <nvml.h>
 #include <cstdint>

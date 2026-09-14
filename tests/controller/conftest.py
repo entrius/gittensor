@@ -1,21 +1,21 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-"""Fixtures for the controller full check: a recorded 5090 box (nvidia-smi / df / docker output), a small challenge
-bank, and a ``FakeRunner`` that answers every command the check issues the way a real, honest box would."""
+"""Fixtures for the controller full check: a recorded 5090 box (nvidia-smi / df / docker output), a fake GPU-proof
+provider in the slot, and a ``FakeRunner`` that answers every command the check issues the way a real, honest box
+would."""
 
 import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Dict, Optional
 
 import pytest
 
-from gittensor.controller.challenge.bank import BankConsumer, BankEntry, ChallengeBank, ChallengeParams
 from gittensor.controller.checks.full_check import FullCheckConfig
 from gittensor.controller.checks.nvml_allowlist import NvmlAllowlist
-from gittensor.controller.checks.runner import CommandResult, FakeRunner, regex
+from gittensor.controller.checks.runner import CommandResult, FakeRunner, HostRunner, regex
 from gittensor.controller.checks.scrape import (
     KERNEL_DRIVER_COMMAND,
     NVML_MD5_COMMAND,
@@ -23,6 +23,15 @@ from gittensor.controller.checks.scrape import (
     disk_free_command,
     network_command,
     nvidia_smi_command,
+)
+from gittensor.controller.proof.slot import (
+    BoxIdentity,
+    ProofUnavailable,
+    ProofVerdict,
+    StagedProof,
+    create_command,
+    remove_command,
+    start_command,
 )
 
 FIXTURES = Path(__file__).parent / 'fixtures'
@@ -32,46 +41,107 @@ DRIVER = '580.65.06'
 NVML_MD5 = '3c9d0f1e2b4a5968778695a4b3c2d1e0'
 NVML_PATH = '/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.580.65.06'
 AGENT_DIGEST = 'sha256:' + 'a' * 64
-AGENT_IMAGE_OUT = f'ghcr.io/entrius/gt-agent@{AGENT_DIGEST}\n'
+AGENT_IMAGE_OUT = f'entrius/gt-agent@{AGENT_DIGEST}\n'
 VRAM_TOTAL_BYTES = 32607 * 1024 * 1024
-BANK_WALL_MS = 1500.0
-PARAMS = ChallengeParams()
-FILLED_BYTES = int(PARAMS.fill_ratio * VRAM_TOTAL_BYTES)
+FILL_RATIO = 0.9
+FILLED_BYTES = int(FILL_RATIO * VRAM_TOTAL_BYTES)
+GOOD_WALL_MS = 1500.0
 NETWORK_TARGETS = ('https://registry.example/v2/', 'https://hub.example/api')
-CONFIG = FullCheckConfig(agent_image_digests=(AGENT_DIGEST,), network_targets=NETWORK_TARGETS)
+PROOF_IMAGE = 'entrius/gt-proof:test'
+CONFIG = FullCheckConfig(agent_image_digests=(AGENT_DIGEST,), network_targets=NETWORK_TARGETS, proof_image=PROOF_IMAGE)
+FAKE_BINARY = b'\x7fELF-fake-sealed-proof'
 
 
 def fixture(name: str) -> str:
     return (FIXTURES / name).read_text()
 
 
-def digest_for(seed: int) -> str:
-    """A stand-in for the GEMM chain's digest: any deterministic function of the seed will do for the consumer."""
-    return hashlib.sha256(f'gt-challenge:{seed}'.encode()).hexdigest()
+def container_for(uuid: str) -> str:
+    """The container id the fake box hands back for a card's `docker create`: deterministic, 64 hex like docker's."""
+    return hashlib.sha256(f'ctr:{uuid}'.encode()).hexdigest()
 
 
-def make_bank(n: int = 5, params: ChallengeParams = PARAMS, wall_ms: float = BANK_WALL_MS) -> ChallengeBank:
-    entries = [
-        BankEntry(
-            seed=1000 + i,
-            digest=digest_for(1000 + i),
-            wall_ms=wall_ms,
-            filled_bytes=FILLED_BYTES,
-            uuid='GPU-bank-card',
-            card_name='NVIDIA GeForce RTX 5090',
-            driver=DRIVER,
-            image_digest='sha256:' + 'c' * 64,
-            generated_at=1_700_000_000.0,
-            run_ms=wall_ms + 900.0,
+def challenge_for(uuid: str, version: str) -> str:
+    return hashlib.sha256(f'challenge:{version}:{uuid}'.encode()).hexdigest()[:32]
+
+
+class FakeProof:
+    """A provider that behaves like the sealed binary's controller side would, without any crypto: it stages one
+    container per card with a per-card challenge token copied in, and judges a result by the token echoing back
+    from the right UUID, a full-enough fill, and both clocks inside a band. Counts what it staged so tests can see
+    that identity failures skip it."""
+
+    def __init__(
+        self, version: str = 'fake-1', wall_budget_ms: float = 1.6 * GOOD_WALL_MS, outer_budget_ms: float = 6_000.0
+    ):
+        self.version = version
+        self.wall_budget_ms = wall_budget_ms
+        self.outer_budget_ms = outer_budget_ms
+        self.staged: list = []
+
+    def stage(self, runner: HostRunner, identity: BoxIdentity, image: str, timeout: float) -> StagedProof:
+        containers: Dict[str, str] = {}
+        challenges: Dict[str, str] = {}
+        for i, uuid in enumerate(identity.uuids):
+            challenge = challenge_for(uuid, self.version)
+            result = runner.run(
+                create_command(image, uuid, f'gt-proof-{i}', ['--', '--challenge', challenge]), timeout=timeout
+            )
+            if not result.ok:
+                raise ProofUnavailable(f'docker create failed: {(result.stderr or result.stdout).strip()[:200]}')
+            cid = result.stdout.strip()
+            runner.run(f'docker cp - {cid}:/opt/gt-proof/bin', timeout=timeout, stdin=FAKE_BINARY)
+            containers[uuid], challenges[uuid] = cid, challenge
+        staged = StagedProof(self.version, containers, challenges)
+        self.staged.append(staged)
+        return staged
+
+    def start_command(self, staged: StagedProof, uuid: str) -> str:
+        return start_command(staged.containers[uuid])
+
+    def judge(self, staged, uuid, stdout, elapsed_ms, vram_total_bytes) -> ProofVerdict:
+        try:
+            answer = json.loads(stdout)
+        except ValueError:
+            return ProofVerdict(False, f'no JSON: {stdout[:80]!r}', uuid, elapsed_ms=elapsed_ms)
+        got_uuid = str(answer.get('uuid', ''))
+        wall = float(answer.get('wall_ms') or 0)
+        filled = int(answer.get('filled_bytes') or 0)
+        verdict = ProofVerdict(
+            True,
+            'ok',
+            got_uuid,
+            filled,
+            wall,
+            answer.get('speed'),
+            elapsed_ms,
+            {'job_version': answer.get('job_version')},
         )
-        for i in range(n)
-    ]
-    return ChallengeBank(params, entries, 'NVIDIA GeForce RTX 5090', DRIVER, 'sha256:' + 'c' * 64, 1_700_000_000.0)
+        if answer.get('challenge') != staged.challenges.get(uuid):
+            return _fail(verdict, 'challenge did not echo: sealed for another box or version')
+        if got_uuid != uuid:
+            return _fail(verdict, f'answered from {got_uuid or "?"}, not {uuid}')
+        want = FILL_RATIO * float(vram_total_bytes or 0)
+        if want and filled < 0.6 * want:
+            return _fail(verdict, f'under-filled: {filled / 1e9:.1f} GB of {want / 1e9:.1f} GB')
+        if wall > self.wall_budget_ms:
+            return _fail(verdict, f'too slow: {wall:.0f} ms > {self.wall_budget_ms:.0f} ms')
+        if elapsed_ms > self.outer_budget_ms:
+            return _fail(verdict, f'too slow: {elapsed_ms:.0f} ms round trip > {self.outer_budget_ms:.0f} ms')
+        return verdict
+
+    def cleanup_command(self, staged: StagedProof) -> Optional[str]:
+        return remove_command(list(staged.containers.values())) if staged.containers else None
+
+
+def _fail(v: ProofVerdict, reason: str) -> ProofVerdict:
+    v.passed, v.reason = False, reason
+    return v
 
 
 @pytest.fixture
-def bank(tmp_path) -> BankConsumer:
-    return BankConsumer(make_bank(), tmp_path / 'bank.used.json')
+def proof() -> FakeProof:
+    return FakeProof()
 
 
 @pytest.fixture
@@ -79,54 +149,58 @@ def allowlist() -> NvmlAllowlist:
     return NvmlAllowlist.from_file(FIXTURES / 'nvml_allowlist.json')
 
 
-_SEED = re.compile(r'--seed (\d+)')
-_DEVICE = re.compile(r'--gpus="device=([^"]+)"')
+_CREATE_DEVICE = re.compile(r'^docker create --gpus="device=([^"]+)"')
+_CREATE_CHALLENGE = re.compile(r'--challenge (\w+)')
+_START = re.compile(r'^docker start -a (\w+)$')
 
 
 def job_responder(
-    bank: ChallengeBank,
     *,
-    digest: Optional[str] = None,
+    uuid: Optional[str] = None,
     wall_ms: Optional[float] = None,
     filled_bytes: Optional[int] = None,
-    uuid: Optional[str] = None,
-    params: ChallengeParams = PARAMS,
+    challenge: Optional[str] = None,
+    version: str = 'fake-1',
 ) -> Callable[[str], str]:
-    """Answers a ``docker run ... --seed N`` command the way the challenge job on an honest card would: the bank's
-    digest for that seed, the bank's wall, the requested fill, the UUID the run was pinned to. Any override makes it
-    a lying (or slow, or wrong) card."""
+    """Answers the proof's docker lines the way an honest box would: `docker create` returns a container id and
+    remembers the challenge it was given; `docker cp` says nothing; `docker start -a` prints the sealed result for
+    that container's card, echoing its challenge. Any override makes it a lying (slow, wrong, relayed) card."""
+    challenges: Dict[str, str] = {}
+    cards: Dict[str, str] = {}
 
     def respond(command: str) -> str:
-        seed = int(_SEED.search(command).group(1))
-        entry = bank.entry(seed)
-        card = _DEVICE.search(command).group(1) if _DEVICE.search(command) else UUID_5090
-        return json.dumps(
-            {
-                'seed': seed,
-                'device': 0,
-                'uuid': uuid if uuid is not None else card,
-                'name': 'NVIDIA GeForce RTX 5090',
-                'driver': DRIVER,
-                'sm_count': 170,
-                'vram_total': VRAM_TOTAL_BYTES,
-                'vram_free_before': VRAM_TOTAL_BYTES - 600 * 1024 * 1024,
-                'filled_bytes': filled_bytes if filled_bytes is not None else FILLED_BYTES,
-                'fill_ratio': params.fill_ratio,
-                'dim': params.dim,
-                'matrices': params.matrices,
-                'iters': params.iters,
-                'digest': digest if digest is not None else (entry.digest if entry else 'no-such-seed'),
-                'wall_ms': wall_ms if wall_ms is not None else (entry.wall_ms if entry else 0.0),
-                'job_version': 'test',
-                'run_ms': 2400.0,
-            }
-        )
+        m = _CREATE_DEVICE.match(command)
+        if m:
+            card = m.group(1)
+            cid = container_for(card)
+            cards[cid] = card
+            challenges[cid] = _CREATE_CHALLENGE.search(command).group(1)
+            return cid + '\n'
+        if command.startswith('docker cp -') or command.startswith('docker rm -f'):
+            return ''
+        m = _START.match(command)
+        if m:
+            cid = m.group(1)
+            card = cards.get(cid, '?')
+            return json.dumps(
+                {
+                    'uuid': uuid if uuid is not None else card,
+                    'name': 'NVIDIA GeForce RTX 5090',
+                    'driver': DRIVER,
+                    'filled_bytes': filled_bytes if filled_bytes is not None else FILLED_BYTES,
+                    'wall_ms': wall_ms if wall_ms is not None else GOOD_WALL_MS,
+                    'speed': 41.2,
+                    'challenge': challenge if challenge is not None else challenges.get(cid, ''),
+                    'job_version': version,
+                    'run_ms': 2400.0,
+                }
+            )
+        return CommandResult(127, '', f'job_responder: unexpected {command!r}')
 
     return respond
 
 
 def passing_runner(
-    bank: BankConsumer,
     nvidia_smi: str = fixture('nvidia_smi_5090.csv'),
     kernel_driver: str = fixture('proc_driver_version.txt'),
     nvml_md5: str = f'{NVML_MD5}  {NVML_PATH}\n',
@@ -147,7 +221,7 @@ def passing_runner(
     )
     for url in network_targets:
         runner.on(network_command(url), '200 4812345.000\n')
-    runner.on(regex(r'^docker run '), job or job_responder(bank.bank))
+    runner.on(regex(r'^docker (create|cp|start|rm) '), job or job_responder())
     return runner
 
 

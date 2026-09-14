@@ -3,9 +3,10 @@
 
 """The command runner the full check talks through.
 
-The controller reaches a box as root over SSH with a per-operation key (``23`` §8). That transport is WS-B's; the
-checks only need ``run(command) -> CommandResult``, so this module defines the interface and a ``FakeRunner`` that
-answers from recorded output for tests.
+The controller reaches a box as root over SSH with a per-visit certificate (``26`` §5); that transport is
+``gittensor.controller.ssh.SshRunner``. The checks only need ``run(command) -> CommandResult``, so this module
+defines the interface and a ``FakeRunner`` that answers from recorded output for tests. ``stdin`` carries bytes
+to the command (``docker cp -`` takes a tar on stdin: that is how the proof binary reaches a box, ``23`` §3a).
 """
 
 import re
@@ -27,7 +28,7 @@ class CommandResult:
 class HostRunner(Protocol):
     """Run one shell command on the box; raise on transport failure, return a non-zero exit on command failure."""
 
-    def run(self, command: str, timeout: Optional[float] = None) -> CommandResult: ...
+    def run(self, command: str, timeout: Optional[float] = None, stdin: Optional[bytes] = None) -> CommandResult: ...
 
 
 Response = Union[str, CommandResult, Exception, Callable[[str], Union[str, CommandResult]]]
@@ -41,6 +42,7 @@ class FakeRunner:
     def __init__(self, responses: Optional[dict] = None):
         self._rules: List[Tuple[Union[str, Pattern[str]], Response]] = []
         self.calls: List[str] = []
+        self.stdins: dict = {}  # command -> the bytes it was given
         for matcher, response in (responses or {}).items():
             self.on(matcher, response)
 
@@ -48,8 +50,10 @@ class FakeRunner:
         self._rules.append((matcher, response))
         return self
 
-    def run(self, command: str, timeout: Optional[float] = None) -> CommandResult:
+    def run(self, command: str, timeout: Optional[float] = None, stdin: Optional[bytes] = None) -> CommandResult:
         self.calls.append(command)
+        if stdin is not None:
+            self.stdins[command] = stdin
         for matcher, response in reversed(self._rules):
             hit = matcher == command if isinstance(matcher, str) else matcher.search(command) is not None
             if hit:

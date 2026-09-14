@@ -34,7 +34,10 @@ POWER_LIMIT_MIN_RATIO = 0.9
 # demand: the FILL comes from OUR 5090 spec table (CardSpec.vram_total_mib_min), never from the box's self-report,
 # so a 24 GB card cannot answer a 5090's challenge. Timing bands are the provider's own.
 PROOF_FILL_RATIO = 0.9  # 0.9 of a 32 GB card is ~29 GiB: only an empty 5090 can give it
-PROOF_JOB_TIMEOUT_S = 180.0  # docker start + CUDA init + fill + kernel; the kernel alone is ~1.5 s on an idle 5090
+# The SSH command timeout for one card's `docker start -a`. The proof's own verdict limit is the provider's flat
+# 10 s on our stopwatch (trust-the-seal, no 5090 speed band; Kimbo 9/14); this is only the hard stop after which we
+# give up waiting for an answer at all, kept above the verdict limit so a late answer is judged, not lost.
+PROOF_JOB_TIMEOUT_S = 30.0
 # The proof image (docker/proof/Dockerfile): our own small signed base, `entrius/gt-proof`, with NO binary and NO
 # secret inside; the sealed binary is copied in over SSH at check time. Unpublished for now: build locally and run
 # by tag, then pin the pushed digest here. With a digest set the controller runs `repo@sha256:...`.

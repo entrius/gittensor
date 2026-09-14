@@ -20,6 +20,7 @@ from gittensor.controller.checks.scrape import (
     KERNEL_DRIVER_COMMAND,
     NVML_MD5_COMMAND,
     agent_image_command,
+    agent_image_id_command,
     disk_free_command,
     network_command,
     nvidia_smi_command,
@@ -42,6 +43,7 @@ NVML_MD5 = '3c9d0f1e2b4a5968778695a4b3c2d1e0'
 NVML_PATH = '/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.580.65.06'
 AGENT_DIGEST = 'sha256:' + 'a' * 64
 AGENT_IMAGE_OUT = f'entrius/gt-agent@{AGENT_DIGEST}\n'
+AGENT_IMAGE_ID = 'sha256:' + 'b' * 64
 VRAM_TOTAL_BYTES = 32607 * 1024 * 1024
 FILL_RATIO = 0.9
 FILLED_BYTES = int(FILL_RATIO * VRAM_TOTAL_BYTES)
@@ -205,6 +207,7 @@ def passing_runner(
     kernel_driver: str = fixture('proc_driver_version.txt'),
     nvml_md5: str = f'{NVML_MD5}  {NVML_PATH}\n',
     agent_image: str = AGENT_IMAGE_OUT,
+    agent_image_id: str = AGENT_IMAGE_ID + '\n',
     df: str = fixture('df_docker.txt'),
     network_targets=NETWORK_TARGETS,
     job=None,
@@ -216,6 +219,7 @@ def passing_runner(
             NVML_MD5_COMMAND: nvml_md5,
             KERNEL_DRIVER_COMMAND: kernel_driver,
             agent_image_command(): agent_image,
+            agent_image_id_command(): agent_image_id,
             disk_free_command(): df,
         }
     )

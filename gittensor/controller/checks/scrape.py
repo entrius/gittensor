@@ -50,6 +50,12 @@ def agent_image_command(container: str = cfg.AGENT_CONTAINER_NAME) -> str:
     )
 
 
+def agent_image_id_command(container: str = cfg.AGENT_CONTAINER_NAME) -> str:
+    """The running agent container's image ID. A local build has no repo digest; on a dev box this exact ID is what
+    ``FullCheckConfig.agent_image_ids`` pins instead."""
+    return f"docker inspect --format '{{{{.Image}}}}' {shlex.quote(container)}"
+
+
 def disk_free_command(path: str = cfg.DISK_PATH) -> str:
     return f'df -kP {shlex.quote(path)} | tail -n 1'
 
@@ -139,6 +145,15 @@ def parse_repo_digests(stdout: str) -> List[str]:
     return digests
 
 
+_IMAGE_ID = re.compile(r'^sha256:[0-9a-f]{64}$')
+
+
+def parse_image_id(stdout: str) -> str:
+    """``sha256:<64 hex>`` or '' for anything else."""
+    value = stdout.strip()
+    return value if _IMAGE_ID.match(value) else ''
+
+
 def parse_df_available_gb(stdout: str) -> Optional[float]:
     """Available KiB (4th column of ``df -kP``) in GB (1e9)."""
     line = stdout.strip().splitlines()[-1] if stdout.strip() else ''
@@ -169,6 +184,7 @@ class HostScrape:
     nvml_path: str = ''
     kernel_driver: str = ''
     agent_image_digests: List[str] = field(default_factory=list)
+    agent_image_id: str = ''
     disk_free_gb: Optional[float] = None
     network: Dict[str, Tuple[int, float]] = field(default_factory=dict)
     errors: Dict[str, str] = field(default_factory=dict)  # scrape step -> what went wrong (fails that check)
@@ -222,6 +238,9 @@ def scrape_host(
     out = _run(runner, scrape, 'agent_image', agent_image_command(agent_container), timeout)
     if out is not None:
         scrape.agent_image_digests = parse_repo_digests(out)
+    out = _run(runner, scrape, 'agent_image_id', agent_image_id_command(agent_container), timeout)
+    if out is not None:
+        scrape.agent_image_id = parse_image_id(out)
     out = _run(runner, scrape, 'disk_free', disk_free_command(disk_path), timeout)
     if out is not None:
         scrape.disk_free_gb = parse_df_available_gb(out)

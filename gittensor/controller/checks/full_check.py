@@ -10,13 +10,13 @@ box state; ``state.apply_verdict`` does that.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, Sequence, Tuple
+from typing import Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.checks import GPU_PROOF, check_gpu_proof, identity_checks
 from gittensor.controller.checks.nvml_allowlist import NvmlAllowlist
 from gittensor.controller.checks.runner import HostRunner
-from gittensor.controller.checks.scrape import scrape_host
+from gittensor.controller.checks.scrape import HostScrape, scrape_host
 from gittensor.controller.checks.verdict import CheckResult, CheckVerdict
 from gittensor.controller.proof.slot import GpuProof, UnconfiguredProof, image_ref
 
@@ -27,6 +27,7 @@ class FullCheckConfig:
 
     spec: cfg.CardSpec = cfg.RTX_5090
     agent_image_digests: Tuple[str, ...] = ()  # sha256:... digests of the agent images we published
+    agent_image_ids: Tuple[str, ...] = ()  # dev only: sha256:... image IDs of local builds, which carry no repo digest
     agent_container: str = cfg.AGENT_CONTAINER_NAME
     power_min_ratio: float = cfg.POWER_LIMIT_MIN_RATIO
     disk_min_free_gb: float = cfg.DISK_MIN_FREE_GB
@@ -44,17 +45,44 @@ def run_full_check(
     pinned_uuids: Optional[Sequence[str]] = None,
     config: FullCheckConfig = FullCheckConfig(),
     now: Optional[float] = None,
+    box_id: str = '',
+    fleet_uuids: Optional[Mapping[str, Iterable[str]]] = None,
 ) -> CheckVerdict:
     """``pinned_uuids`` is what ADMIT pinned (None for a box at ADMIT). ``proof`` is the provider in the slot; the
-    default admits nobody."""
-    scrape = scrape_host(
+    default admits nobody. ``fleet_uuids`` (every other box's UUIDs) adds the fleet-wide uniqueness check."""
+    scrape = scrape_box(runner, config)
+    checks = judge_identity(scrape, allowlist, pinned_uuids, config, box_id, fleet_uuids)
+    if identity_passed(checks):
+        checks.append(check_gpu_proof(runner, scrape.gpus, proof, config.proof_image, config.proof_timeout_s))
+    else:
+        checks.append(proof_skipped(checks))
+    return finish_verdict(checks, scrape, now)
+
+
+# The halves of a full check, for a caller that must see every box's scrape before judging any (the fleet round:
+# UUID uniqueness across boxes, then stage everywhere, then fire everywhere).
+
+
+def scrape_box(runner: HostRunner, config: FullCheckConfig) -> HostScrape:
+    return scrape_host(
         runner,
         agent_container=config.agent_container,
         disk_path=config.disk_path,
         network_targets=config.network_targets,
         timeout=config.ssh_timeout_s,
     )
-    checks = identity_checks(
+
+
+def judge_identity(
+    scrape: HostScrape,
+    allowlist: NvmlAllowlist,
+    pinned_uuids: Optional[Sequence[str]],
+    config: FullCheckConfig,
+    box_id: str = '',
+    fleet_uuids: Optional[Mapping[str, Iterable[str]]] = None,
+) -> List[CheckResult]:
+    """Every check except the GPU proof, from one scrape."""
+    return identity_checks(
         scrape,
         config.spec,
         pinned_uuids,
@@ -64,11 +92,21 @@ def run_full_check(
         config.disk_min_free_gb,
         config.disk_path,
         config.network_targets,
+        config.agent_image_ids,
+        box_id,
+        fleet_uuids,
     )
-    if all(c.passed for c in checks):
-        checks.append(check_gpu_proof(runner, scrape.gpus, proof, config.proof_image, config.proof_timeout_s))
-    else:
-        failed = [c.name for c in checks if not c.passed]
-        checks.append(CheckResult(GPU_PROOF, False, {'reason': f'skipped: {", ".join(failed)} failed'}, True))
+
+
+def identity_passed(checks: Sequence[CheckResult]) -> bool:
+    return all(c.passed for c in checks)
+
+
+def proof_skipped(checks: Sequence[CheckResult]) -> CheckResult:
+    failed = [c.name for c in checks if not c.passed]
+    return CheckResult(GPU_PROOF, False, {'reason': f'skipped: {", ".join(failed)} failed'}, True)
+
+
+def finish_verdict(checks: List[CheckResult], scrape: HostScrape, now: Optional[float] = None) -> CheckVerdict:
     card_name = scrape.gpus[0].name if scrape.gpus else ''
     return CheckVerdict.from_checks(checks, scrape.uuids, card_name, scrape.driver, now)

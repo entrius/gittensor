@@ -86,6 +86,12 @@ def plan_commands(
     default=False,
     help='Let an agent image built on docker/agent/keys/make-dev-keys.sh keys start (with --no-update only).',
 )
+@click.option(
+    '--no-chain',
+    is_flag=True,
+    default=False,
+    help='Dev boxes only (with --no-update): skip the hotkey registration lookup; no hotkey needed on disk.',
+)
 @click.option('--dry-run', is_flag=True, default=False, help='Print the docker command(s) without running them.')
 @click.option('--json', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
 def up_command(
@@ -99,6 +105,7 @@ def up_command(
     image,
     no_update,
     allow_dev_keys,
+    no_chain,
     dry_run,
     json_mode,
 ):
@@ -121,9 +128,17 @@ def up_command(
     if allow_dev_keys and not no_update:
         _error('--allow-dev-keys only applies to --no-update (a locally built image).', json_mode)
         sys.exit(2)
+    if no_chain and not no_update:
+        _error('--no-chain only applies to --no-update (a dev box running a local build).', json_mode)
+        sys.exit(2)
 
     if not json_mode:
         err_console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {endpoint} | Netuid: {netuid}[/dim]')
+        if no_chain:
+            err_console.print(
+                '[bold red]WARNING: --no-chain — the hotkey registration lookup is SKIPPED. '
+                'This is a dev box, not a miner: nothing it does earns or is scored.[/bold red]'
+            )
 
     report = run_prereqs(
         _make_probe(),
@@ -133,6 +148,7 @@ def up_command(
         endpoint=endpoint,
         ssh_port=ssh_port,
         skip_chain=dry_run,
+        no_chain=no_chain,
     )
 
     channel = None
@@ -173,6 +189,7 @@ def up_command(
             {
                 'success': report.ok or dry_run,
                 'dry_run': dry_run,
+                'no_chain': no_chain,
                 'already_up': report.already_up,
                 'hotkey_ss58': report.hotkey_ss58,
                 'channel': None if channel is None else channel.__dict__,

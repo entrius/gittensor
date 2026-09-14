@@ -192,7 +192,9 @@ def run_prereqs(
     endpoint: str,
     ssh_port: int,
     skip_chain: bool = False,
+    no_chain: bool = False,
 ) -> PrereqReport:
+    """``no_chain`` is for our own dev boxes only: no registration lookup, and no hotkey needed on disk."""
     report = PrereqReport()
     report.results.extend(check_driver(probe))
     docker = check_docker(probe)
@@ -203,8 +205,17 @@ def run_prereqs(
         report.runner_state = probe.container_state(RUNNER_CONTAINER_NAME)
     report.results.append(check_ports(probe, [ssh_port], report))
     hotkey_result, report.hotkey_ss58 = check_hotkey(probe, wallet, hotkey)
+    if no_chain and not hotkey_result.ok:
+        hotkey_result = CheckResult(hotkey_result.name, None, 'none on disk (--no-chain dev box)')
     report.results.append(hotkey_result)
-    report.results.append(check_registered(probe, report.hotkey_ss58, netuid, endpoint, skip_chain))
+    if no_chain:
+        report.results.append(
+            CheckResult(
+                f'Registered on netuid {netuid}', None, 'skipped (--no-chain: a dev box, NOT a registered miner)'
+            )
+        )
+    else:
+        report.results.append(check_registered(probe, report.hotkey_ss58, netuid, endpoint, skip_chain))
     return report
 
 

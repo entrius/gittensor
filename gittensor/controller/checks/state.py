@@ -36,6 +36,11 @@ class BoxState:
     last_check_at: Optional[float] = None
     last_failed: List[str] = field(default_factory=list)
     admitted_at: Optional[float] = None
+    # Where the box's agent sshd answers, and its host key pinned at admission (``gitt controller admit``). Files
+    # written before these fields existed load with the defaults.
+    host: str = ''
+    port: int = 0
+    host_key: str = ''
 
     def as_dict(self) -> dict:
         return asdict(self)

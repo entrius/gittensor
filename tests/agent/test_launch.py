@@ -126,7 +126,11 @@ class TestRunLines:
             ]
             or '*' in ignored
         )
-        assert not list((AGENT_DIR / 'keys').glob('gt_*'))
+        # make-dev-keys.sh writes the dev pairs here on purpose (gitignored); what must never happen is a commit
+        tracked = subprocess.run(
+            ['git', '-C', str(REPO), 'ls-files', 'docker/agent/keys'], capture_output=True, text=True
+        ).stdout.split()
+        assert not [p for p in tracked if Path(p).name.startswith('gt_')]
         assert config.RELEASE_PUBKEY_OPENSSH == ''  # no release key on this branch: gitt up refuses the runner
 
 

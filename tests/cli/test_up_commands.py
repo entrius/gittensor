@@ -214,6 +214,19 @@ class TestUpCommand:
         result = runner.invoke(cli, [*UP, '--allow-dev-keys'])
         assert result.exit_code == 2 and 'only applies to --no-update' in result.output and docker_calls == []
 
+    def test_no_chain_dev_box_skips_the_lookup_and_needs_no_hotkey(self, runner, docker_calls, probe):
+        probe.ss58 = None
+        result = runner.invoke(
+            cli, [*UP, '--no-update', '--allow-dev-keys', '--no-chain', '--image', 'entrius/gt-agent:dev']
+        )
+        assert result.exit_code == 0, result.output
+        assert 'WARNING: --no-chain' in result.output and 'NOT a registered miner' in result.output
+        assert probe.chain_calls == 0 and len(docker_calls) == 1 and 'GT_AGENT_MINER_HOTKEY=' in docker_calls[0]
+
+    def test_no_chain_requires_no_update(self, runner, docker_calls, probe):
+        result = runner.invoke(cli, [*UP, '--no-chain'])
+        assert result.exit_code == 2 and 'only applies to --no-update' in result.output and docker_calls == []
+
     def test_dry_run_survives_failed_checks(self, runner, docker_calls, probe):
         probe.docker_info = subprocess.CompletedProcess([], 1, '', 'no daemon')
         result = runner.invoke(cli, [*UP, '--dry-run'])

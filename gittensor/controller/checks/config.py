@@ -52,7 +52,11 @@ PROOF_IMAGE_DIGEST = ''
 # Identity and resources.
 AGENT_CONTAINER_NAME = 'gt-agent'  # the container `gitt up` starts (gittensor/agent/config.py AGENT_CONTAINER_NAME)
 DISK_MIN_FREE_GB = 100.0  # weights + images; Lium's VerifyX floor is the same 100 GB
-DISK_PATH = '/var/lib/docker'
+# A HOST path; '' = wherever the host docker daemon keeps images (`docker info` DockerRootDir). The scrape reads it
+# through /proc/1/root: the agent runs with --pid host, and its own filesystem has no /var/lib/docker at all (first
+# real box, 9/14: `df /var/lib/docker` inside gt-agent -> No such file or directory).
+DISK_PATH = ''
+HOST_ROOT = '/proc/1/root'
 # Docker Hub is the registry (vault 23 §8); the weights come from Hugging Face at pre-staging.
 NETWORK_TARGETS = ('https://registry-1.docker.io/v2/', 'https://huggingface.co/api/models/Qwen')
 NETWORK_TIMEOUT_S = 10.0

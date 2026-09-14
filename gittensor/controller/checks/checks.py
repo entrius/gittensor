@@ -158,7 +158,11 @@ def check_fleet_uuid_unique(
 def check_disk_free(
     free_gb: Optional[float], min_gb: float = cfg.DISK_MIN_FREE_GB, path: str = cfg.DISK_PATH
 ) -> CheckResult:
-    evidence = {'path': path, 'free_gb': None if free_gb is None else round(free_gb, 1), 'min_gb': min_gb}
+    evidence = {
+        'path': path or 'docker root dir',
+        'free_gb': None if free_gb is None else round(free_gb, 1),
+        'min_gb': min_gb,
+    }
     if free_gb is None:
         return CheckResult(DISK_FREE, False, {**evidence, 'reason': 'df unreadable'})
     if free_gb < min_gb:

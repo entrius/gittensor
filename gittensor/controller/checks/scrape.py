@@ -57,7 +57,10 @@ def agent_image_id_command(container: str = cfg.AGENT_CONTAINER_NAME) -> str:
 
 
 def disk_free_command(path: str = cfg.DISK_PATH) -> str:
-    return f'df -kP {shlex.quote(path)} | tail -n 1'
+    """Free space on the HOST filesystem holding ``path`` ('' = the host docker daemon's root dir), seen through
+    PID 1's root because the agent container's own filesystem is not the host's."""
+    target = shlex.quote(path) if path else '"$(docker info --format \'{{.DockerRootDir}}\')"'
+    return f'df -kP {cfg.HOST_ROOT}{target} | tail -n 1'
 
 
 def network_command(url: str, timeout_s: float = cfg.NETWORK_TIMEOUT_S) -> str:

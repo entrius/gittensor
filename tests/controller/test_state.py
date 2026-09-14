@@ -78,7 +78,7 @@ def test_ladder_resets_after_a_clean_stretch():
 
 def test_due_for_check_interval():
     idle = apply_verdict(BoxState('hk1'), admit_verdict(), now=0.0)
-    assert not due_for_check(idle, 100.0) and due_for_check(idle, 900.0) and due_for_check(idle, 50.0, interval_s=10)
+    assert not due_for_check(idle, 100.0) and due_for_check(idle, 1200.0) and due_for_check(idle, 50.0, interval_s=10)
 
 
 def test_state_store_roundtrip(tmp_path):

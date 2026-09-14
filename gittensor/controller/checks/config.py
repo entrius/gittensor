@@ -35,9 +35,9 @@ POWER_LIMIT_MIN_RATIO = 0.9
 # so a 24 GB card cannot answer a 5090's challenge. Timing bands are the provider's own.
 PROOF_FILL_RATIO = 0.9  # 0.9 of a 32 GB card is ~29 GiB: only an empty 5090 can give it
 # The SSH command timeout for one card's `docker start -a`. The proof's own verdict limit is the provider's flat
-# 10 s on our stopwatch (trust-the-seal, no 5090 speed band; Kimbo 9/14); this is only the hard stop after which we
+# 30 s on our stopwatch (trust-the-seal, no 5090 speed band; Kimbo 9/14); this is only the hard stop after which we
 # give up waiting for an answer at all, kept above the verdict limit so a late answer is judged, not lost.
-PROOF_JOB_TIMEOUT_S = 30.0
+PROOF_JOB_TIMEOUT_S = 60.0
 # The proof image (docker/proof/Dockerfile): our own small signed base, `entrius/gt-proof`, with NO binary and NO
 # secret inside; the sealed binary is copied in over SSH at check time. Unpublished for now: build locally and run
 # by tag, then pin the pushed digest here. With a digest set the controller runs `repo@sha256:...`.
@@ -58,9 +58,10 @@ SSH_COMMAND_TIMEOUT_S = 30.0
 # allowlisted and every box fails the nvml_digest check (fail closed).
 NVML_ALLOWLIST_LOCATION = ''
 
-# State machine. Every idle card is probed at the same instant every ~5 min (Kimbo 9/13; cadence TBD, the old 15
-# was arbitrary); a BENCHED box waits out the ladder before it may re-enter through ADMIT, and the ladder resets
-# after a long clean stretch.
-FULL_CHECK_INTERVAL_S = 300.0
+# State machine. Every idle card is probed at the same instant every 20 min (Kimbo 9/14), and the proof binary is
+# rebuilt every round, so a forger has to crack that round's build inside the 30 s answer window; worst case is
+# one cycle of idle pay before the bench. A BENCHED box waits out the ladder before it may re-enter through ADMIT,
+# and the ladder resets after a long clean stretch.
+FULL_CHECK_INTERVAL_S = 1200.0
 BENCH_BACKOFF_LADDER_S = (3_600, 14_400, 57_600, 230_400)  # 1 h -> 4 h -> 16 h -> 64 h (vault `23` §5)
 BENCH_LADDER_RESET_AFTER_S = 7 * 86_400

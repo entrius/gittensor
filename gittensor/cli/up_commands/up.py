@@ -9,13 +9,13 @@ import sys
 
 import click
 
+from gittensor.agent import channel as release_channel
 from gittensor.agent.config import (
+    AGENT_CHANNEL_URL,
     AGENT_CONTAINER_NAME,
-    AGENT_HTTP_PORT,
     AGENT_IMAGE,
     AGENT_SSH_PORT,
     RUNNER_CONTAINER_NAME,
-    RUNNER_IMAGE,
 )
 from gittensor.agent.launch import agent_run_command, render, runner_run_command
 from gittensor.cli.helpers import NETWORK_CHOICE, console, err_console
@@ -30,33 +30,35 @@ def _make_probe() -> HostProbe:
     return HostProbe()
 
 
+def _load_channel(url: str) -> release_channel.Channel:
+    return release_channel.load(url)
+
+
 def plan_commands(
     report: PrereqReport,
     *,
     image: str,
-    runner_image: str,
     ssh_port: int,
-    http_port: int,
     no_update: bool,
+    allow_dev_keys: bool = False,
+    channel: release_channel.Channel | None = None,
+    channel_url: str = AGENT_CHANNEL_URL,
 ) -> list[list[str]]:
-    """The docker commands `gitt up` will issue, in order. A stopped-but-present container is removed first."""
+    """The docker commands `gitt up` will issue, in order. A stopped-but-present container is removed first.
+
+    With the runner (the default) the runner image comes from the verified ``channel``, by digest; ``image`` is
+    only used by ``--no-update`` (a local build started directly)."""
     hotkey = report.hotkey_ss58 or ''
     if no_update:
-        target, cmd = (
-            AGENT_CONTAINER_NAME,
-            agent_run_command(image=image, ssh_port=ssh_port, http_port=http_port, miner_hotkey=hotkey),
-        )
+        target = AGENT_CONTAINER_NAME
+        cmd = agent_run_command(image=image, ssh_port=ssh_port, miner_hotkey=hotkey, allow_dev_keys=allow_dev_keys)
         state = report.agent_state
     else:
-        target, cmd = (
-            RUNNER_CONTAINER_NAME,
-            runner_run_command(
-                agent_image=image,
-                runner_image=runner_image,
-                ssh_port=ssh_port,
-                http_port=http_port,
-                miner_hotkey=hotkey,
-            ),
+        if channel is None:
+            raise ValueError('a verified channel is required to start the runner')
+        target = RUNNER_CONTAINER_NAME
+        cmd = runner_run_command(
+            runner_image=channel.runner, ssh_port=ssh_port, miner_hotkey=hotkey, channel_url=channel_url
         )
         state = report.runner_state
     plan = []
@@ -75,10 +77,15 @@ def plan_commands(
 @click.option(
     '--ssh-port', type=int, default=AGENT_SSH_PORT, show_default=True, help='sshd port the controller reaches.'
 )
-@click.option('--port', 'http_port', type=int, default=AGENT_HTTP_PORT, show_default=True, help='Agent HTTP port.')
-@click.option('--image', default=AGENT_IMAGE, show_default=True, help='Agent image the runner follows.')
-@click.option('--runner-image', default=RUNNER_IMAGE, show_default=True, help='Runner image.')
+@click.option('--channel-url', default=AGENT_CHANNEL_URL, show_default=True, help='Signed release channel to follow.')
+@click.option('--image', default=AGENT_IMAGE, show_default=True, help='Agent image for --no-update (a local build).')
 @click.option('--no-update', is_flag=True, default=False, help='Start the agent directly, no self-updating runner.')
+@click.option(
+    '--allow-dev-keys',
+    is_flag=True,
+    default=False,
+    help='Let an agent image built on docker/agent/keys/make-dev-keys.sh keys start (with --no-update only).',
+)
 @click.option('--dry-run', is_flag=True, default=False, help='Print the docker command(s) without running them.')
 @click.option('--json', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
 def up_command(
@@ -88,29 +95,32 @@ def up_command(
     network,
     rpc_url,
     ssh_port,
-    http_port,
+    channel_url,
     image,
-    runner_image,
     no_update,
+    allow_dev_keys,
     dry_run,
     json_mode,
 ):
     """Start the compute agent: the one container that makes this box a Gittensor compute miner.
 
-    Checks the NVIDIA driver, Docker + the NVIDIA container toolkit, that the SSH and agent ports are free, and
-    that your hotkey exists and is registered. Then starts a self-updating runner which pulls the agent image
-    and keeps it running. After this you do nothing: the controller installs a per-operation SSH key through the
-    agent's signed route and drives the box over SSH.
+    Checks the NVIDIA driver, Docker + the NVIDIA container toolkit, that the SSH port is free, and that your
+    hotkey exists and is registered. Then verifies the signed release channel and starts a self-updating runner
+    which pulls the agent image by digest and keeps it running. After this you do nothing: the controller logs in
+    over SSH with a short-lived certificate and drives the box.
 
     \b
     Examples:
         gitt up --wallet alice --hotkey default
         gitt up --dry-run
-        gitt up --no-update --image entrius/gt-agent:dev   (a locally built image)
+        gitt up --no-update --allow-dev-keys --image entrius/gt-agent:dev   (a locally built image)
     """
     wallet_name = wallet_name or _load_config_value('wallet') or 'default'
     wallet_hotkey = wallet_hotkey or _load_config_value('hotkey') or 'default'
     endpoint = _resolve_endpoint(network, rpc_url)
+    if allow_dev_keys and not no_update:
+        _error('--allow-dev-keys only applies to --no-update (a locally built image).', json_mode)
+        sys.exit(2)
 
     if not json_mode:
         err_console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {endpoint} | Netuid: {netuid}[/dim]')
@@ -122,16 +132,41 @@ def up_command(
         netuid=netuid,
         endpoint=endpoint,
         ssh_port=ssh_port,
-        http_port=http_port,
         skip_chain=dry_run,
     )
-    plan = plan_commands(
-        report, image=image, runner_image=runner_image, ssh_port=ssh_port, http_port=http_port, no_update=no_update
-    )
-    # What the runner itself will issue: printed so the miner can see exactly what runs privileged on their box.
-    agent_line = agent_run_command(
-        image=image, ssh_port=ssh_port, http_port=http_port, miner_hotkey=report.hotkey_ss58 or ''
-    )
+
+    channel = None
+    channel_error = None
+    if not no_update:
+        try:
+            channel = _load_channel(channel_url)
+        except release_channel.ChannelError as e:
+            channel_error = str(e)
+        report.results.append(
+            release_channel_result(channel, channel_error, channel_url)  # a row in the table like any other check
+        )
+
+    if channel is None and not no_update:
+        plan: list[list[str]] = []
+        agent_line: list[str] = []
+    else:
+        plan = plan_commands(
+            report,
+            image=image,
+            ssh_port=ssh_port,
+            no_update=no_update,
+            allow_dev_keys=allow_dev_keys,
+            channel=channel,
+            channel_url=channel_url,
+        )
+        # What the runner itself will issue: printed so the miner can see exactly what runs privileged on their box.
+        agent_line = agent_run_command(
+            image=image if no_update else channel.agent,
+            ssh_port=ssh_port,
+            miner_hotkey=report.hotkey_ss58 or '',
+            image_digest='' if no_update else channel.agent_digest,
+            allow_dev_keys=allow_dev_keys,
+        )
 
     if json_mode:
         emit_json(
@@ -140,6 +175,7 @@ def up_command(
                 'dry_run': dry_run,
                 'already_up': report.already_up,
                 'hotkey_ss58': report.hotkey_ss58,
+                'channel': None if channel is None else channel.__dict__,
                 'checks': [r.as_dict() for r in report.results],
                 'commands': [render(c) for c in plan],
                 'agent_command': render(agent_line),
@@ -154,12 +190,15 @@ def up_command(
 
     if dry_run:
         if not json_mode:
-            console.print('\n[bold]Would run:[/bold]')
-            for cmd in plan:
-                click.echo(f'  {render(cmd)}')
-            if not no_update:
-                console.print('\n[bold]The runner then keeps this agent container running:[/bold]')
-                click.echo(f'  {render(agent_line)}')
+            if plan:
+                console.print('\n[bold]Would run:[/bold]')
+                for cmd in plan:
+                    click.echo(f'  {render(cmd)}')
+                if not no_update:
+                    console.print('\n[bold]The runner then keeps this agent container running:[/bold]')
+                    click.echo(f'  {render(agent_line)}')
+            else:
+                console.print('\n[yellow]No channel: nothing to run.[/yellow]')
         return
 
     if report.already_up:
@@ -177,7 +216,15 @@ def up_command(
 
     if not json_mode:
         started = AGENT_CONTAINER_NAME if no_update else RUNNER_CONTAINER_NAME
-        err_console.print(f'\n[green]Started {started}.[/green] sshd :{ssh_port}, agent :{http_port}.')
+        err_console.print(f'\n[green]Started {started}.[/green] sshd :{ssh_port}.')
         err_console.print(
             '[dim]Nothing else to do: the controller takes it from here. `gitt down` stops the agent.[/dim]'
         )
+
+
+def release_channel_result(channel, error, url):
+    from .prereqs import CheckResult
+
+    if channel is not None:
+        return CheckResult('Release channel', True, f'{channel.version or "?"} → {channel.agent[-19:]} ({url})')
+    return CheckResult('Release channel', False, error[:160])

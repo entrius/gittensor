@@ -1,7 +1,7 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-"""Prerequisite checks for `gitt up`: driver, docker, NVIDIA toolkit, free ports, hotkey on disk, hotkey on chain.
+"""Prerequisite checks for `gitt up`: driver, docker, NVIDIA toolkit, a free SSH port, hotkey on disk, hotkey on chain.
 
 Every probe of the host goes through :class:`HostProbe` so the checks are unit-testable with a fake; nothing in
 this module imports ``bittensor`` at module load (the chain lookup imports it lazily inside the probe).
@@ -152,7 +152,7 @@ def check_ports(probe: HostProbe, ports: Sequence[int], report: PrereqReport) ->
         )
     busy = [p for p in ports if not probe.port_free(p)]
     if busy:
-        return CheckResult('Ports free', False, f'in use: {", ".join(map(str, busy))} (pick --ssh-port / --port)')
+        return CheckResult('Ports free', False, f'in use: {", ".join(map(str, busy))} (pick --ssh-port)')
     return CheckResult('Ports free', True, ', '.join(map(str, ports)))
 
 
@@ -191,7 +191,6 @@ def run_prereqs(
     netuid: int,
     endpoint: str,
     ssh_port: int,
-    http_port: int,
     skip_chain: bool = False,
 ) -> PrereqReport:
     report = PrereqReport()
@@ -202,7 +201,7 @@ def run_prereqs(
     if docker.ok:
         report.agent_state = probe.container_state(AGENT_CONTAINER_NAME)
         report.runner_state = probe.container_state(RUNNER_CONTAINER_NAME)
-    report.results.append(check_ports(probe, [ssh_port, http_port], report))
+    report.results.append(check_ports(probe, [ssh_port], report))
     hotkey_result, report.hotkey_ss58 = check_hotkey(probe, wallet, hotkey)
     report.results.append(hotkey_result)
     report.results.append(check_registered(probe, report.hotkey_ss58, netuid, endpoint, skip_chain))

@@ -13,10 +13,12 @@ from __future__ import annotations
 import shlex
 
 from gittensor.agent.config import (
+    AGENT_CHANNEL_URL,
     AGENT_CONTAINER_NAME,
     AGENT_IMAGE,
+    ENV_ALLOW_DEV_KEYS,
+    ENV_CHANNEL_URL,
     ENV_CONTAINER_NAME,
-    ENV_HTTP_PORT,
     ENV_IMAGE,
     ENV_IMAGE_DIGEST,
     ENV_MINER_HOTKEY,
@@ -32,7 +34,7 @@ from gittensor.agent.config import (
 DOCKER_SOCK = '/var/run/docker.sock'
 
 # The privileges the agent needs and nothing more is not a claim we can make: this is Lium's executor footprint
-# (vault 22 §4). Privileged + pid host + docker.sock is host root for whoever holds the controller hotkey.
+# (vault 22 §4). Privileged + pid host + docker.sock is host root for whoever holds the controller's CA key.
 AGENT_PRIVILEGE_FLAGS = ('--privileged', '--pid', 'host', '--gpus', 'all')
 
 
@@ -40,13 +42,14 @@ def agent_run_command(
     *,
     image: str = AGENT_IMAGE,
     ssh_port: int,
-    http_port: int,
     miner_hotkey: str = '',
     image_digest: str = '',
     name: str = AGENT_CONTAINER_NAME,
+    allow_dev_keys: bool = False,
 ) -> list[str]:
-    """The agent container: what the runner starts (and restarts when the image digest moves)."""
-    return [
+    """The agent container: what the runner starts (and restarts when the channel's digest moves). One published port,
+    sshd. ``allow_dev_keys`` lets an image built on docker/agent/keys/make-dev-keys.sh keys start (local builds)."""
+    cmd = [
         'docker',
         'run',
         '-d',
@@ -61,12 +64,8 @@ def agent_run_command(
         f'{SSH_HOSTKEY_VOLUME}:{SSH_HOSTKEY_VOLUME_MOUNT}',
         '-p',
         f'{ssh_port}:{ssh_port}',
-        '-p',
-        f'{http_port}:{http_port}',
         '-e',
         f'{ENV_SSH_PORT}={ssh_port}',
-        '-e',
-        f'{ENV_HTTP_PORT}={http_port}',
         '-e',
         f'{ENV_MINER_HOTKEY}={miner_hotkey}',
         '-e',
@@ -75,22 +74,24 @@ def agent_run_command(
         f'{ENV_IMAGE_DIGEST}={image_digest}',
         '-e',
         'NVIDIA_DRIVER_CAPABILITIES=all',
-        image,
     ]
+    if allow_dev_keys:
+        cmd += ['-e', f'{ENV_ALLOW_DEV_KEYS}=1']
+    return [*cmd, image]
 
 
 def runner_run_command(
     *,
-    agent_image: str = AGENT_IMAGE,
     runner_image: str = RUNNER_IMAGE,
     ssh_port: int,
-    http_port: int,
     miner_hotkey: str = '',
+    channel_url: str = AGENT_CHANNEL_URL,
     update_interval_s: int = UPDATE_INTERVAL_S,
     agent_name: str = AGENT_CONTAINER_NAME,
     name: str = RUNNER_CONTAINER_NAME,
 ) -> list[str]:
-    """The runner container: what ``gitt up`` actually issues. Needs only the docker socket."""
+    """The runner container: what ``gitt up`` actually issues. Needs only the docker socket. It follows the signed
+    channel at ``channel_url``, never a tag."""
     return [
         'docker',
         'run',
@@ -102,13 +103,11 @@ def runner_run_command(
         '-v',
         f'{DOCKER_SOCK}:{DOCKER_SOCK}',
         '-e',
-        f'{ENV_IMAGE}={agent_image}',
+        f'{ENV_CHANNEL_URL}={channel_url}',
         '-e',
         f'{ENV_CONTAINER_NAME}={agent_name}',
         '-e',
         f'{ENV_SSH_PORT}={ssh_port}',
-        '-e',
-        f'{ENV_HTTP_PORT}={http_port}',
         '-e',
         f'{ENV_MINER_HOTKEY}={miner_hotkey}',
         '-e',

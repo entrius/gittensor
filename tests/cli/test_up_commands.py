@@ -11,11 +11,15 @@ from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
 
+from gittensor.agent.channel import Channel, ChannelError
 from gittensor.cli.main import cli
 from gittensor.cli.up_commands import prereqs
 from gittensor.cli.up_commands.prereqs import PrereqReport, check_ports, check_toolkit, run_prereqs
 
 SMI_OK = 'NVIDIA GeForce RTX 5090, 580.65.06, GPU-1111\n'
+AGENT_REF = 'entrius/gt-agent@sha256:' + 'a' * 64
+RUNNER_REF = 'entrius/gt-agent-runner@sha256:' + 'b' * 64
+CHANNEL = Channel(AGENT_REF, RUNNER_REF, '5.1.0', 1_789_000_000)
 
 
 class FakeProbe:
@@ -77,6 +81,7 @@ def docker_calls(probe):
 
     with (
         patch('gittensor.cli.up_commands.up._make_probe', return_value=probe),
+        patch('gittensor.cli.up_commands.up._load_channel', return_value=CHANNEL),
         patch('gittensor.cli.up_commands.docker_exec.run_docker', side_effect=_run),
     ):
         yield calls
@@ -92,25 +97,25 @@ UP = ['up', '--wallet', 'alice', '--hotkey', 'default', '--network', 'test']
 
 class TestPrereqs:
     def test_all_pass(self, probe):
-        report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200, http_port=8200)
+        report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
         assert report.ok and report.hotkey_ss58 == probe.ss58 and not report.already_up
         assert [r.status for r in report.results] == ['pass'] * 6
 
     def test_no_driver_fails(self, probe):
         probe.smi = subprocess.CompletedProcess([], 127, '', 'nvidia-smi: command not found')
-        report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200, http_port=8200)
+        report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
         assert not report.ok
         assert report.results[0].name == 'NVIDIA driver' and report.results[0].status == 'fail'
 
     def test_wrong_gpu_is_a_warning_not_a_failure(self, probe):
         probe.smi = subprocess.CompletedProcess([], 0, 'NVIDIA GeForce RTX 4090, 550.1, GPU-9\n', '')
-        report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200, http_port=8200)
+        report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
         warn = [r for r in report.results if r.status == 'warn']
         assert report.ok and len(warn) == 1 and '5090' in warn[0].detail
 
     def test_docker_down_fails_and_skips_container_lookup(self, probe):
         probe.docker_info = subprocess.CompletedProcess([], 1, '', 'Cannot connect to the Docker daemon')
-        report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200, http_port=8200)
+        report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
         assert not report.ok and report.agent_state is None
         assert any(r.name == 'Docker daemon' and 'Cannot connect' in r.detail for r in report.results)
 
@@ -124,20 +129,20 @@ class TestPrereqs:
     def test_busy_port_fails_unless_ours(self, probe):
         probe.busy_ports = {2200}
         report = PrereqReport()
-        result = check_ports(probe, [2200, 8200], report)
+        result = check_ports(probe, [2200], report)
         assert not result.ok and '2200' in result.detail
         report.agent_state = 'running'
-        assert check_ports(probe, [2200, 8200], report).ok
+        assert check_ports(probe, [2200], report).ok
 
     def test_missing_hotkey_file_fails_both_hotkey_checks(self, probe):
         probe.ss58 = None
-        report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200, http_port=8200)
+        report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
         assert [r.status for r in report.results[-2:]] == ['fail', 'fail']
         assert probe.chain_calls == 0
 
     def test_unregistered_fails(self, probe):
         probe.registered = False
-        report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200, http_port=8200)
+        report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
         assert not report.ok and 'not registered' in report.results[-1].detail
 
     def test_chain_error_is_reported_not_raised(self, probe):
@@ -145,12 +150,12 @@ class TestPrereqs:
             raise ConnectionError('rpc down')
 
         probe.is_registered = boom
-        report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200, http_port=8200)
+        report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
         assert not report.ok and 'rpc down' in report.results[-1].detail
 
     def test_skip_chain(self, probe):
         report = run_prereqs(
-            probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200, http_port=8200, skip_chain=True
+            probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200, skip_chain=True
         )
         assert report.ok and report.results[-1].status == 'skip' and probe.chain_calls == 0
 
@@ -184,10 +189,30 @@ class TestUpCommand:
         out = result.output
         assert 'prerequisites' in out and 'NVIDIA driver' in out and 'skipped (--dry-run)' in out
         assert 'Would run:' in out
-        assert 'docker run -d --name gt-agent-runner' in out
+        assert 'docker run -d --name gt-agent-runner' in out and RUNNER_REF in out
         assert 'docker run -d --name gt-agent --restart unless-stopped --privileged --pid host --gpus all' in out
+        assert AGENT_REF in out and 'Release channel' in out and '5.1.0' in out
         assert probe.ss58 in out
         assert docker_calls == [] and probe.chain_calls == 0
+
+    def test_unverifiable_channel_fails_and_starts_nothing(self, runner, docker_calls, probe):
+        with patch('gittensor.cli.up_commands.up._load_channel', side_effect=ChannelError('signature does not verify')):
+            result = runner.invoke(cli, UP)
+        assert result.exit_code == 1 and 'signature does not verify' in result.output and docker_calls == []
+        with patch('gittensor.cli.up_commands.up._load_channel', side_effect=ChannelError('no release public key')):
+            result = runner.invoke(cli, [*UP, '--dry-run'])
+        assert result.exit_code == 0 and 'No channel' in result.output and 'Would run' not in result.output
+
+    def test_no_update_never_touches_the_channel(self, runner, docker_calls, probe):
+        with patch('gittensor.cli.up_commands.up._load_channel', side_effect=AssertionError('must not be called')):
+            result = runner.invoke(cli, [*UP, '--no-update', '--allow-dev-keys', '--image', 'entrius/gt-agent:dev'])
+        assert result.exit_code == 0, result.output
+        (cmd,) = docker_calls
+        assert 'GT_AGENT_ALLOW_DEV_KEYS=1' in cmd and cmd[-1] == 'entrius/gt-agent:dev'
+
+    def test_allow_dev_keys_requires_no_update(self, runner, docker_calls, probe):
+        result = runner.invoke(cli, [*UP, '--allow-dev-keys'])
+        assert result.exit_code == 2 and 'only applies to --no-update' in result.output and docker_calls == []
 
     def test_dry_run_survives_failed_checks(self, runner, docker_calls, probe):
         probe.docker_info = subprocess.CompletedProcess([], 1, '', 'no daemon')
@@ -205,7 +230,7 @@ class TestUpCommand:
         assert result.exit_code == 0, result.output
         assert len(docker_calls) == 1
         cmd = docker_calls[0]
-        assert cmd[:5] == ['docker', 'run', '-d', '--name', 'gt-agent-runner']
+        assert cmd[:5] == ['docker', 'run', '-d', '--name', 'gt-agent-runner'] and cmd[-1] == RUNNER_REF
         assert f'GT_AGENT_MINER_HOTKEY={probe.ss58}' in cmd
         assert 'Started gt-agent-runner' in result.output
 
@@ -214,7 +239,7 @@ class TestUpCommand:
         assert result.exit_code == 0, result.output
         (cmd,) = docker_calls
         assert cmd[:5] == ['docker', 'run', '-d', '--name', 'gt-agent'] and cmd[-1] == 'local/gt-agent:dev'
-        assert '-p' in cmd and '2201:2201' in cmd and '--privileged' in cmd
+        assert '-p' in cmd and '2201:2201' in cmd and '--privileged' in cmd and 'GT_AGENT_ALLOW_DEV_KEYS=1' not in cmd
 
     def test_stopped_runner_is_removed_before_start(self, runner, docker_calls, probe):
         probe.states['gt-agent-runner'] = 'exited'
@@ -225,13 +250,14 @@ class TestUpCommand:
     def test_already_up_is_a_noop(self, runner, docker_calls, probe):
         probe.states['gt-agent-runner'] = 'running'
         probe.states['gt-agent'] = 'running'
-        probe.busy_ports = {2200, 8200}  # held by our own containers
+        probe.busy_ports = {2200}  # held by our own container
         result = runner.invoke(cli, UP)
         assert result.exit_code == 0 and 'Already up' in result.output and docker_calls == []
 
     def test_docker_run_failure_exits_1(self, runner, probe):
         with (
             patch('gittensor.cli.up_commands.up._make_probe', return_value=probe),
+            patch('gittensor.cli.up_commands.up._load_channel', return_value=CHANNEL),
             patch(
                 'gittensor.cli.up_commands.docker_exec.run_docker',
                 return_value=subprocess.CompletedProcess([], 125, '', 'port is already allocated'),
@@ -247,7 +273,8 @@ class TestUpCommand:
         assert payload['success'] and payload['dry_run'] and payload['hotkey_ss58'] == probe.ss58
         assert {c['name'] for c in payload['checks']} >= {'NVIDIA driver', 'Docker daemon', 'Ports free'}
         assert payload['commands'][0].startswith('docker run -d --name gt-agent-runner')
-        assert '--privileged' in payload['agent_command']
+        assert '--privileged' in payload['agent_command'] and AGENT_REF in payload['agent_command']
+        assert payload['channel']['agent'] == AGENT_REF
 
     def test_json_failure_envelope(self, runner, docker_calls, probe):
         probe.ss58 = None
@@ -287,5 +314,15 @@ class TestDownCommand:
 
 def test_docker_assets_exist():
     root = Path(__file__).resolve().parents[2] / 'docker' / 'agent'
-    for name in ('Dockerfile', 'runner.Dockerfile', 'entrypoint.sh', 'runner.sh', 'sshd.conf'):
+    for name in (
+        'Dockerfile',
+        'runner.Dockerfile',
+        'entrypoint.sh',
+        'runner.sh',
+        'sshd.conf',
+        'keys/make-dev-keys.sh',
+        'keys/README.md',
+        'channel/sign.sh',
+        'channel/README.md',
+    ):
         assert (root / name).is_file(), name

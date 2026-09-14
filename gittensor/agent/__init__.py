@@ -3,13 +3,12 @@
 
 """The compute agent: the one privileged container a miner runs with ``gitt up``.
 
-Lium's executor shape, reduced (vault ``22`` §4, ``23`` §2, ``24`` §3 WS-A): sshd for root-by-key, one signed
-write route (``POST /install_ssh_key``, plus its ``DELETE``) that only the controller hotkey compiled into
-:mod:`gittensor.agent.config` can drive, and a read-only ``GET /info``. Everything else the controller does over
-SSH against the host docker daemon (``/var/run/docker.sock`` is mounted). The agent updates itself through the
-runner in ``docker/agent/``.
+Lium's executor shape, reduced (vault ``22`` §4, ``23`` §2, ``24`` §3 WS-A, ``26`` §5): an sshd that trusts one
+SSH certificate authority compiled into the image, and nothing else. The controller mints a throwaway key and a
+~5-minute certificate for every visit and does everything over SSH against the host docker daemon
+(``/var/run/docker.sock`` is mounted). There is no agent HTTP port and no signed key-install route: nothing on the
+box accepts a request, and the agent image has no Python in it.
 
-Import discipline: nothing under this package imports ``bittensor`` — the agent image ships only
-``bittensor-wallet`` (sr25519 verify) and the standard library, so the modules here stay importable in that image
-and cheap to import from the CLI.
+What lives here is the part the CLI needs on the miner's host: the constants both sides agree on (``config``), the
+``docker run`` lines (``launch``), and the signed release channel the runner follows (``channel``). Stdlib only.
 """

@@ -12,7 +12,7 @@
 # The volume stays read-only: `read_only: false` would still fail on the tokenizer marker, and it would let the
 # workload rewrite the weights it is verified against.
 name: qwen3.8-27b-nvfp4
-version: 3
+version: 4
 description: Qwen3.8-27B (NVFP4) chat on sparkinfer 19ef39ec2, one RTX 5090 per instance
 runtime: sparkinfer
 image: entrius/sparkinfer:19ef39ec2@sha256:d35719b03f320f7c30abcb7f6b495e64fb7edbe4187c8744775277dc661a23bb
@@ -20,7 +20,7 @@ placement:
   gpu_types: {include: [RTX5090]}
   cards_per_instance: 1
   min_vram_gb: 30            # 25 GiB resident at CTX 131072 (9/8)
-  max_load_s: 25             # measured × 1.5: 16.3 / 16.5 s docker run → healthy on a rented 5090 (9/15), weights in page
+  max_load_s: 60             # 9/15 measured 16.5 s with weights in page cache on a fast disk; 60 until a cold-cache load on a slower box is measured (Kimbo 9/15)
                              # cache because the pre-start hash had just read them; a start that skips that hash reads cold
 run:
   env:
@@ -95,5 +95,5 @@ front_door:
     - {path: /v1/models, method: GET}
 drain:
   type: requests
-  max_s: 60                  # worst case 4096 tokens at ~90 tok/s ≈ 45 s; but sparkinfer 19ef39ec2 forces exit 30 s after
+  max_s: 30                  # what sparkinfer 19ef39ec2 actually delivers: it force-exits 30 s after SIGTERM whatever is in flight (Kimbo 9/15; upstream asks filed)
                              # SIGTERM, and an idle instance takes all 30 s (it reports requests still draining)

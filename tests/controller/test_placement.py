@@ -229,10 +229,11 @@ def test_artifact_sha256_matches_the_template_entrypoint_scheme(tmp_path):
 class FakeDocker:
     """The host docker daemon of one box, as the controller's commands see it."""
 
-    def __init__(self, healthy=True, image_present=True, artifact_sha='', fetch_gives=ARTIFACT_SHA):
+    def __init__(self, healthy=True, image_present=True, artifact_sha='', fetch_gives=ARTIFACT_SHA, stop_exit=0):
         self.containers: dict[str, dict] = {}
         self.healthy, self.image_present = healthy, image_present
         self.artifact_sha, self.fetch_gives = artifact_sha, fetch_gives
+        self.stop_exit = stop_exit  # 137: the workload ignored SIGTERM and docker stop killed it at drain.max_s
         self.runner = FakeRunner().on(regex(r'.'), self.respond)
 
     def commands(self, prefix):
@@ -282,6 +283,8 @@ class FakeDocker:
             for cid in command.split()[4:]:
                 self.containers[cid]['state'] = 'exited'
             return ''
+        if command.startswith("docker inspect --format '{{.State.ExitCode}}'"):
+            return ''.join(f'{self.stop_exit}\n' for _ in command.split()[4:])
         if command.startswith('docker rm -f'):
             for cid in command.split()[3:]:
                 self.containers.pop(cid, None)
@@ -453,6 +456,17 @@ def test_a_disabled_deployment_drains_to_checking(world):
     assert {c.state for c in after.cards.values()} == {CHECKING}
     verdict = CheckVerdict.from_checks([CheckResult('gpu_proof', True)], after.pinned_uuids, now=2.0)
     assert {c.state for c in apply_verdict(after, verdict, 2.0).cards.values()} == {IDLE}  # the next round
+
+
+def test_a_workload_that_ignores_sigterm_is_a_failed_drain_but_still_reaches_checking(world):
+    root, registry = world
+    seed(root, idle_box(uuids=(UUID_5090,)), replicas=1)
+    box = FakeDocker(stop_exit=137)
+    reconciler(root, registry, {'hk1': box}).run_pass()
+    DeploymentStore(root / 'deployments.json').set(ENTRY, enabled=False)
+    (drain,) = reconciler(root, registry, {'hk1': box}).run_pass().actions
+    assert not drain.ok and 'failed drain' in drain.detail and drain.states == [LEASED, DRAINING, CHECKING]
+    assert box.containers == {} and StateStore(root / 'boxes.json').get('hk1').cards[UUID_5090].state == CHECKING
 
 
 def test_a_failed_health_probe_undeploys_to_checking_and_three_bench(world):

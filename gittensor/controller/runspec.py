@@ -388,20 +388,27 @@ def deploy(runner: HostRunner, spec: RunSpec) -> str:
 @dataclass
 class UndeployResult:
     found: bool
-    in_time: bool  # the drain finished inside drain.max_s (a `kill` drain always is)
-    elapsed_s: float = 0.0
+    in_time: bool  # the workload exited on SIGTERM inside drain.max_s (a `kill` drain always is)
+    elapsed_s: float = 0.0  # our clock around `docker stop`, SSH round trip included
+
+
+SIGKILL_EXIT = 137  # what `docker stop` leaves when drain.max_s ran out and it had to kill
 
 
 def undeploy(
     runner: HostRunner, instance_id: str, drain: Drain, clock: Callable[[], float] = time.monotonic
 ) -> UndeployResult:
     """Stop with the manifest's drain: SIGTERM, wait ``drain.max_s``, then remove (``kill``: remove at once).
-    Idempotent: an instance with no container left is ``found=False``."""
+    Idempotent: an instance with no container left is ``found=False``.
+
+    Whether the drain made it is read from the exit code, not our stopwatch: on the first real box the SSH round trip
+    alone put a drain at max_s + 0.5 s, so a workload that exits just inside the window would read as a failed drain."""
     ids = [c.container_id for c in list_containers(runner, instance_id)]
     if not ids:
         return UndeployResult(False, True)
     quoted = ' '.join(ids)
     started = clock()
+    killed = False
     if drain.type != 'kill':
         _check(
             runner.run(
@@ -409,9 +416,13 @@ def undeploy(
             ),
             f'docker stop {instance_id}',
         )
+        codes = runner.run(
+            f"docker inspect --format '{{{{.State.ExitCode}}}}' {quoted}", timeout=cfg.SSH_COMMAND_TIMEOUT_S
+        )
+        killed = not codes.ok or str(SIGKILL_EXIT) in codes.stdout.split()
     elapsed = clock() - started
     _check(runner.run(f'docker rm -f {quoted}', timeout=cfg.SSH_COMMAND_TIMEOUT_S), f'docker rm {instance_id}')
-    return UndeployResult(True, drain.type == 'kill' or elapsed < drain.max_s, round(elapsed, 3))
+    return UndeployResult(True, drain.type == 'kill' or not killed, round(elapsed, 3))
 
 
 # ---------------------------------------------------------------- health + canary -----------------------------------

@@ -48,10 +48,10 @@ class Channel:
         return DIGEST_REF.match(self.agent)['digest']
 
 
-def allowed_signers_line(pubkey: str = RELEASE_PUBKEY_OPENSSH) -> str:
+def allowed_signers_line(pubkey: str = RELEASE_PUBKEY_OPENSSH, namespace: str = RELEASE_SIGN_NAMESPACE) -> str:
     """The one line of the ``allowed_signers`` file ``ssh-keygen -Y verify`` reads: identity, namespace, key."""
     key = ' '.join(pubkey.split()[:2])  # type + base64; drop any comment
-    return f'{RELEASE_SIGNER_IDENTITY} namespaces="{RELEASE_SIGN_NAMESPACE}" {key}\n'
+    return f'{RELEASE_SIGNER_IDENTITY} namespaces="{namespace}" {key}\n'
 
 
 def fetch(url: str, timeout: float = CHANNEL_FETCH_TIMEOUT_S, opener: Callable = urllib.request.urlopen) -> bytes:
@@ -62,13 +62,20 @@ def fetch(url: str, timeout: float = CHANNEL_FETCH_TIMEOUT_S, opener: Callable =
         raise ChannelError(f'fetch {url}: {type(e).__name__}: {e}') from e
 
 
-def verify(payload: bytes, signature: bytes, pubkey: str = RELEASE_PUBKEY_OPENSSH, run=subprocess.run) -> None:
-    """Raise ``ChannelError`` unless ``signature`` is a valid OpenSSH signature over ``payload`` by ``pubkey``."""
+def verify(
+    payload: bytes,
+    signature: bytes,
+    pubkey: str = RELEASE_PUBKEY_OPENSSH,
+    run=subprocess.run,
+    namespace: str = RELEASE_SIGN_NAMESPACE,
+) -> None:
+    """Raise ``ChannelError`` unless ``signature`` is a valid OpenSSH signature over ``payload`` by ``pubkey`` in
+    ``namespace``: a signature made for another purpose (the channel vs a registry entry) does not verify."""
     if not pubkey.strip():
         raise ChannelError('no release public key compiled in (gittensor/agent/config.py RELEASE_PUBKEY_OPENSSH)')
     with tempfile.TemporaryDirectory(prefix='gt-channel-') as tmp:
         signers = Path(tmp) / 'allowed_signers'
-        signers.write_text(allowed_signers_line(pubkey))
+        signers.write_text(allowed_signers_line(pubkey, namespace))
         sig = Path(tmp) / 'channel.sig'
         sig.write_bytes(signature)
         try:
@@ -82,7 +89,7 @@ def verify(payload: bytes, signature: bytes, pubkey: str = RELEASE_PUBKEY_OPENSS
                     '-I',
                     RELEASE_SIGNER_IDENTITY,
                     '-n',
-                    RELEASE_SIGN_NAMESPACE,
+                    namespace,
                     '-s',
                     str(sig),
                 ],

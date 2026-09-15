@@ -23,7 +23,8 @@ State lives in one directory (``--state-dir``, default ``~/.gittensor/controller
 ``registry/`` (signed entries), ``deployments.json``, ``instances.json`` and ``controller.json`` (what ``run`` last
 did); the CA private key defaults to ``gt_ca`` beside them. The one-shot commands that change box or card state
 (``check``, ``round``, ``reconcile``) hold ``controller.lock``, so a proof round never lands on a card mid-start. ``run``
-holds it, and ``controller.run.lock``, for its whole life: a one-shot beside it refuses and points at ``status``.
+holds it, and ``controller.run.lock``, for its whole life: a one-shot beside it refuses and points at ``status``, except
+``check --force`` on a BENCHED box, which applies nothing.
 Inside ``run`` the loops share the state in memory with per-box locks (``daemon.py``, ``locks.py``); ``admit`` and
 ``deploy`` stay usable beside it (the daemon merges admitted boxes and reads deployments fresh each pass).
 The GPU proof is chosen by config, never by code: ``--proof module:Class`` plus ``--proof-args key=value``
@@ -1052,7 +1053,8 @@ def admit_command(hotkey, host, port, force_rekey, port_maps, state_dir, json_mo
     '--force',
     is_flag=True,
     default=False,
-    help='Check a BENCHED box anyway (operator debugging). The verdict is shown but NOT applied; the bench stands.',
+    help='Check a BENCHED box anyway (operator debugging). The verdict is shown but NOT applied; the bench stands. '
+    'Allowed beside `gitt controller run`.',
 )
 @_check_options
 @_state_options
@@ -1061,6 +1063,7 @@ def check_command(hotkey, force, state_dir, json_mode, **opts):
 
     \b
     Exit 0 ADMIT, 1 BENCH, 2 no verdict (transport failure: the unreachable count goes up; 3 in a row benches 12 h).
+    Beside `gitt controller run` only `check --force` on a BENCHED box runs (it writes nothing); anything else refuses.
     Example (dev box, sealed proof):
         gitt controller check 5F... --agent-image-id sha256:... \\
             --proof gittensor_proof.provider:SealedProof \\
@@ -1068,16 +1071,23 @@ def check_command(hotkey, force, state_dir, json_mode, **opts):
             --proof-args version=@dist/gt_proof.version --proof-args binary_path=dist/gt_proof
     """
     setup = _setup(state_dir, **opts)
+    if force and setup.state.daemon_running():
+        # A forced check never applies its verdict and a benched box has no leases, so it may run beside `run`
+        # (Kimbo 9/15); on any other box it refuses below, exactly as the lock would.
+        _check_one(setup, hotkey, force, json_mode, beside_daemon=True)
+        return
     with _one_shot_lock(setup.state, json_mode):
         _check_one(setup, hotkey, force, json_mode)
 
 
-def _check_one(setup: CheckSetup, hotkey: str, force: bool, json_mode: bool) -> None:
+def _check_one(setup: CheckSetup, hotkey: str, force: bool, json_mode: bool, beside_daemon: bool = False) -> None:
     store = setup.state.store()
     box = _admitted_box(store, hotkey, json_mode)
     _require_ca_key(setup.ca_key, json_mode)
     now = time.time()
     released = release_from_bench(box, now)
+    if beside_daemon and released.status != BENCHED:
+        _fail(str(ControllerRunning(setup.state.root)), json_mode, EXIT_NO_VERDICT)
     forced = released.status == BENCHED and force
     if released.status == BENCHED and not force:
         _fail(
@@ -1796,7 +1806,7 @@ def run_command(
 
     \b
     It holds the state directory for its whole life: `check`, `round` and `reconcile` refuse beside it (use
-    `status`); `admit` and `deploy` keep working. SIGTERM finishes the visits in flight, writes state and exits 0.
+    `status`); `admit`, `deploy` and `check --force` on a BENCHED box keep working. SIGTERM finishes the visits in flight, writes state and exits 0.
     Takes every `round` flag (--proof, --proof-args, --agent-image-digest, ...) and every `reconcile` flag.
     """
     setup = _setup(state_dir, **opts)

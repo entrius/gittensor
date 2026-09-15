@@ -17,7 +17,7 @@ import pytest
 
 import gittensor.cli.main  # noqa: F401  (the CLI package must load before gittensor.controller.cli: circular import)
 from gittensor.controller import cli as ctl
-from gittensor.controller.checks.state import IDLE, LEASED, STARTING, BoxState
+from gittensor.controller.checks.state import ADMIT, BENCHED, IDLE, LEASED, STARTING, BoxState
 from gittensor.controller.daemon import Controller, Intervals
 from tests.controller.conftest import AGENT_DIGEST, FIXTURES, NETWORK_TARGETS, UUID_5090_B, FakeProof
 from tests.controller.test_cli import FAKE_PROOF, HK_A, HK_B, NET, admit, box_runner, invoke, round_args
@@ -117,6 +117,35 @@ def test_run_owns_the_state_directory(state, tmp_path):
     assert json.loads(invoke('status', '--state-dir', state, '--json').stdout)['running'] is False
     with patch.object(ctl, '_make_runner', side_effect=lambda st, box, ca, purpose: box_runner()):
         assert invoke(*round_args(state)).exit_code == 0  # free again
+
+
+def test_check_force_runs_beside_run_only_on_a_benched_box(state):
+    admit(state)
+    s = ctl.StateDir(state).store()
+
+    def put(**fields):
+        s.put(BoxState.from_dict({**s.get(HK_A).as_dict(), **fields}))
+
+    put(status=BENCHED, bench_until=9e12, bench_count=1, last_failed=['gpu_proof'])
+    args = ['check', HK_A, '--state-dir', state, '--proof', FAKE_PROOF, '--agent-image-digest', AGENT_DIGEST, *NET]
+    with (
+        ctl.StateDir(state).run_lock(),
+        patch.object(ctl, '_make_runner', side_effect=lambda st, box, ca, purpose: box_runner()),
+    ):
+        forced = invoke(*args, '--force')
+        assert forced.exit_code == 0 and '--force' in forced.output and 'ADMIT' in forced.output, forced.output
+        after = ctl.StateDir(state).store().get(HK_A)
+        assert after.status == BENCHED and after.bench_until == 9e12 and after.last_failed == ['gpu_proof']
+
+        unforced = invoke(*args)  # without --force: the one-shot refusal, unchanged
+        assert unforced.exit_code == 2 and 'controller running' in unforced.output
+
+        for fields in ({'status': ADMIT, 'bench_until': None}, {'bench_until': 1.0}):  # not benched / bench expired
+            put(**{'status': BENCHED, **fields})
+            refused = invoke(*args, '--force')
+            assert refused.exit_code == 2 and 'controller running' in refused.output, refused.output
+            assert 'gitt controller status' in refused.output and 'ADMIT' not in refused.output
+        assert ctl.StateDir(state).store().get(HK_A).last_check_at is None  # nothing was ever applied
 
 
 def test_run_serves_its_loops_stops_on_sigterm_and_status_reads_what_it_did(state, tmp_path):

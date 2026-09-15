@@ -107,7 +107,7 @@ from gittensor.controller.discovery import ChainReader, DiscoverReport, Discover
 from gittensor.controller.heartbeat import WatchReport
 from gittensor.controller.locks import BoxLocks
 from gittensor.controller.manifest import ManifestError
-from gittensor.controller.pay.oracle import FailSafeOracle, MetagraphedOracle, StaticOracle
+from gittensor.controller.pay.oracle import CoinGeckoChainOracle, FailSafeOracle, MetagraphedOracle, StaticOracle
 from gittensor.controller.pay.rates import RatesError, load_rates
 from gittensor.controller.pay.scorecard import LATEST, ScorecardError, read_scorecard
 from gittensor.controller.proof.slot import (
@@ -2028,10 +2028,17 @@ class _DaemonPrinter:
     help='Seconds between signed-scorecard writes; the scorecard is valid for two intervals.',
 )
 @click.option(
+    '--price-source',
+    type=click.Choice(cfg.PRICE_SOURCES),
+    default=cfg.PRICE_SOURCE,
+    show_default=True,
+    help='Where prices come from: CoinGecko for TAO/USD + the chain pool for alpha/TAO (as phase 0 did), metagraphed, or the static values.',
+)
+@click.option(
     '--metagraphed-url',
     default=cfg.METAGRAPHED_URL,
     envvar='GT_METAGRAPHED_URL',
-    help="metagraphed's REST base URL for TAO/USD and the alpha price. Unset: the static prices only.",
+    help="metagraphed's REST base URL (with --price-source metagraphed).",
 )
 @click.option(
     '--static-tao-usd', type=float, default=cfg.STATIC_TAO_USD, show_default=True, help='Fallback USD per TAO.'
@@ -2064,6 +2071,7 @@ def run_command(
     heartbeat_interval,
     pull_token_file,
     scorecard_interval,
+    price_source,
     metagraphed_url,
     static_tao_usd,
     static_alpha_tao,
@@ -2107,7 +2115,15 @@ def run_command(
     except RatesError as e:
         _fail(f'pay rates: {e}', json_mode, EXIT_NO_VERDICT)
     static = StaticOracle(static_tao_usd, static_alpha_tao)
-    oracle = FailSafeOracle(MetagraphedOracle(metagraphed_url) if metagraphed_url else static, static)
+    if price_source == 'metagraphed':
+        if not metagraphed_url:
+            _fail('--price-source metagraphed needs --metagraphed-url', json_mode, EXIT_NO_VERDICT)
+        inner: Any = MetagraphedOracle(metagraphed_url, netuid)
+    elif price_source == 'coingecko+chain':
+        inner = CoinGeckoChainOracle(_resolve_endpoint(network, rpc_url), netuid)
+    else:
+        inner = static
+    oracle = FailSafeOracle(inner, static)
     printer = _DaemonPrinter(json_mode)
     try:
         with setup.state.run_lock():
@@ -2144,7 +2160,7 @@ def run_command(
                 'controller',
                 f'running on {setup.state.root} (pid {os.getpid()}): round every {round_interval:.0f} s, reconcile '
                 f'every {reconcile_interval:.0f} s, heartbeat every {heartbeat_interval:.0f} s, scorecard every '
-                f'{scorecard_interval:.0f} s (prices: {"metagraphed" if metagraphed_url else "static"}){discovering}',
+                f'{scorecard_interval:.0f} s (prices: {price_source}){discovering}',
             )
             clean = controller.serve(max_seconds=max_seconds or None)
     except ControllerRunning as e:

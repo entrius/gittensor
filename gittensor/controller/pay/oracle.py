@@ -4,7 +4,8 @@
 """Prices for turning USD pay targets into alpha (vault ``23`` §7a, §7b "price-oracle failure must fail safe").
 
 A ``PriceOracle`` answers two questions: USD per TAO and TAO per alpha. ``StaticOracle`` answers from config;
-``MetagraphedOracle`` reads metagraphed's REST API. The ledger never talks to either directly: it asks a
+``CoinGeckoChainOracle`` (the default) asks CoinGecko for TAO/USD, as phase 0's serving pricing did, and the chain
+for alpha/TAO (the subnet pool price, read-only); ``MetagraphedOracle`` reads metagraphed's REST API. The ledger never talks to either directly: it asks a
 ``FailSafeOracle`` for a ``Quote``, which
 
 * holds the last good price when a read fails, is not a positive finite number, or the source says it is stale;
@@ -124,6 +125,60 @@ class MetagraphedOracle:
         if economics.get('alpha_price_tao') is None:
             raise OracleError(f'subnet {self.netuid} economics carry no alpha_price_tao')
         return float(economics['alpha_price_tao'])
+
+
+class CoinGeckoChainOracle:
+    """TAO/USD from CoinGecko's free ``simple/price`` endpoint (the same URL phase 0 used) and alpha/TAO from the
+    subnet's own pool price on chain. Both injectable for tests: ``get`` (a ``requests.get``-alike) and
+    ``price_reader`` (a callable returning TAO per alpha as a float)."""
+
+    def __init__(
+        self,
+        endpoint: str,
+        netuid: int = cfg.NETUID,
+        url: str = cfg.COINGECKO_TAO_USD_URL,
+        get: Callable[..., Any] | None = None,
+        price_reader: Callable[[], float] | None = None,
+        timeout_s: float = 10.0,
+    ):
+        self.endpoint, self.netuid, self.url, self.timeout_s = endpoint, netuid, url, timeout_s
+        if get is None:
+            import requests
+
+            get = requests.get
+        self._get = get
+        self._price_reader = price_reader
+        self._subtensor = None
+
+    def tao_usd(self) -> float:
+        try:
+            response = self._get(self.url, timeout=self.timeout_s)
+            response.raise_for_status()
+            doc = response.json()
+        except Exception as e:
+            raise OracleError(f'coingecko: {type(e).__name__}: {e}'[:300]) from e
+        try:
+            return float(doc['bittensor']['usd'])
+        except (KeyError, TypeError, ValueError) as e:
+            raise OracleError(f'coingecko: unexpected body {str(doc)[:120]!r}') from e
+
+    def alpha_tao(self) -> float:
+        if self._price_reader is not None:
+            return float(self._price_reader())
+        try:
+            import bittensor as bt
+
+            if self._subtensor is None:
+                self._subtensor = bt.Subtensor(network=self.endpoint)
+            info = self._subtensor.subnet(self.netuid)
+            price = getattr(info, 'price', None)
+            value = float(getattr(price, 'tao', price))
+        except Exception as e:
+            self._subtensor = None  # reconnect next time
+            raise OracleError(
+                f'chain pool price ({self.endpoint}, netuid {self.netuid}): {type(e).__name__}: {e}'[:300]
+            ) from e
+        return value
 
 
 @dataclass

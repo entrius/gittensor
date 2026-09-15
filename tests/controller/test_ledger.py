@@ -316,3 +316,29 @@ def test_metagraphed_reads_the_documented_shapes_and_refuses_stale_or_unpriced()
 
     with pytest.raises(OracleError, match='ConnectionError'):
         MetagraphedOracle('https://mg.example', get=down).alpha_tao()
+
+
+def test_coingecko_plus_chain_oracle_reads_both_and_fails_closed_on_bad_bodies():
+    from gittensor.controller.pay.oracle import CoinGeckoChainOracle, OracleError
+
+    class Resp:
+        def __init__(self, doc, ok=True):
+            self.doc, self.ok = doc, ok
+
+        def raise_for_status(self):
+            if not self.ok:
+                raise RuntimeError('503')
+
+        def json(self):
+            return self.doc
+
+    good = CoinGeckoChainOracle(
+        'ws://x', 74, get=lambda url, timeout: Resp({'bittensor': {'usd': 226.84}}), price_reader=lambda: 0.003384
+    )
+    assert good.tao_usd() == 226.84 and good.alpha_tao() == 0.003384
+    bad_body = CoinGeckoChainOracle('ws://x', 74, get=lambda url, timeout: Resp({'nope': 1}), price_reader=lambda: 0.1)
+    with pytest.raises(OracleError, match='coingecko'):
+        bad_body.tao_usd()
+    down = CoinGeckoChainOracle('ws://x', 74, get=lambda url, timeout: Resp({}, ok=False), price_reader=lambda: 0.1)
+    with pytest.raises(OracleError, match='coingecko'):
+        down.tao_usd()

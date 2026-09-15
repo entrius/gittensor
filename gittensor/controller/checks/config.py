@@ -155,6 +155,11 @@ ORACLE_CONFIRM_READS = 3
 STATIC_TAO_USD = 400.0
 STATIC_ALPHA_TAO = 0.003
 METAGRAPHED_URL = ''  # metagraphed's REST base URL; '' = the static prices only
+# The default price source (Kimbo 9/15: "whatever phase 0 did"): TAO/USD from CoinGecko's free endpoint, exactly as
+# the retired serving pricing did, and alpha/TAO from the chain itself (the subnet pool's price, read-only).
+COINGECKO_TAO_USD_URL = 'https://api.coingecko.com/api/v3/simple/price?ids=bittensor&vs_currencies=usd'
+PRICE_SOURCES = ('coingecko+chain', 'metagraphed', 'static')
+PRICE_SOURCE = 'coingecko+chain'
 NETUID = 74
 
 # The signed scorecard (23 §8a, 26 §10 item 4). Written every SCORECARD_INTERVAL_S; valid_until = issued_at +

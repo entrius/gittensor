@@ -200,8 +200,9 @@ def ensure_network_command(network: str = cfg.NOEGRESS_NETWORK) -> str:
 
 
 # One definition of an artifact's sha256, the template entrypoint's: a file hashes its bytes; a directory hashes
-# "<relpath>\0<file sha256 hex>\n" over its files in sorted walk order. Run on the box in a throwaway container, and
-# exec'd here so tests (and `bless` authors) compute the same number.
+# "<relpath>\0<file sha256 hex>\n" over its files in sorted walk order, skipping top-level dotfiles and dot-directories
+# (``.revision``, ``.gitattributes``, ``.cache``): markers and source metadata, not content. Run on the box in a
+# throwaway container, and exec'd here so tests (and `bless` authors) compute the same number.
 ARTIFACT_SHA256_PY = r"""
 import hashlib, os, sys
 
@@ -214,8 +215,14 @@ def file_sha256(path):
 
 def artifact_sha256(path):
     if os.path.isdir(path):
+        walk = []
+        for root, dirs, files in os.walk(path):
+            if root == path:
+                dirs[:] = [d for d in dirs if not d.startswith('.')]
+                files = [f for f in files if not f.startswith('.')]
+            walk.append((root, files))
         h = hashlib.sha256()
-        for root, _dirs, files in sorted(os.walk(path)):
+        for root, files in sorted(walk):
             for name in sorted(files):
                 full = os.path.join(root, name)
                 h.update(os.path.relpath(full, path).encode() + b'\0' + file_sha256(full).encode() + b'\n')
@@ -243,8 +250,10 @@ def artifact_verify_command(host_dir: str, relpath: str, image: str = cfg.ARTIFA
 
 def artifact_fetch_command(artifact: Artifact, host_dir: str, relpath: str, image: str = cfg.ARTIFACT_IMAGE) -> str:
     """Fetch one artifact into the host volume directory, replacing whatever partial copy is there. ``hf://org/repo``
-    is a pinned ``hf download --revision`` (its ``.cache`` metadata dropped so the directory hash sees only the
-    files); ``https://`` is a single file."""
+    is a pinned ``hf download --revision`` into a directory, its ``.cache`` metadata dropped and ``<dir>/.revision``
+    written with the pinned revision (a runtime that checks what it was given reads the marker; the directory hash
+    skips top-level dotfiles, so the marker never changes the digest). ``https://`` is a single file; ``data:`` is a
+    single file whose content is the URL itself (a small marker or config a runtime expects beside its weights)."""
     dest = '/stage/' + relpath
     if artifact.source.startswith('hf://'):
         repo = artifact.source[len('hf://') :]
@@ -254,8 +263,9 @@ def artifact_fetch_command(artifact: Artifact, host_dir: str, relpath: str, imag
             f' && hf download {shlex.quote(repo)} --revision {shlex.quote(artifact.revision)}'
             f' --local-dir {shlex.quote(dest)} >/dev/null'
             f' && rm -rf {shlex.quote(dest + "/.cache")}'
+            f' && printf "%s\\n" {shlex.quote(artifact.revision)} > {shlex.quote(dest + "/.revision")}'
         )
-    elif artifact.source.startswith('https://'):
+    elif artifact.source.startswith(('https://', 'data:')):
         fetch = 'import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])'
         script = (
             f'mkdir -p "$(dirname {shlex.quote(dest)})" && rm -rf {shlex.quote(dest)}'

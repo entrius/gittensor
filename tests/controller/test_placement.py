@@ -13,6 +13,7 @@ import os
 import random
 import re
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -48,6 +49,7 @@ from gittensor.controller.runspec import (
     BoxHttp,
     PlacementError,
     PullToken,
+    artifact_fetch_command,
     artifact_sha256,
     build_run_spec,
     parse_curl_response,
@@ -222,6 +224,32 @@ def test_artifact_sha256_matches_the_template_entrypoint_scheme(tmp_path):
     assert artifact_sha256(str(tmp_path / 'm')) == expected.hexdigest()
     assert artifact_sha256(str(tmp_path / 'm' / 'config.json')) == hashlib.sha256(b'{}').hexdigest()
     assert artifact_sha256(str(tmp_path / 'missing')) == ''
+
+    # top-level dotfiles and dot-directories are markers and source metadata, not content; deeper ones are content
+    (tmp_path / 'm' / '.revision').write_text('abc123\n')
+    (tmp_path / 'm' / '.gitattributes').write_text('*.bin filter=lfs\n')
+    (tmp_path / 'm' / '.cache' / 'huggingface').mkdir(parents=True)
+    (tmp_path / 'm' / '.cache' / 'huggingface' / 'x.lock').write_bytes(b'')
+    assert artifact_sha256(str(tmp_path / 'm')) == expected.hexdigest()
+    (tmp_path / 'm' / 'sub' / '.hidden').write_bytes(b'content')
+    assert artifact_sha256(str(tmp_path / 'm')) != expected.hexdigest()
+
+
+def test_fetch_writes_the_revision_marker_and_takes_data_urls():
+    doc = placeholder_doc()
+    doc['artifacts'] = [
+        {'path': '/models/tiny', 'source': 'hf://org/tiny', 'revision': 'abc123', 'sha256': ARTIFACT_SHA},
+        {'path': '/models/.tokenizer_repo', 'source': 'data:,org/tiny', 'revision': 'inline', 'sha256': ARTIFACT_SHA},
+    ]
+    manifest = parse_manifest(doc)
+    hf, marker = manifest.artifacts
+    fetch = artifact_fetch_command(hf, '/var/lib/gt-models/gt-placeholder/models', 'tiny')
+    assert 'hf download org/tiny --revision abc123 --local-dir /stage/tiny' in fetch
+    assert 'printf "%s\\n" abc123 > /stage/tiny/.revision' in fetch.replace("'\"'\"'", "'")
+    inline = artifact_fetch_command(marker, '/var/lib/gt-models/gt-placeholder/models', '.tokenizer_repo')
+    assert 'data:,org/tiny' in inline and 'urlretrieve' in inline
+    with pytest.raises(ArtifactError, match='unsupported source'):
+        artifact_fetch_command(replace(hf, source='s3://bucket/x'), '/tmp', 'x')
 
 
 # ---------------------------------------------------------------- a fake box ----------------------------------------
@@ -668,3 +696,18 @@ def test_bless_deploy_registry_reconcile_instances_commands(state, tmp_path):
         drained = invoke('reconcile', *common)
     assert drained.exit_code == 0, drained.output
     assert 'LEASED → DRAINING → CHECKING' in drained.output and box.containers == {}
+
+
+def test_the_committed_27b_manifest_stages_every_file_the_phase0_image_checks():
+    manifest = load_manifest(
+        Path(__file__).parents[2] / 'docker' / 'controller' / 'manifests' / 'qwen3.8-27b-nvfp4.yaml'
+    )
+    spec = build_run_spec('qwen3.8-27b-nvfp4@1', manifest, UUID_5090, 'i-0123456789ab')
+    env = dict(spec.env)
+    model_dir = f'{env["MODELS_DIR"]}/{env["MODEL_DIR_REPO"].rsplit("/", 1)[1]}'
+    assert [a.path for a in manifest.artifacts] == [model_dir, '/models/tokenizer.json', '/models/.tokenizer_repo']
+    assert spec.volumes == (('/var/lib/gt-models/qwen3.8-27b-nvfp4/models', '/models', True),)
+    assert spec.network == 'gt-noegress' and manifest.image_digest.startswith('sha256:d35719b0')
+    marker = manifest.artifacts[2]
+    assert hashlib.sha256(env['TOK_REPO'].encode()).hexdigest() == marker.sha256  # run.sh compares it to TOK_REPO
+    assert marker.source == 'data:,' + env['TOK_REPO'] and manifest.artifacts[0].revision == env['MODEL_DIR_REVISION']

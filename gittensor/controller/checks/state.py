@@ -47,6 +47,13 @@ TRANSITIONS = {
 
 FAILED_STARTS = 'failed_starts'  # the bench reason when too many starts fail in a row
 
+# Standing events (folded by gittensor/controller/standing.py, which names the same strings).
+CHECK_FAILED = 'check_failed'
+UNREACHABLE_BENCHED = 'unreachable_benched'
+START_FAILED = 'start_failed'
+DRAIN_FAILED = 'drain_failed'
+CLEAN_LEASE = 'clean_lease'
+
 
 class CardTransitionError(ValueError):
     """A card transition the state machine does not allow (or a card the box does not have)."""
@@ -173,6 +180,7 @@ def apply_verdict(
                 new.cards[uuid] = CardState(IDLE, '', now)
         new.status = IDLE
         return new
+    new = add_event(new, CHECK_FAILED, now, failed=list(verdict.failed))
     return _bench(new, now, verdict.failed, ladder, ladder_reset_after_s)
 
 
@@ -191,6 +199,7 @@ def apply_unreachable(
     new = BoxState.from_dict(state.as_dict())
     new.unreachable_count += 1
     if new.unreachable_count >= bench_after and new.status != BENCHED:
+        new = add_event(new, UNREACHABLE_BENCHED, now, rounds=new.unreachable_count)
         new.status = BENCHED
         new.benched_at = now
         new.bench_until = now + bench_s
@@ -275,14 +284,17 @@ def transition_card(state: BoxState, uuid: str, to: str, now: float, instance_id
     return new
 
 
-def record_start(state: BoxState, ok: bool, now: float, bench_after: int = cfg.FAILED_STARTS_BENCH_AFTER) -> BoxState:
+def record_start(
+    state: BoxState, ok: bool, now: float, bench_after: int = cfg.FAILED_STARTS_BENCH_AFTER, **detail
+) -> BoxState:
     """Count a lease start. A success resets the count; ``bench_after`` failures in a row bench the box on the ladder
     (Kimbo 9/14: a forged idle card must not keep idle pay by never managing to host a model). A single failed start is
-    slow, not caught, and changes nothing else (``23`` §4a). Pure."""
+    slow, not caught: a ``start_failed`` standing event and nothing else (``23`` §4a). Pure."""
     new = BoxState.from_dict(state.as_dict())
     if ok:
         new.failed_starts = 0
         return new
+    new = add_event(new, START_FAILED, now, **detail)
     new.failed_starts += 1
     if new.failed_starts >= bench_after and new.status != BENCHED:
         return _bench(new, now, [FAILED_STARTS])
@@ -313,9 +325,16 @@ CARD_OURS_ALONE = 'card_ours_alone'
 
 
 def add_event(state: BoxState, kind: str, now: float, keep: int = cfg.STANDING_EVENTS_KEEP, **detail) -> BoxState:
-    """Append a dated standing event (WS-E folds them). Pure."""
+    """Append a dated standing event (WS-E folds them). Past ``keep`` the oldest are replaced by one ``folded`` event
+    that carries their fold, so trimming never changes the box's standing. Pure."""
+    from gittensor.controller.standing import fold_into_one  # standing.py imports config only; no cycle at load
+
     new = BoxState.from_dict(state.as_dict())
-    new.standing_events = [*new.standing_events, {'at': now, 'kind': kind, **detail}][-keep:]
+    events = [*new.standing_events, {'at': now, 'kind': kind, **detail}]
+    if len(events) > keep:
+        cut = len(events) - keep + 1
+        events = [fold_into_one(events[:cut]), *events[cut:]]
+    new.standing_events = events
     return new
 
 

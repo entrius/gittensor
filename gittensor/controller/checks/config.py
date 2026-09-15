@@ -111,4 +111,50 @@ ROUND_BOX_LOCK_WAIT_S = 30.0
 # is tried again after this long, not every tick.
 REPROVE_RETRY_S = 60.0
 SHUTDOWN_GRACE_S = 120.0  # SIGTERM: how long the loops get to finish the visit in flight
-STANDING_EVENTS_KEEP = 200  # dated events per box for WS-E to fold; the oldest drop off
+STANDING_EVENTS_KEEP = 200  # dated events per box for WS-E to fold; the oldest are folded into one, never lost
+
+# Standing (24 §3 WS-E, 23 §5): probation -> standard -> trusted, a pure fold of the box's dated events. Clean lease
+# time (a `clean_lease` event on every normal drain, summed over the box's cards) raises it; a hard failure (a failed
+# heartbeat, a failed full check or proof, an operator release from a bench) resets it to probation; a soft one (a
+# failed start or drain, a health replacement, an unreachable bench) drops it one level. First guesses.
+STANDING_STANDARD_AFTER_S = 6 * 3_600.0  # N: clean lease-hours since the last reset
+STANDING_TRUSTED_AFTER_S = 48 * 3_600.0  # M
+
+# Rotation (23 §8). A lease gets its cap when it becomes LEASED: LEASE_CAP_S x its box's standing multiplier x a random
+# factor in [1 - jitter, 1 + jitter], drawn by the controller and kept in instances.json (nothing a miner sees derives
+# it). Past the cap the lease is replaced first and drained after, at most ROTATION_MAX_FRACTION of leased cards at once
+# (never fewer than one), never below a deployment's replica count. Set the cap from the measured cycle D (~70 s, 9/15).
+LEASE_CAP_S = 3_600.0
+LEASE_CAP_JITTER = 0.2
+LEASE_CAP_MULTIPLIER = {'probation': 0.5, 'standard': 1.0, 'trusted': 2.0}
+ROTATION_MAX_FRACTION = 0.10
+
+# Pay (24 §3 WS-F, 23 §7). The ledger settles every card every SETTLEMENT_TICK_S (one block) from the recorded state;
+# the scorecard pays the trailing SETTLEMENT_WINDOW_S (phase 0's settlement window was one hour too).
+SETTLEMENT_TICK_S = 12.0
+SETTLEMENT_WINDOW_S = 3_600.0
+# Idle pay needs a passing proof no older than this: one missed 20-min round is tolerated, a second stops idle pay.
+IDLE_PROOF_MAX_AGE_S = 1.5 * FULL_CHECK_INTERVAL_S
+# A hard failure forfeits the box's leased accrual over [its UTC day - 1 day, its UTC day + 1 day) (23 §5).
+WITHHELD_DAYS_BEFORE = 1
+WITHHELD_DAYS_AFTER = 1
+# The alpha the compute pool pays with: the miners' part of the subnet's per-block alpha emission (41% of 1 alpha per
+# block, dTAO before any halving) x the compute share of miner weights (1 - OSS_EMISSION_SHARE, read where it is used).
+MINER_ALPHA_PER_BLOCK = 0.41
+BLOCK_S = 12.0
+
+# Price oracle (23 §7b "fail safe"). Hold the last good price on any failure; a read more than ORACLE_MAX_MOVE x away
+# from it is refused until ORACLE_CONFIRM_READS reads in a row agree with each other; before any good read, the static
+# prices. TAO is priced high there, like phase 0's fallback, so an unpriced pool undersizes its alpha, never overpays.
+ORACLE_REFRESH_S = 600.0
+ORACLE_MAX_MOVE = 2.0
+ORACLE_CONFIRM_READS = 3
+STATIC_TAO_USD = 400.0
+STATIC_ALPHA_TAO = 0.003
+METAGRAPHED_URL = ''  # metagraphed's REST base URL; '' = the static prices only
+NETUID = 74
+
+# The signed scorecard (23 §8a, 26 §10 item 4). Written every SCORECARD_INTERVAL_S; valid_until = issued_at +
+# SCORECARD_TTL_INTERVALS x the interval. A validator refuses it after that, and the compute share recycles.
+SCORECARD_INTERVAL_S = 1_200.0
+SCORECARD_TTL_INTERVALS = 2

@@ -194,6 +194,7 @@ def test_the_exact_docker_line_for_the_27b_example():
         f'--label io.gittensor.uuid={UUID_5090} --label io.gittensor.port=8080 '
         f'--gpus "device={UUID_5090}" -p 8080:8080 --restart no '
         '-v /var/lib/gt-models/qwen3.8-27b-nvfp4/models:/models:ro '
+        '-v /var/lib/gt-models/qwen3.8-27b-nvfp4/manifest.qwen3.8-27b-nvfp4@1.yaml:/manifest.yaml:ro '
         '--network gt-noegress '
         'entrius/sparkinfer:19ef39ec2@sha256:' + '1' * 64
     )
@@ -247,6 +248,9 @@ class FakeDocker:
                 f'{c["id"]}\t{c["state"]}\t{c["instance"]}\t{c["entry"]}\t{c["uuid"]}\t{c["port"]}\n' for c in rows
             )
         if command.startswith('docker network inspect gt-noegress'):
+            return ''
+        if command.startswith('mkdir -p ') and ' && cat > ' in command:
+            self.manifest_written = self.runner.stdins.get(command, b'')
             return ''
         if command.startswith('docker network inspect bridge'):
             return '172.17.0.1\n'
@@ -363,6 +367,7 @@ def test_prestage_pulls_with_a_token_for_that_pull_only_and_verifies_artifacts()
     assert 'docker login -u bot --password-stdin' in pull and 'docker logout' in pull and 'rm -rf' in pull
     assert box.runner.stdins[pull] == b'dckr_pat_x' and report.pulled
     fetch = box.commands('docker run --rm -v')[0]
+    assert b'name: gt-placeholder' in box.manifest_written  # the blessed manifest lands on the box first
     assert (
         '/var/lib/gt-models/gt-placeholder/models:/stage' in fetch and 'hf download org/tiny --revision abc123' in fetch
     )

@@ -23,7 +23,10 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import Any, Protocol
+
+import yaml
 
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import CommandResult, HostRunner
@@ -64,6 +67,9 @@ class RunSpec:
     volumes: tuple[tuple[str, str, bool], ...] = ()  # (host dir, mount, read only)
     network: str = cfg.NOEGRESS_NETWORK
     notes: tuple[str, ...] = ()
+    # The blessed manifest, written to the box at pre-stage and mounted read-only over the image's baked copy, so the
+    # entrypoint verifies the artifacts the registry entry names, not whatever the image was built with.
+    manifest_host_path: str = ''
 
     @property
     def name(self) -> str:
@@ -72,6 +78,17 @@ class RunSpec:
 
 def volume_host_dir(manifest: Manifest, volume_name: str, root: str = cfg.MODELS_ROOT) -> str:
     return f'{root.rstrip("/")}/{manifest.name}/{volume_name}'
+
+
+def manifest_host_path(manifest: Manifest, entry_id: str, root: str = cfg.MODELS_ROOT) -> str:
+    return f'{root.rstrip("/")}/{manifest.name}/manifest.{entry_id}.yaml'
+
+
+def manifest_write_command(path: str) -> str:
+    """Write the blessed manifest (given on stdin) onto the box, atomically."""
+    d = shlex.quote(str(PurePosixPath(path).parent))
+    q = shlex.quote(path)
+    return f'mkdir -p {d} && cat > {q}.tmp && mv -f {q}.tmp {q}'
 
 
 def artifact_host_path(manifest: Manifest, artifact: Artifact, root: str = cfg.MODELS_ROOT) -> tuple[str, str]:
@@ -110,6 +127,7 @@ def build_run_spec(entry_id: str, manifest: Manifest, uuid: str, instance_id: st
         volumes=volumes,
         network=network,
         notes=tuple(notes),
+        manifest_host_path=manifest_host_path(manifest, entry_id),
     )
 
 
@@ -131,6 +149,8 @@ def run_command(spec: RunSpec) -> str:
     parts.append('--restart no')
     parts += [f'-e {shlex.quote(f"{k}={v}")}' for k, v in spec.env]
     parts += [f'-v {shlex.quote(f"{host}:{mount}" + (":ro" if ro else ""))}' for host, mount, ro in spec.volumes]
+    if spec.manifest_host_path:
+        parts.append(f'-v {shlex.quote(f"{spec.manifest_host_path}:{cfg.MANIFEST_MOUNT}:ro")}')
     parts.append(f'--network {shlex.quote(spec.network)}')
     parts.append(shlex.quote(spec.image))
     return ' '.join(parts)
@@ -283,6 +303,17 @@ def prestage(
         timed(
             'network',
             lambda: _check(runner.run(ensure_network_command(), timeout=cfg.SSH_COMMAND_TIMEOUT_S), 'network'),
+        )
+    if spec.manifest_host_path:
+        document = yaml.safe_dump(manifest.raw, sort_keys=False).encode()
+        timed(
+            'manifest',
+            lambda: _check(
+                runner.run(
+                    manifest_write_command(spec.manifest_host_path), timeout=cfg.SSH_COMMAND_TIMEOUT_S, stdin=document
+                ),
+                'write manifest',
+            ),
         )
     report.image_present = timed(
         'image_inspect', lambda: runner.run(image_present_command(spec.image), timeout=cfg.SSH_COMMAND_TIMEOUT_S).ok

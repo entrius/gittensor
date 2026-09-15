@@ -85,6 +85,7 @@ FAILED_STARTS_BENCH_AFTER = 3
 # Pre-staged artifacts live on the HOST under this root, one directory per manifest name and volume, bind-mounted
 # into the instance read-only. Fetch and hash run in a throwaway container, never in the workload (no egress there).
 MODELS_ROOT = '/var/lib/gt-models'
+MANIFEST_MOUNT = '/manifest.yaml'  # the BLESSED manifest, bind-mounted read-only over the image's baked copy
 ARTIFACT_IMAGE = 'python:3.12-slim'
 HF_HUB_VERSION = '1.31.0'  # huggingface_hub in the fetch container; `hf download --revision`
 IMAGE_PULL_TIMEOUT_S = 1800.0

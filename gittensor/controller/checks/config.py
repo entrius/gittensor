@@ -106,5 +106,9 @@ POWER_LIMIT_TOLERANCE_W = 1.0  # nvidia-smi rounds the limit; a real change is t
 # `gitt controller run` (one process). A box mid-start or mid-drain holds its lock for minutes: the proof round waits
 # this long for it (a heartbeat visit takes seconds), then skips the box until the next round.
 ROUND_BOX_LOCK_WAIT_S = 30.0
+# A card that reaches CHECKING (drain done, failed start, health replacement) is re-proved on its own box at the next
+# watch tick instead of waiting for the 20-min round (Kimbo 9/15). A re-prove that got no verdict (box busy, SSH down)
+# is tried again after this long, not every tick.
+REPROVE_RETRY_S = 60.0
 SHUTDOWN_GRACE_S = 120.0  # SIGTERM: how long the loops get to finish the visit in flight
 STANDING_EVENTS_KEEP = 200  # dated events per box for WS-E to fold; the oldest drop off

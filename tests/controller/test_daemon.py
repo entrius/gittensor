@@ -17,12 +17,29 @@ import pytest
 
 import gittensor.cli.main  # noqa: F401  (the CLI package must load before gittensor.controller.cli: circular import)
 from gittensor.controller import cli as ctl
-from gittensor.controller.checks.state import ADMIT, BENCHED, IDLE, LEASED, STARTING, BoxState, StateStore
+from gittensor.controller.checks.state import (
+    ADMIT,
+    BENCHED,
+    CHECKING,
+    IDLE,
+    LEASED,
+    STARTING,
+    BoxState,
+    StateStore,
+)
 from gittensor.controller.daemon import Controller, Intervals
-from gittensor.controller.registry import Registry
-from tests.controller.conftest import AGENT_DIGEST, FIXTURES, NETWORK_TARGETS, UUID_5090_B, FakeProof
+from gittensor.controller.registry import DeploymentStore, Registry
+from tests.controller.conftest import (
+    AGENT_DIGEST,
+    FIXTURES,
+    NETWORK_TARGETS,
+    UUID_5090,
+    UUID_5090_B,
+    FakeProof,
+    fixture,
+)
 from tests.controller.test_cli import FAKE_PROOF, HK_A, HK_B, NET, admit, box_runner, invoke, round_args
-from tests.controller.test_placement import FakeDocker, idle_box, keypair, make_world, seed
+from tests.controller.test_placement import ENTRY, FakeDocker, idle_box, keypair, make_world, seed
 
 
 @pytest.fixture
@@ -96,6 +113,54 @@ def test_a_slow_start_on_one_box_blocks_neither_the_round_on_another_nor_the_oth
         status['round']['boxes'][HK_B]['verdict'] == 'ADMIT' and 'box busy' in status['round']['boxes']['hkA']['busy']
     )
     assert status['reconcile']['last_background']['actions'][0]['states'] == [IDLE, STARTING, LEASED]
+
+
+def test_a_drained_card_is_re_proved_at_the_next_watch_tick_and_the_round_does_not_prove_it_twice(world):
+    root, registry = world
+    shutil.copy(FIXTURES / 'nvml_allowlist.json', root / 'nvml_allowlist.json')
+    seed(root, idle_box('hkA'), replicas=1)  # two IDLE cards
+    docker = FakeDocker()  # what reconcile and the watch see
+    one = fixture('nvidia_smi_5090.csv')
+    prover = box_runner(nvidia_smi=one + one.replace(UUID_5090, UUID_5090_B))  # what the proof visits see
+    setup = ctl._setup(
+        root, None, FAKE_PROOF, (), (AGENT_DIGEST,), (), 'entrius/gt-proof:test', None, NETWORK_TARGETS, 100
+    )
+    controller = Controller(
+        ctl.StateDir(root),
+        registry,
+        make_runner=lambda box, purpose: docker.runner,
+        run_round=lambda proof, **shared: ctl.run_round(setup, proof, **shared),
+        load_proof=FakeProof,
+        reprove=lambda proof, box_id, **shared: ctl.reprove_box(setup, proof, box_id, **shared),
+    )
+
+    def proofs(uuid):
+        return [c for c in prover.calls if c.startswith('docker create') and uuid in c]
+
+    def card(uuid):
+        return controller.boxes.boxes['hkA'].cards[uuid].state
+
+    with patch.object(ctl, '_make_runner', side_effect=lambda st, box, ca, purpose: prover):
+        controller.reconcile_once()
+        assert controller.reconciler.join(5)
+        (drained,) = [u for u in (UUID_5090, UUID_5090_B) if card(u) == LEASED]
+        other = UUID_5090_B if drained == UUID_5090 else UUID_5090
+        DeploymentStore(root / 'deployments.json').set(ENTRY, enabled=False)
+        controller.reconcile_once()
+        assert controller.reconciler.join(5)
+        assert card(drained) == CHECKING and not prover.calls  # t = 0: drained, nothing proved yet
+
+        controller.watch_once()  # the next tick
+        _until(lambda: card(drained) == IDLE)
+        _until(lambda: (controller.status.get('reprove') or {}).get('verdict') == 'ADMIT')
+        assert len(proofs(drained)) == 1 and not proofs(other)  # that box, that card only; the IDLE one waits
+        assert controller.reprove_once() == [] and len(proofs(drained)) == 1  # later ticks: nothing in CHECKING
+
+        report = controller.round_once()  # t = 20 min: the fleet round, unchanged
+        assert report.boxes[0].verdict.admitted
+        assert len(proofs(drained)) == 2 and len(proofs(other)) == 1  # proved once by the round, not twice
+        controller.watch_once()
+        assert len(proofs(drained)) == 2
 
 
 def test_run_owns_the_state_directory(state, tmp_path):

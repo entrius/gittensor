@@ -10,7 +10,10 @@ changes under one short lock and saves at once:
 * **the reconciler** every ``RECONCILE_INTERVAL_S`` (30 s); its starts and drains run on their own threads holding
   their box's lock, so a pass never waits for a model load;
 * **the watch** every ``WATCH_TICK_S``: the generic heartbeat (``HEARTBEAT_INTERVAL_S``) and the manifest health probe
-  wherever one is due.
+  wherever one is due; and on the same tick, **the re-prove**: an IDLE box with a card in CHECKING (a drain done, a
+  failed start, a health replacement) gets the proof on that box only, for its CHECKING cards, on a thread of its own,
+  so a replacement can start within a minute instead of waiting up to 20 (Kimbo 9/15). The fleet-wide round is
+  unchanged. A benched box has no cards, so nothing benched is re-proved: it waits out the bench.
 
 No lock is held across a model load: a start holds only its own box, the proof round skips a box whose lock stays held
 (its cards are STARTING anyway) and proves it next round, and the watch takes no box lock at all (``locks.py``). On
@@ -32,7 +35,7 @@ from typing import Any, Protocol
 
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import HostRunner
-from gittensor.controller.checks.state import BoxState, StateStore
+from gittensor.controller.checks.state import CHECKING, IDLE, BoxState, StateStore
 from gittensor.controller.heartbeat import Watch, WatchReport
 from gittensor.controller.locks import BoxLocks
 from gittensor.controller.reconcile import InstanceStore, Reconciler, ReconcileReport
@@ -47,11 +50,15 @@ class Reporter(Protocol):
     def reconcile(self, report: ReconcileReport, n: int) -> None: ...
     def background(self, report: ReconcileReport) -> None: ...
     def watch(self, report: WatchReport) -> None: ...
+    def reprove(self, report: Any) -> None: ...
     def note(self, loop: str, message: str) -> None: ...
 
 
 class SilentReporter:
     def round(self, report, n):
+        pass
+
+    def reprove(self, report):
         pass
 
     def reconcile(self, report, n):
@@ -77,7 +84,8 @@ class Intervals:
 
 class Controller:
     """``state`` names the files (``StateDir``). ``run_round(proof, store=, write_lock=, box_locks=)`` is the fleet
-    round and ``load_proof()`` builds the provider, both from the CLI; ``make_runner(box, purpose)`` opens a visit."""
+    round, ``reprove(proof, box_id, store=, write_lock=, box_locks=)`` the one-box re-prove (both return a round report)
+    and ``load_proof()`` builds the provider, all from the CLI; ``make_runner(box, purpose)`` opens a visit."""
 
     def __init__(
         self,
@@ -94,6 +102,7 @@ class Controller:
         reporter: Reporter | None = None,
         http_for: Callable[[HostRunner, BoxState], HttpClient] | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        reprove: Callable[..., Any] | None = None,
     ):
         self.state = state
         self.intervals = intervals or Intervals()
@@ -104,6 +113,9 @@ class Controller:
         self.instances = InstanceStore(state.instances)
         self.stop = threading.Event()
         self._run_round, self._load_proof = run_round, load_proof
+        self._reprove = reprove
+        self._reproving: dict[str, threading.Thread] = {}
+        self._reprove_retry_at: dict[str, float] = {}  # box -> not before: its last re-prove got no verdict
         self._build, self.build_cmd = build, build_cmd
         self.proof = None
         self.counts = {'round': 0, 'reconcile': 0}
@@ -230,7 +242,73 @@ class Controller:
                 },
             )
             self.reporter.watch(report)
+        self.reprove_once()
         return report
+
+    def reprove_once(self) -> list[str]:
+        """Launch the re-prove on every IDLE box with a CHECKING card that is not already being re-proved (or waiting
+        to retry one that got no verdict). Returns the boxes launched."""
+        if self._reprove is None:
+            return []
+        now = time.time()
+        with self.write_lock:
+            running = {box_id for box_id, thread in self._reproving.items() if thread.is_alive()}
+            due = sorted(
+                box.box_id
+                for box in self.boxes.boxes.values()
+                if box.status == IDLE
+                and box.host
+                and box.box_id not in running
+                and now >= self._reprove_retry_at.get(box.box_id, 0.0)
+                and any(card.state == CHECKING for card in box.cards.values())
+            )
+        if not due:
+            return []
+        proof = self.proof
+        if proof is None:
+            try:
+                proof = self.proof = self._load_proof()
+            except Exception as e:
+                self.reporter.note('reprove', f'not run: no proof provider ({e})')
+                return []
+        for box_id in due:
+            thread = threading.Thread(
+                target=self._reprove_box, args=(proof, box_id), name=f'reprove-{box_id[:16]}', daemon=True
+            )
+            with self.write_lock:
+                self._reproving[box_id] = thread
+            thread.start()
+        return due
+
+    def _reprove_box(self, proof: Any, box_id: str) -> None:
+        try:
+            report = self._reprove(
+                proof, box_id, store=self.boxes, write_lock=self.write_lock, box_locks=self.box_locks
+            )
+        except Exception as e:  # never kill the thread silently; the next tick after the retry delay tries again
+            with self.write_lock:
+                self._reprove_retry_at[box_id] = time.time() + cfg.REPROVE_RETRY_S
+            self.reporter.note('reprove', f'{box_id[:16]}: {type(e).__name__}: {e}')
+            return
+        (row,) = report.boxes
+        with self.write_lock:
+            if row.verdict is None:
+                self._reprove_retry_at[box_id] = time.time() + cfg.REPROVE_RETRY_S
+            else:
+                self._reprove_retry_at.pop(box_id, None)
+        self._set_status(
+            'reprove',
+            {
+                'at': time.time(),
+                'box': box_id,
+                'before': row.status_before,
+                'after': (row.after or row.box).status,
+                'verdict': row.verdict.verdict if row.verdict else None,
+                'busy': row.busy,
+                'transport_error': row.transport_error,
+            },
+        )
+        self.reporter.reprove(report)
 
     def _background_done(self, report: ReconcileReport) -> None:
         with self.write_lock:

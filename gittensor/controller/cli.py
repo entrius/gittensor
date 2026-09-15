@@ -87,6 +87,7 @@ from gittensor.controller.checks.scrape import (
 from gittensor.controller.checks.state import (
     ADMIT,
     BENCHED,
+    CHECKING,
     IDLE,
     BoxState,
     StateStore,
@@ -436,6 +437,7 @@ class CheckOutcome:
     verdict: CheckVerdict | None
     transport_error: str = ''
     busy: str = ''  # identity passed but every card hosts our workload: nothing to prove, no verdict
+    proved: list[str] = field(default_factory=list)  # the cards the proof ran on
 
 
 def busy_cards(box: BoxState, uuids: Iterable[str]) -> dict[str, str]:
@@ -457,8 +459,10 @@ def check_box(
     allowlist: NvmlAllowlist,
     config: FullCheckConfig,
     now: float,
+    cards: Sequence[str] | None = None,
 ) -> CheckOutcome:
-    """``run_full_check`` with a transport gate: a box SSH cannot reach gets no verdict instead of a BENCH."""
+    """``run_full_check`` with a transport gate: a box SSH cannot reach gets no verdict instead of a BENCH. ``cards``
+    limits the proof to those cards (the re-prove of CHECKING cards); identity is judged on the whole box either way."""
     try:
         runner.run(PREFLIGHT_COMMAND, timeout=config.ssh_timeout_s)
     except (SshTransportError, CertificateError) as e:
@@ -468,17 +472,21 @@ def check_box(
     if lost:
         return CheckOutcome(None, lost)
     checks = judge_identity(scrape, allowlist, box.pinned_uuids or None, config, box.box_id, fleet_uuids)
+    proved: list[str] = []
     if identity_passed(checks):
         gpus = _provable_gpus(box, scrape.gpus)
+        if cards is not None:
+            gpus = [g for g in gpus if g.uuid in cards]
         if not gpus:
             skipped = busy_cards(box, scrape.uuids)
             return CheckOutcome(
                 None, busy='every card busy: ' + ', '.join(f'{u[:12]}… {s}' for u, s in skipped.items())
             )
+        proved = [g.uuid for g in gpus]
         checks.append(ck.check_gpu_proof(runner, gpus, proof, config.proof_image, config.proof_timeout_s))
     else:
         checks.append(proof_skipped(checks))
-    return CheckOutcome(finish_verdict(checks, scrape, now))
+    return CheckOutcome(finish_verdict(checks, scrape, now), proved=proved)
 
 
 # ---------------------------------------------------------------- the fleet round ------------------------------------
@@ -693,6 +701,70 @@ def run_round(
     if fired:
         timings['fire_spread'] = round((max(fired) - min(fired)) * 1000.0, 3)
     return RoundReport(provider, rows, not_probed, {k: v for k, v in timings.items() if v is not None})
+
+
+def reprove_box(
+    setup: CheckSetup,
+    proof: GpuProof,
+    box_id: str,
+    *,
+    store: StateStore,
+    write_lock: threading.RLock,
+    box_locks: BoxLocks,
+    lock_wait_s: float = cfg.ROUND_BOX_LOCK_WAIT_S,
+) -> RoundReport:
+    """One box's CHECKING cards proved at once, inside `gitt controller run` (Kimbo 9/15), instead of at the next 20-min
+    round: identity on the box and the same two-phase probe (``probe_box``: stage, fire, clean up) on those cards only,
+    holding the box's lock, then ``apply_verdict`` returning only the proved cards to IDLE. A BENCH verdict benches the
+    box as the round would. No verdict (the lock stayed held, no CHECKING card left, SSH down) changes nothing: the
+    daemon retries later, and unreachable boxes are counted by the round."""
+    provider = str(getattr(proof, 'version', '?'))
+    started = time.monotonic()
+    with write_lock:
+        box = store.boxes.get(box_id)
+    row = BoxRound(box or BoxState(box_id), box.status if box else '?')
+
+    def report() -> RoundReport:
+        return RoundReport(provider, [row], [], {'total': round((time.monotonic() - started) * 1000.0, 1)})
+
+    if not box_locks.acquire(box_id, lock_wait_s):
+        row.busy = f'box busy {lock_wait_s:.0f} s (a start, drain or round in flight): retried later'
+        return report()
+    try:
+        with write_lock:
+            current = store.boxes.get(box_id)
+            fleet = {b.box_id: list(b.pinned_uuids) for b in store.boxes.values() if b.box_id != box_id}
+        if current is None or current.status != IDLE or not current.host:
+            row.busy = f'{current.status if current else "removed"} meanwhile: not re-proved'
+            return report()
+        checking = sorted(uuid for uuid, card in current.cards.items() if card.state == CHECKING)
+        if not checking:
+            row.busy = 'no CHECKING card left: nothing to re-prove'
+            return report()
+        row.box, row.status_before = current, current.status
+        row.runner = TimedRunner(_make_runner(setup.state, current, setup.ca_key, 'reprove'))
+        try:
+            outcome = check_box(
+                row.runner, current, fleet, proof, setup.allowlist(), setup.config, time.time(), cards=checking
+            )
+        finally:
+            row.runner.close()
+        row.transport_error, row.busy = outcome.transport_error, outcome.busy
+        if outcome.verdict is None:
+            return report()
+        with write_lock:
+            latest = store.boxes.get(box_id)
+            if latest is None or latest.status != current.status:
+                row.after = latest  # benched by the watch meanwhile: the bench stands, no verdict applied
+            else:
+                row.verdict = outcome.verdict
+                row.after = store.boxes[box_id] = apply_verdict(
+                    latest, outcome.verdict, time.time(), proved=outcome.proved
+                )
+                store.save()
+    finally:
+        box_locks.release(box_id)
+    return report()
 
 
 # ---------------------------------------------------------------- options + setup ------------------------------------
@@ -1791,6 +1863,12 @@ class _DaemonPrinter:
                 err_console.print(f'[dim]{time.strftime("%H:%M:%S", time.gmtime())}[/dim] {line}')
 
     def round(self, report: RoundReport, n: int) -> None:
+        self._probe('round', f'round {n}', {'round': n}, report)
+
+    def reprove(self, report: RoundReport) -> None:
+        self._probe('reprove', 're-prove', {}, report)
+
+    def _probe(self, event: str, label: str, head: dict, report: RoundReport) -> None:
         parts, rows = [], []
         for r in report.boxes:
             after = (r.after or r.box).status
@@ -1815,10 +1893,10 @@ class _DaemonPrinter:
                     'failed': r.verdict.failed if r.verdict else [],
                 }
             )
-        payload = {'round': n, 'provider': report.provider, 'exit_code': report.exit_code, 'boxes': rows}
+        payload = {**head, 'provider': report.provider, 'exit_code': report.exit_code, 'boxes': rows}
         payload['timings_ms'] = report.timings_ms
         self._emit(
-            'round', payload, f'[cyan]round {n}[/cyan] {escape(report.provider)}: ' + (' · '.join(parts) or 'no boxes')
+            event, payload, f'[cyan]{label}[/cyan] {escape(report.provider)}: ' + (' · '.join(parts) or 'no boxes')
         )
 
     def _actions(self, event: str, actions: Sequence) -> None:
@@ -1905,7 +1983,8 @@ def run_command(
 ):
     """The controller as one process: the proof round (every --round-interval, --build-cmd between rounds), the
     reconciler (every --reconcile-interval) and the in-lease watch (heartbeat every --heartbeat-interval, manifest
-    health probe every health.interval_s), each on its own thread over one state.
+    health probe every health.interval_s), each on its own thread over one state. A card that reaches CHECKING is
+    re-proved on its own box at the next watch tick, not at the next round.
 
     \b
     It holds the state directory for its whole life: `check`, `round` and `reconcile` refuse beside it (use
@@ -1929,6 +2008,7 @@ def run_command(
                 registry,
                 make_runner=lambda box, purpose: _make_runner(setup.state, box, setup.ca_key, purpose),
                 run_round=lambda proof, **shared: run_round(setup, proof, **shared),
+                reprove=lambda proof, box_id, **shared: reprove_box(setup, proof, box_id, **shared),
                 load_proof=setup.proof,
                 build=_run_build,
                 build_cmd=build_cmd,

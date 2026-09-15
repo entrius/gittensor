@@ -20,7 +20,7 @@ from gittensor.cli.main import cli
 from gittensor.controller import cli as ctl
 from gittensor.controller.checks import checks as ck
 from gittensor.controller.checks.runner import FakeRunner
-from gittensor.controller.checks.state import ADMIT, BENCHED, IDLE, BoxState, StateStore
+from gittensor.controller.checks.state import ADMIT, BENCHED, IDLE, BoxState, StateStore, release_from_bench
 from gittensor.controller.proof.slot import ProbeResult, UnconfiguredProof
 from gittensor.controller.ssh import SshTransportError
 from tests.controller.conftest import (
@@ -246,6 +246,37 @@ def test_force_checks_a_benched_box_without_touching_the_bench(state):
     assert forced.exit_code == 0 and '--force' in forced.output and 'ADMIT' in forced.output
     after = store(state).get(HK_A)
     assert after.status == BENCHED and after.bench_until == 9e12 and after.last_failed == ['gpu_proof']
+
+
+def test_release_ends_a_bench_early_and_refuses_a_box_that_is_not_benched(state):
+    admit(state)
+    refused = invoke('release', HK_A, '--state-dir', state)
+    assert refused.exit_code == 1 and 'not benched' in refused.output
+    s = store(state)
+    s.put(
+        BoxState.from_dict(
+            {**s.get(HK_A).as_dict(), 'status': BENCHED, 'benched_at': 5.0, 'bench_until': 9e12, 'bench_count': 2}
+        )
+    )
+    result = invoke('release', HK_A, '--reason', 'driver reinstalled, checked by hand', '--state-dir', state, '--json')
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload['released'] is True and payload['pending'] is False and payload['status'] == ADMIT
+    box = store(state).get(HK_A)
+    assert box.status == ADMIT and box.bench_until is None and box.bench_count == 2  # the ladder rung stays
+    (event,) = box.standing_events
+    assert event['kind'] == 'released' and event['reason'] == 'driver reinstalled, checked by hand'
+    assert event['bench_until'] == 9e12 and event['requested_at'] == box.release_request['at']
+
+    with runners({HK_A: box_runner()}):  # re-pinned by the next check, like an expired bench
+        assert check(state, '--proof', FAKE_PROOF, '--agent-image-digest', AGENT_DIGEST).exit_code == 0
+    box = store(state).get(HK_A)
+    assert box.status == IDLE and box.pinned_uuids == [UUID_5090] and len(box.standing_events) == 1
+    assert invoke('release', HK_A, '--state-dir', state).exit_code == 1  # IDLE: nothing to release
+
+    # the request is for that bench only: a later bench is not lifted by it
+    later = BoxState.from_dict({**box.as_dict(), 'status': BENCHED, 'benched_at': 9e11, 'bench_until': 9e12})
+    assert release_from_bench(later, 9e11 + 1).status == BENCHED
 
 
 def test_unadmitted_box_and_missing_ca_key_exit_2(state):

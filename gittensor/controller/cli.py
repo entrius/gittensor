@@ -10,6 +10,7 @@ full check and box state (``controller.checks``), the GPU-proof slot (``controll
     gitt controller allowlist add <hotkey> | show              curate the NVML allowlist from a known-good box
     gitt controller check <hotkey>                             one full check: verdict, new state, exit 0 / 1 / 2
     gitt controller round [--loop]                             the 20-min two-phase probe over every idle card
+    gitt controller release <hotkey> [--reason TEXT]           end a bench early: BENCHED -> ADMIT, re-pinned next round
     gitt controller bless <manifest.yaml> --image <repo@sha256> --sign-key <key>   sign an entry into the registry
     gitt controller deploy <entry> --enabled/--disabled --replicas N               operator deployment settings
     gitt controller registry show                              entries (re-verified), deployments, running counts
@@ -25,8 +26,9 @@ did); the CA private key defaults to ``gt_ca`` beside them. The one-shot command
 (``check``, ``round``, ``reconcile``) hold ``controller.lock``, so a proof round never lands on a card mid-start. ``run``
 holds it, and ``controller.run.lock``, for its whole life: a one-shot beside it refuses and points at ``status``, except
 ``check --force`` on a BENCHED box, which applies nothing.
-Inside ``run`` the loops share the state in memory with per-box locks (``daemon.py``, ``locks.py``); ``admit`` and
-``deploy`` stay usable beside it (the daemon merges admitted boxes and reads deployments fresh each pass).
+Inside ``run`` the loops share the state in memory with per-box locks (``daemon.py``, ``locks.py``); ``admit``,
+``deploy`` and ``release`` stay usable beside it (the daemon merges admitted boxes and release requests, and reads
+deployments fresh each pass).
 The GPU proof is chosen by config, never by code: ``--proof module:Class`` plus ``--proof-args key=value``
 kwargs. Without one the fail-closed ``UnconfiguredProof`` benches every box with the reason named. No inbound
 endpoints and no chain access: outbound SSH and local files only (``26`` §3).
@@ -92,6 +94,8 @@ from gittensor.controller.checks.state import (
     apply_verdict,
     provable_uuids,
     release_from_bench,
+    release_requested,
+    request_release,
 )
 from gittensor.controller.checks.verdict import CheckResult, CheckVerdict
 from gittensor.controller.daemon import STATUS_FILE, Controller, Intervals
@@ -956,6 +960,7 @@ def controller_group():
         allowlist  Curate the NVML allowlist (driver -> libnvidia-ml md5)
         check      One full check of one box: verdict, state, exit 0 ADMIT / 1 BENCH / 2 no verdict
         round      The two-phase probe over every idle card (--loop: every 20 min)
+        release    End a bench early: BENCHED → ADMIT, with a reason (safe beside run)
         bless      Sign a manifest + digest-pinned image into the registry
         deploy     Enable / disable a registry entry and set its replica count
         registry   Show the registry, re-verified, with deployments
@@ -1281,6 +1286,67 @@ def _print_round(report: RoundReport, n: int, json_mode: bool) -> None:
         )
     console.print(table)
     console.print(f'[dim]{_timings_text(report.timings_ms) or "no boxes to probe"}[/dim]')
+
+
+# ---------------------------------------------------------------- release ------------------------------------------
+
+
+@controller_group.command('release')
+@click.argument('hotkey')
+@click.option('--reason', default='', help='Why the bench ends early: recorded on the `released` standing event.')
+@_state_options
+def release_command(hotkey, reason, state_dir, json_mode):
+    """End a bench early: BENCHED → ADMIT, re-pinned by the next proof round like an expired bench, with a `released`
+    standing event carrying the reason. The ladder rung and any withheld pay stay.
+
+    \b
+    Beside `gitt controller run` the release is recorded in boxes.json and the controller applies it on its next round;
+    without one it applies at once. Refuses a box that is not benched (exit 1).
+    """
+    state = StateDir(Path(state_dir).expanduser())
+    store = state.store()
+    box = store.boxes.get(hotkey)
+    if box is None:
+        _fail(f'{hotkey} is not admitted', json_mode, EXIT_NO_VERDICT)
+    if box.status != BENCHED:
+        _fail(f'{hotkey} is {box.status}, not benched: nothing to release', json_mode, EXIT_BENCH)
+    store.put(request_release(box, time.time(), reason))
+    after: BoxState | None = None
+    if not state.daemon_running():
+        try:
+            with state.lock():
+                store = state.store()
+                current = store.boxes[hotkey]
+                after = release_from_bench(current, time.time())
+                if after is not current:
+                    store.put(after)
+        except ControllerRunning:
+            after = None  # `run` started meanwhile: it applies the request on its next round
+    released = after is not None and after.status != BENCHED
+    until = _when(box.bench_until)
+    if json_mode:
+        emit_json(
+            {
+                'success': True,
+                'hotkey': hotkey,
+                'reason': reason,
+                'released': released,
+                'pending': not released,
+                'bench_until': box.bench_until,
+                'status': after.status if after is not None else BENCHED,
+            }
+        )
+        return
+    if released:
+        err_console.print(
+            f'[green]Released[/green] {escape(hotkey)}: BENCHED (until {until}) → ADMIT; the next round or check '
+            're-pins it.'
+        )
+    else:
+        err_console.print(
+            f'[green]Release recorded[/green] for {escape(hotkey)} (BENCHED until {until}): the running controller '
+            'applies it on its next round.'
+        )
 
 
 # ---------------------------------------------------------------- allowlist ----------------------------------------
@@ -1806,7 +1872,7 @@ def run_command(
 
     \b
     It holds the state directory for its whole life: `check`, `round` and `reconcile` refuse beside it (use
-    `status`); `admit`, `deploy` and `check --force` on a BENCHED box keep working. SIGTERM finishes the visits in flight, writes state and exits 0.
+    `status`); `admit`, `deploy`, `release` and `check --force` on a BENCHED box keep working. SIGTERM finishes the visits in flight, writes state and exits 0.
     Takes every `round` flag (--proof, --proof-args, --agent-image-digest, ...) and every `reconcile` flag.
     """
     setup = _setup(state_dir, **opts)
@@ -1883,6 +1949,7 @@ def status_command(state_dir, json_mode):
                 'last_failed': box.last_failed,
                 'bench_until': box.bench_until,
                 'withheld_from': box.withheld_from,
+                'release_requested': release_requested(box),
                 'standing_events': box.standing_events[-5:],
             }
         )
@@ -1913,6 +1980,8 @@ def status_command(state_dir, json_mode):
             for c in b['cards']
         )
         bench = f'until {_when(b["bench_until"])}' if b['status'] == BENCHED else ''
+        if b['release_requested']:
+            bench += ' · release requested'
         if b['withheld_from']:
             bench += f'{" · " if bench else ""}pay withheld from {_when(b["withheld_from"])}'
         event = b['standing_events'][-1] if b['standing_events'] else None

@@ -93,6 +93,9 @@ class BoxState:
     standing_events: List[dict] = field(default_factory=list)
     # When a hard in-lease failure (a heartbeat) stopped this box's pay; WS-F withholds the leased accrual from it.
     withheld_from: Optional[float] = None
+    # `gitt controller release`: {'at', 'reason'}. An operator field (merged from disk beside a running controller);
+    # ``release_from_bench`` honours it for a bench that began before it.
+    release_request: Dict[str, object] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -208,13 +211,41 @@ def mark_reachable(state: BoxState) -> BoxState:
     return new
 
 
+RELEASED = 'released'  # the standing event of an operator ending a bench early
+
+
+def request_release(state: BoxState, now: float, reason: str) -> BoxState:
+    """``gitt controller release``: ask for this bench to end now. Pure; ``release_from_bench`` applies it."""
+    new = BoxState.from_dict(state.as_dict())
+    new.release_request = {'at': now, 'reason': reason}
+    return new
+
+
+def release_requested(state: BoxState) -> bool:
+    """A BENCHED box an operator released after its bench began (a request from an earlier bench does not count)."""
+    at = state.release_request.get('at')
+    return state.status == BENCHED and isinstance(at, (int, float)) and at >= (state.benched_at or 0.0)
+
+
 def release_from_bench(state: BoxState, now: float) -> BoxState:
-    """BENCHED -> ADMIT once the bench has expired; otherwise unchanged."""
-    if state.status != BENCHED or state.bench_until is None or now < state.bench_until:
+    """BENCHED -> ADMIT once the bench has expired, or at once when an operator released it (Kimbo 9/15: a ``released``
+    standing event with the reason; the ladder rung and any withheld pay stay). Otherwise unchanged."""
+    early = release_requested(state)
+    if state.status != BENCHED or (not early and (state.bench_until is None or now < state.bench_until)):
         return state
     new = BoxState.from_dict(state.as_dict())
     new.status = ADMIT
     new.bench_until = None
+    if early:
+        request = state.release_request
+        new = add_event(
+            new,
+            RELEASED,
+            now,
+            reason=request.get('reason', ''),
+            requested_at=request['at'],
+            bench_until=state.bench_until,
+        )
     return new
 
 
@@ -308,7 +339,7 @@ def provable_uuids(state: BoxState, reported: Sequence[str]) -> List[str]:
     return [uuid for uuid in reported if uuid not in state.cards or state.cards[uuid].state in PROVABLE]
 
 
-OPERATOR_FIELDS = ('host', 'port', 'host_key', 'port_map')  # what `gitt controller admit` writes
+OPERATOR_FIELDS = ('host', 'port', 'host_key', 'port_map', 'release_request')  # what `admit` and `release` write
 
 
 class StateStore:

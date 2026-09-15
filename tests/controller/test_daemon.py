@@ -17,8 +17,9 @@ import pytest
 
 import gittensor.cli.main  # noqa: F401  (the CLI package must load before gittensor.controller.cli: circular import)
 from gittensor.controller import cli as ctl
-from gittensor.controller.checks.state import ADMIT, BENCHED, IDLE, LEASED, STARTING, BoxState
+from gittensor.controller.checks.state import ADMIT, BENCHED, IDLE, LEASED, STARTING, BoxState, StateStore
 from gittensor.controller.daemon import Controller, Intervals
+from gittensor.controller.registry import Registry
 from tests.controller.conftest import AGENT_DIGEST, FIXTURES, NETWORK_TARGETS, UUID_5090_B, FakeProof
 from tests.controller.test_cli import FAKE_PROOF, HK_A, HK_B, NET, admit, box_runner, invoke, round_args
 from tests.controller.test_placement import FakeDocker, idle_box, keypair, make_world, seed
@@ -146,6 +147,43 @@ def test_check_force_runs_beside_run_only_on_a_benched_box(state):
             assert refused.exit_code == 2 and 'controller running' in refused.output, refused.output
             assert 'gitt controller status' in refused.output and 'ADMIT' not in refused.output
         assert ctl.StateDir(state).store().get(HK_A).last_check_at is None  # nothing was ever applied
+
+
+def test_release_beside_run_is_applied_by_the_daemons_next_round(state, tmp_path):
+    admit(state)
+    s = ctl.StateDir(state).store()
+    s.put(
+        BoxState.from_dict(
+            {**s.get(HK_A).as_dict(), 'status': BENCHED, 'benched_at': 5.0, 'bench_until': 9e12, 'bench_count': 1}
+        )
+    )
+    setup = ctl._setup(
+        state, None, FAKE_PROOF, (), (AGENT_DIGEST,), (), 'entrius/gt-proof:test', None, NETWORK_TARGETS, 100
+    )
+    with ctl.StateDir(state).run_lock():
+        controller = Controller(
+            ctl.StateDir(state),
+            Registry(tmp_path / 'registry'),
+            make_runner=lambda box, purpose: box_runner(),
+            run_round=lambda proof, **shared: ctl.run_round(setup, proof, **shared),
+            load_proof=FakeProof,
+        )
+        assert controller.boxes.boxes[HK_A].status == BENCHED  # the daemon's in-memory view
+
+        result = invoke('release', HK_A, '--reason', 'false positive', '--state-dir', state, '--json')
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.stdout)['pending'] is True
+        assert StateStore(state / 'boxes.json').get(HK_A).status == BENCHED  # recorded, not applied: the daemon owns it
+        assert 'release requested' in invoke('status', '--state-dir', state).output
+
+        with patch.object(ctl, '_make_runner', side_effect=lambda st, box, ca, purpose: box_runner()):
+            report = controller.round_once()
+        (row,) = report.boxes
+        assert row.status_before == BENCHED and row.verdict.admitted
+        after = controller.boxes.boxes[HK_A]
+        assert after.status == IDLE and after.standing_events[-1]['kind'] == 'released'
+        assert after.standing_events[-1]['reason'] == 'false positive'
+        assert StateStore(state / 'boxes.json').get(HK_A).status == IDLE
 
 
 def test_run_serves_its_loops_stops_on_sigterm_and_status_reads_what_it_did(state, tmp_path):

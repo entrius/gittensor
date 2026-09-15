@@ -78,3 +78,20 @@ BENCH_BACKOFF_LADDER_S = (3_600, 14_400, 57_600, 230_400)  # 1 h -> 4 h -> 16 h 
 UNREACHABLE_BENCH_AFTER = 3
 UNREACHABLE_BENCH_S = 12 * 3_600
 BENCH_LADDER_RESET_AFTER_S = 7 * 86_400
+
+# Placement (24 §3 WS-B). A failed start (health not by `placement.max_load_s`, canary failed, artifact mismatch) is
+# slow, not caught: undeploy, CHECKING, no bench. This many in a row on one box benches it on the ladder (Kimbo 9/14).
+FAILED_STARTS_BENCH_AFTER = 3
+# Pre-staged artifacts live on the HOST under this root, one directory per manifest name and volume, bind-mounted
+# into the instance read-only. Fetch and hash run in a throwaway container, never in the workload (no egress there).
+MODELS_ROOT = '/var/lib/gt-models'
+ARTIFACT_IMAGE = 'python:3.12-slim'
+HF_HUB_VERSION = '1.31.0'  # huggingface_hub in the fetch container; `hf download --revision`
+IMAGE_PULL_TIMEOUT_S = 1800.0
+ARTIFACT_FETCH_TIMEOUT_S = 3600.0
+# `network.egress: []` runs the instance on this bridge: IP masquerade off (no route out; published ports still
+# answer) and inter-container traffic off. `--network none` cannot be used: docker silently drops `-p` with it.
+NOEGRESS_NETWORK = 'gt-noegress'
+HEALTH_POLL_S = 2.0
+HTTP_PROBE_TIMEOUT_S = 10.0
+RECONCILE_INTERVAL_S = 30.0

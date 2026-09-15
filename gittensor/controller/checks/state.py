@@ -1,13 +1,17 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-"""Per-box state for the idle pool: ADMIT / IDLE / BENCHED, the UUID pin, and the bench backoff ladder.
+"""Per-box and per-card state: ADMIT / IDLE / BENCHED boxes, the UUID pin, the bench backoff ladder, and the card
+state machine (IDLE / STARTING / LEASED / DRAINING / CHECKING, ``23`` §4a).
 
-Pure functions over a ``BoxState`` plus a tiny JSON store; no scheduler yet (that is WS-D/E). A box enters at ADMIT;
-its first passing full check pins its UUIDs and moves it to IDLE, where it is re-checked every
-``FULL_CHECK_INTERVAL_S``. Any BENCH verdict sends it to BENCHED for the next rung of the ladder (1 h -> 4 h -> 16 h
--> 64 h, ``23`` §5), clears the pin, and when the bench expires it re-enters through ADMIT. A long clean stretch
-resets the ladder. LEASED / RELEASING arrive with the lease state machine.
+Pure functions over a ``BoxState`` plus a tiny JSON store; the controller is the single writer. A box enters at ADMIT;
+its first passing full check pins its UUIDs, moves it to IDLE and makes every pinned card IDLE. Any BENCH verdict
+sends the box to BENCHED for the next rung of the ladder (1 h -> 4 h -> 16 h -> 64 h, ``23`` §5), clears the pin and
+the cards, and when the bench expires it re-enters through ADMIT. A long clean stretch resets the ladder.
+
+The card, not the box, is the unit of placement (``23`` §4a, §7): a start takes an IDLE card to STARTING, then LEASED
+at its first healthy probe (or CHECKING on a failed start); a drain takes LEASED through DRAINING to CHECKING; the
+next passing proof returns a CHECKING card to IDLE. The proof round only proves IDLE and CHECKING cards.
 """
 
 import json
@@ -22,6 +26,41 @@ ADMIT = 'ADMIT'
 IDLE = 'IDLE'
 BENCHED = 'BENCHED'
 STATUSES = (ADMIT, IDLE, BENCHED)
+
+# Card states. IDLE is shared with the box status of the same name.
+STARTING = 'STARTING'
+LEASED = 'LEASED'
+DRAINING = 'DRAINING'
+CHECKING = 'CHECKING'
+CARD_STATES = (IDLE, STARTING, LEASED, DRAINING, CHECKING)
+PROVABLE = (IDLE, CHECKING)  # cards the proof round stages and fires; the rest host (or are leaving) our workload
+BUSY = (STARTING, LEASED, DRAINING)
+
+# Every transition the controller may make. CHECKING -> IDLE belongs to a passing proof (``apply_verdict``), not here.
+TRANSITIONS = {
+    IDLE: (STARTING,),
+    STARTING: (LEASED, DRAINING, CHECKING),  # healthy / stop mid-start / failed start
+    LEASED: (DRAINING, CHECKING),  # drain / the container vanished under us
+    DRAINING: (CHECKING,),
+    CHECKING: (),
+}
+
+FAILED_STARTS = 'failed_starts'  # the bench reason when too many starts fail in a row
+
+
+class CardTransitionError(ValueError):
+    """A card transition the state machine does not allow (or a card the box does not have)."""
+
+
+@dataclass
+class CardState:
+    state: str = IDLE
+    instance_id: str = ''  # the placement instance on this card, while STARTING / LEASED / DRAINING
+    since: Optional[float] = None
+
+    @classmethod
+    def from_dict(cls, d: dict) -> 'CardState':
+        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
 
 @dataclass
@@ -42,13 +81,29 @@ class BoxState:
     host: str = ''
     port: int = 0
     host_key: str = ''
+    cards: Dict[str, CardState] = field(default_factory=dict)  # pinned uuid -> card state
+    failed_starts: int = 0  # consecutive failed lease starts on this box; FAILED_STARTS_BENCH_AFTER benches it
+    # Published port -> the port the outside world reaches it on, for hosts that remap ports (a Lium pod). Empty on a
+    # real miner box, where the manifest's port is published as-is.
+    port_map: Dict[str, int] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, d: dict) -> 'BoxState':
-        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+        fields = {k: v for k, v in d.items() if k in cls.__dataclass_fields__}
+        fields['cards'] = {uuid: CardState.from_dict(c) for uuid, c in (fields.get('cards') or {}).items()}
+        state = cls(**fields)
+        if 'cards' not in d and state.status == IDLE:  # a file from before cards existed: its pinned cards are idle
+            state.cards = {uuid: CardState(IDLE, '', state.last_check_at) for uuid in state.pinned_uuids}
+        return state
+
+    def card(self, uuid: str) -> CardState:
+        return self.cards.get(uuid) or CardState()
+
+    def public_port(self, port: int) -> int:
+        return int(self.port_map.get(str(port), port))
 
 
 def backoff_seconds(bench_count: int, ladder: Sequence[int] = cfg.BENCH_BACKOFF_LADDER_S) -> int:
@@ -58,6 +113,28 @@ def backoff_seconds(bench_count: int, ladder: Sequence[int] = cfg.BENCH_BACKOFF_
     return int(ladder[min(bench_count, len(ladder)) - 1])
 
 
+def _bench(
+    new: BoxState,
+    now: float,
+    failed: Sequence[str],
+    ladder: Sequence[int] = cfg.BENCH_BACKOFF_LADDER_S,
+    ladder_reset_after_s: float = cfg.BENCH_LADDER_RESET_AFTER_S,
+) -> BoxState:
+    """Climb the ladder (or restart it after a long clean stretch), clear the pin and the cards, wait it out."""
+    if new.benched_at is not None and now - new.benched_at > ladder_reset_after_s:
+        new.bench_count = 0
+    new.bench_count += 1
+    new.status = BENCHED
+    new.benched_at = now
+    new.bench_until = now + backoff_seconds(new.bench_count, ladder)
+    new.last_failed = list(failed)
+    new.pinned_uuids = []
+    new.admitted_at = None
+    new.cards = {}
+    new.failed_starts = 0
+    return new
+
+
 def apply_verdict(
     state: BoxState,
     verdict: CheckVerdict,
@@ -65,7 +142,8 @@ def apply_verdict(
     ladder: Sequence[int] = cfg.BENCH_BACKOFF_LADDER_S,
     ladder_reset_after_s: float = cfg.BENCH_LADDER_RESET_AFTER_S,
 ) -> BoxState:
-    """The state after a full check. Pure: returns a new ``BoxState``."""
+    """The state after a full check. Pure: returns a new ``BoxState``. A pass at ADMIT makes every pinned card IDLE;
+    a pass at IDLE returns CHECKING cards to IDLE and leaves busy cards alone."""
     new = BoxState.from_dict(state.as_dict())
     new.last_check_at = now
     new.last_failed = list(verdict.failed)
@@ -75,18 +153,14 @@ def apply_verdict(
             new.pinned_uuids = list(verdict.gpu_uuids)
             new.card_name = verdict.card_name
             new.admitted_at = now
+            new.cards = {}
+        for uuid in new.pinned_uuids:
+            card = new.cards.get(uuid)
+            if card is None or card.state == CHECKING:
+                new.cards[uuid] = CardState(IDLE, '', now)
         new.status = IDLE
         return new
-    # BENCH: climb the ladder (or restart it after a long clean stretch), clear the pin, wait it out.
-    if new.benched_at is not None and now - new.benched_at > ladder_reset_after_s:
-        new.bench_count = 0
-    new.bench_count += 1
-    new.status = BENCHED
-    new.benched_at = now
-    new.bench_until = now + backoff_seconds(new.bench_count, ladder)
-    new.pinned_uuids = []
-    new.admitted_at = None
-    return new
+    return _bench(new, now, verdict.failed, ladder, ladder_reset_after_s)
 
 
 UNREACHABLE = 'ssh_unreachable'
@@ -109,6 +183,7 @@ def apply_unreachable(
         new.last_failed = [UNREACHABLE]
         new.pinned_uuids = []
         new.admitted_at = None
+        new.cards = {}
     return new
 
 
@@ -129,6 +204,50 @@ def due_for_check(state: BoxState, now: float, interval_s: float = cfg.FULL_CHEC
     if state.status == IDLE:
         return state.last_check_at is None or now - state.last_check_at >= interval_s
     return False
+
+
+# ---------------------------------------------------------------- cards ---------------------------------------------
+
+
+def transition_card(state: BoxState, uuid: str, to: str, now: float, instance_id: Optional[str] = None) -> BoxState:
+    """Move one card along ``TRANSITIONS``. Pure. ``instance_id`` is set on the way into STARTING and kept until the
+    card reaches CHECKING. Raises ``CardTransitionError`` for a card the box has not pinned or a move not allowed."""
+    if state.status != IDLE or uuid not in state.cards:
+        raise CardTransitionError(f'{state.box_id}: no card {uuid} on an {state.status} box')
+    card = state.cards[uuid]
+    if to not in TRANSITIONS.get(card.state, ()):
+        raise CardTransitionError(f'{state.box_id} card {uuid}: {card.state} -> {to} is not allowed')
+    new = BoxState.from_dict(state.as_dict())
+    keep = card.instance_id if to in BUSY else ''
+    new.cards[uuid] = CardState(to, instance_id if instance_id is not None else keep, now)
+    return new
+
+
+def record_start(state: BoxState, ok: bool, now: float, bench_after: int = cfg.FAILED_STARTS_BENCH_AFTER) -> BoxState:
+    """Count a lease start. A success resets the count; ``bench_after`` failures in a row bench the box on the ladder
+    (Kimbo 9/14: a forged idle card must not keep idle pay by never managing to host a model). A single failed start is
+    slow, not caught, and changes nothing else (``23`` §4a). Pure."""
+    new = BoxState.from_dict(state.as_dict())
+    if ok:
+        new.failed_starts = 0
+        return new
+    new.failed_starts += 1
+    if new.failed_starts >= bench_after and new.status != BENCHED:
+        return _bench(new, now, [FAILED_STARTS])
+    return new
+
+
+def cards_in(state: BoxState, *states: str) -> List[str]:
+    return [uuid for uuid in state.pinned_uuids if state.card(uuid).state in states]
+
+
+def provable_uuids(state: BoxState, reported: Sequence[str]) -> List[str]:
+    """The reported cards the proof may run on this round: every card of a box at ADMIT; on an IDLE box, cards in IDLE
+    or CHECKING plus any card that is not pinned (it fails the UUID pin anyway). A STARTING, LEASED or DRAINING card
+    is skipped: it hosts, or is leaving, our workload."""
+    if state.status != IDLE:
+        return list(reported)
+    return [uuid for uuid in reported if uuid not in state.cards or state.cards[uuid].state in PROVABLE]
 
 
 class StateStore:

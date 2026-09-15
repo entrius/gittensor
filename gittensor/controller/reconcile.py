@@ -77,6 +77,7 @@ from gittensor.controller.runspec import (
     PullToken,
     build_run_spec,
     deploy,
+    host_port_client,
     inspect_container,
     list_containers,
     new_instance_id,
@@ -108,6 +109,7 @@ class InstanceRecord:
     container_id: str = ''
     host: str = ''
     port: int | None = None  # the port the outside reaches (the box's port map applied)
+    host_port: int | None = None  # the box's port the instance is published on, from its workload range
     healthy: bool = False
     draining: bool = False
     started_at: float | None = None  # docker run returned
@@ -464,6 +466,7 @@ class Reconciler:
             container_id=container.container_id,
             host=box.host,
             port=box.public_port(container.port) if container.port else None,
+            host_port=container.port,  # the port label carries the host port
             drain_type=drain.type,
             drain_max_s=drain.max_s,
         )
@@ -557,30 +560,57 @@ class Reconciler:
             if new is not None and self._leased(new):
                 add(record.box, 'drain', record)
 
-        # Starts: IDLE cards on reachable IDLE boxes, best standing first, then freshest last check, one per card.
+        # Starts: IDLE cards on reachable IDLE boxes, best standing first, then freshest last check, one instance per
+        # card, each with the first host port of its box's workload range that no record or container there holds.
+        # A draining instance still holds its port until it is removed: a freed port is given out on a later pass.
         used = {(r.box, r.uuid) for r in records}
+        ports_held: dict[str, set[int]] = {}
+        for r in records:
+            if r.host_port is not None:
+                ports_held.setdefault(r.box, set()).add(r.host_port)
+        for box_id, containers in seen.items():
+            ports_held.setdefault(box_id, set()).update(c.port for c in containers if c.port is not None)
         candidates = [
             (box, uuid)
             for box in sorted(boxes, key=lambda b: (-rank(levels[b.box_id]), -(b.last_check_at or 0.0), b.box_id))
-            if box.status == IDLE and box.host and box.box_id not in report.unreachable and box.box_id not in busy
+            if box.status == IDLE
+            and box.host
+            and not box.endpoint_changed
+            and box.box_id not in report.unreachable
+            and box.box_id not in busy
             for uuid in box.pinned_uuids
             if box.card(uuid).state == IDLE and (box.box_id, uuid) not in used
         ]
 
-        def take(verified: VerifiedEntry) -> tuple[BoxState, str] | None:
+        port_skips: dict[str, str] = {}
+
+        def take(verified: VerifiedEntry) -> tuple[BoxState, str, int | None] | None:
+            """The best free card that fits, with a host port from its box's workload range; a box with no port left
+            is skipped and named in ``port_skips``."""
             for box, uuid in candidates:
-                if card_fits(box, verified.manifest)[0]:
-                    candidates.remove((box, uuid))
-                    return box, uuid
+                if not card_fits(box, verified.manifest)[0]:
+                    continue
+                host_port = None
+                if verified.manifest.front_door.port is not None:
+                    held = ports_held.setdefault(box.box_id, set())
+                    host_port = next((p for p in box.workload_port_range() if p not in held), None)
+                    if host_port is None:
+                        span = box.workload_port_range()
+                        port_skips[box.box_id] = f'workload ports {span[0]}-{span[-1]} all in use'
+                        continue
+                    held.add(host_port)
+                candidates.remove((box, uuid))
+                return box, uuid, host_port
             return None
 
         for entry_id, verified in sorted(entries.items()):
             need = report.desired[entry_id] - len(by_entry.get(entry_id, []))
             while need > 0 and (pick := take(verified)) is not None:
-                add(pick[0].box_id, 'start', (entry_id, pick[1], ''))
+                add(pick[0].box_id, 'start', (entry_id, pick[1], '', pick[2]))
                 need -= 1
             if need > 0:
-                report.errors.append(f'{entry_id}: {need} replica(s) short: no IDLE card fits its placement')
+                why = ''.join(f'; {box_id}: {reason}' for box_id, reason in sorted(port_skips.items()))
+                report.errors.append(f'{entry_id}: {need} replica(s) short: no IDLE card fits its placement{why}')
 
         # Rotation (23 §8): a lease past its cap gets a replacement started on the best free card; it is drained on a
         # later pass once the replacement is LEASED. Oldest full check first, at most ROTATION_MAX_FRACTION of leased
@@ -599,7 +629,7 @@ class Reconciler:
             pick = take(verified) if verified is not None else None
             if pick is None:
                 continue
-            add(pick[0].box_id, 'start', (record.entry, pick[1], record.id))
+            add(pick[0].box_id, 'start', (record.entry, pick[1], record.id, pick[2]))
             record.rotating = pick[0].box_id
             self._put_record(record)
             report.rotations.append(record.id)
@@ -631,8 +661,8 @@ class Reconciler:
                 if op == 'drain':
                     action = self._drain(box_id, runner, arg)
                 else:
-                    entry_id, uuid, replaces = arg
-                    action = self._start(box_id, runner, entries[entry_id], uuid, replaces)
+                    entry_id, uuid, replaces, host_port = arg
+                    action = self._start(box_id, runner, entries[entry_id], uuid, replaces, host_port)
                 with self._lock:
                     report.actions.append(action)
                 if action.detail.startswith('transport:'):
@@ -684,7 +714,15 @@ class Reconciler:
                 detail['leased_s'] = round(max(0.0, (record.stopped_at or self.wall()) - (record.leased_at or 0.0)), 1)
             self.boxes.put(add_event(box, CLEAN_LEASE if in_time else DRAIN_FAILED, self.wall(), **detail))
 
-    def _start(self, box_id: str, runner: HostRunner, verified: VerifiedEntry, uuid: str, replaces: str = '') -> Action:
+    def _start(
+        self,
+        box_id: str,
+        runner: HostRunner,
+        verified: VerifiedEntry,
+        uuid: str,
+        replaces: str = '',
+        host_port: int | None = None,
+    ) -> Action:
         manifest = verified.manifest
         instance_id = new_instance_id()
         action = Action('start', box_id, instance_id, verified.entry_id, uuid, False, states=[IDLE])
@@ -693,22 +731,27 @@ class Reconciler:
         box = self._box(box_id)
         marks = [('begin', self.clock())]
         self._move(box_id, uuid, STARTING, action, instance_id)
+        if manifest.front_door.port is None:
+            host_port = None
+        elif host_port is None:
+            host_port = manifest.front_door.port
         record = InstanceRecord(
             id=instance_id,
             entry=verified.entry_id,
             box=box_id,
             uuid=uuid,
             host=box.host,
-            port=box.public_port(manifest.front_door.port) if manifest.front_door.port else None,
+            port=box.public_port(host_port) if host_port else None,
+            host_port=host_port,
             drain_type=manifest.drain.type,
             drain_max_s=manifest.drain.max_s,
             replaces=replaces,
         )
         self._put_record(record)
-        client = self.http_for(runner, box)
+        client = host_port_client(self.http_for(runner, box), manifest, host_port)
         staged = PrestageReport()
         try:
-            spec = build_run_spec(verified.entry_id, manifest, uuid, instance_id)
+            spec = build_run_spec(verified.entry_id, manifest, uuid, instance_id, host_port)
             prestage(runner, spec, manifest, self.pull_token, self.clock, report=staged)
             marks.append(('prestage', self.clock()))
             record.container_id = deploy(runner, spec)

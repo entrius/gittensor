@@ -600,7 +600,11 @@ def test_zero_to_two_replicas_starts_two_instances_on_two_idle_cards(world):
     assert {re.search(r'device=([^"]+)', r).group(1) for r in runs} == {UUID_5090, UUID_5090_B}
     records = InstanceStore(root / 'instances.json').instances
     assert {r.container_id for r in records.values()} == set(box.containers)
-    assert all((r.host, r.port, r.healthy, r.draining) == ('10.0.0.1', 20135, True, False) for r in records.values())
+    assert all((r.host, r.healthy, r.draining) == ('10.0.0.1', True, False) for r in records.values())
+    # two instances of one image on one box: two host ports from the workload range, each mapped to the manifest's 8080
+    assert sorted((r.host_port, r.port) for r in records.values()) == [(20000, 20000), (20001, 20001)]
+    assert sorted(re.search(r' -p (\d+:\d+) ', r).group(1) for r in runs) == ['20000:8080', '20001:8080']
+    assert {c['port'] for c in box.containers.values()} == {'20000', '20001'}  # the port label is the host port
     cards = StateStore(root / 'boxes.json').get('hk1').cards
     assert {c.state for c in cards.values()} == {LEASED} and {c.instance_id for c in cards.values()} == set(records)
     assert report.running == {ENTRY: 2} and {'prestage', 'docker_run', 'load', 'canary', 'first_probe'} <= set(
@@ -851,3 +855,61 @@ def test_the_committed_27b_manifest_stages_every_file_the_phase0_image_checks():
     marker = manifest.artifacts[2]
     assert hashlib.sha256(env['TOK_REPO'].encode()).hexdigest() == marker.sha256  # run.sh compares it to TOK_REPO
     assert marker.source == 'data:,' + env['TOK_REPO'] and manifest.artifacts[0].revision == env['MODEL_DIR_REVISION']
+
+
+# ---------------------------------------------------------------- workload ports ------------------------------------
+
+
+def test_a_freed_host_port_is_given_out_again_and_an_exhausted_range_skips_the_box(world):
+    root, registry = world
+    box_state = idle_box(uuids=(UUID_5090, UUID_5090_B, UUID_C))
+    box_state.workload_ports = [20000, 20001]
+    seed(root, box_state, replicas=2)
+    box = FakeDocker()
+    assert reconciler(root, registry, {'hk1': box}).run_pass().ok
+    records = InstanceStore(root / 'instances.json').instances
+    assert sorted(r.host_port for r in records.values()) == [20000, 20001]
+
+    # a third replica: an IDLE card is left, a port is not; the box is skipped and the reason named
+    DeploymentStore(root / 'deployments.json').set(ENTRY, True, 3)
+    short = reconciler(root, registry, {'hk1': box}).run_pass()
+    assert short.actions == [] and len(box.commands('docker run -d')) == 2
+    assert short.errors == [
+        f'{ENTRY}: 1 replica(s) short: no IDLE card fits its placement; hk1: workload ports 20000-20001 all in use'
+    ]
+
+    # scale down: the drained instance's port is free again, and the next start gets it
+    DeploymentStore(root / 'deployments.json').set(ENTRY, True, 1)
+    (drain,) = reconciler(root, registry, {'hk1': box}).run_pass().actions
+    freed = records[drain.instance].host_port
+    DeploymentStore(root / 'deployments.json').set(ENTRY, True, 2)
+    (start,) = reconciler(root, registry, {'hk1': box}).run_pass().actions
+    assert start.ok and start.uuid == UUID_C
+    assert InstanceStore(root / 'instances.json').instances[start.instance].host_port == freed
+    assert f' -p {freed}:8080 ' in box.commands('docker run -d')[-1]
+
+
+def test_health_probes_and_the_canary_go_to_the_host_port(world):
+    root, registry = world
+    seed(root, idle_box(uuids=(UUID_5090,)), replicas=1)
+    box = FakeDocker()
+    assert reconciler(root, registry, {'hk1': box}).run_pass().ok
+    curls = box.commands('curl ')
+    assert curls and all(c.endswith('http://172.17.0.1:20000/v1/models') for c in curls)
+
+
+def test_a_dev_box_with_its_own_port_range_and_a_port_map(world, state):
+    root, registry = world
+    box_state = idle_box(uuids=(UUID_5090,))  # port_map {'8080': 20135}: a Lium pod exposing 8080 on 20135
+    box_state.workload_ports = [8080, 8080]
+    seed(root, box_state, replicas=1)
+    box = FakeDocker()
+    assert reconciler(root, registry, {'hk1': box}).run_pass().ok
+    (record,) = InstanceStore(root / 'instances.json').instances.values()
+    assert (record.host_port, record.port) == (8080, 20135) and ' -p 8080:8080 ' in box.commands('docker run -d')[0]
+
+    result = admit(state, extra=['--workload-ports', '8080-8080', '--port-map', '8080=20135', '--json'])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)['workload_ports'] == [8080, 8080]
+    assert store(state).get(HK_A).workload_port_range() == range(8080, 8081)
+    assert admit(state, extra=['--workload-ports', '9-8']).exit_code == 2

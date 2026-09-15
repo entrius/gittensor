@@ -19,6 +19,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
+from gittensor.agent.config import WORKLOAD_PORT_RANGE
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.verdict import CheckVerdict
 
@@ -90,9 +91,19 @@ class BoxState:
     host_key: str = ''
     cards: Dict[str, CardState] = field(default_factory=dict)  # pinned uuid -> card state
     failed_starts: int = 0  # consecutive failed lease starts on this box; FAILED_STARTS_BENCH_AFTER benches it
-    # Published port -> the port the outside world reaches it on, for hosts that remap ports (a Lium pod). Empty on a
-    # real miner box, where the manifest's port is published as-is.
+    # Host port -> the port the outside world reaches it on, for hosts that remap ports (a Lium pod). Empty on a real
+    # miner box, where the host port is reached as-is.
     port_map: Dict[str, int] = field(default_factory=dict)
+    # [low, high] host ports instances are given, inclusive. Empty: the convention every `gitt up` box opens
+    # (``WORKLOAD_PORT_RANGE``); a dev box whose provider exposes other ports sets it at admit.
+    workload_ports: List[int] = field(default_factory=list)
+    # Who put the box here: 'chain' (discovery read its endpoint off the metagraph and removes it when the hotkey
+    # deregisters) or 'operator' (`gitt controller admit`; discovery leaves it alone). '' is a file from before this.
+    source: str = ''
+    # The endpoint the chain now publishes when it differs from host:port and the host key there is not the pinned one
+    # (or did not answer): {'host', 'port', 'host_key', 'at'}. Not re-pinned silently; every round counts it as an
+    # unreachable round until `gitt controller admit --force-rekey` or the pinned key answers at the new address.
+    endpoint_changed: Dict[str, object] = field(default_factory=dict)
     # What the last passing full check saw, for the in-lease heartbeat's "same card?": {'power_limits': {uuid: W},
     # 'nvml_md5': md5}.
     identity: Dict[str, object] = field(default_factory=dict)
@@ -121,6 +132,10 @@ class BoxState:
 
     def public_port(self, port: int) -> int:
         return int(self.port_map.get(str(port), port))
+
+    def workload_port_range(self) -> range:
+        low, high = self.workload_ports if len(self.workload_ports) == 2 else WORKLOAD_PORT_RANGE
+        return range(int(low), int(high) + 1)
 
 
 def backoff_seconds(bench_count: int, ladder: Sequence[int] = cfg.BENCH_BACKOFF_LADDER_S) -> int:
@@ -358,7 +373,35 @@ def provable_uuids(state: BoxState, reported: Sequence[str]) -> List[str]:
     return [uuid for uuid in reported if uuid not in state.cards or state.cards[uuid].state in PROVABLE]
 
 
-OPERATOR_FIELDS = ('host', 'port', 'host_key', 'port_map', 'release_request')  # what `admit` and `release` write
+# What `gitt controller admit`, `release` and discovery write.
+OPERATOR_FIELDS = (
+    'host',
+    'port',
+    'host_key',
+    'port_map',
+    'release_request',
+    'workload_ports',
+    'source',
+    'endpoint_changed',
+)
+
+
+DEREGISTERED = 'deregistered'
+
+
+def apply_deregistered(state: BoxState, now: float) -> BoxState:
+    """The hotkey left the metagraph: BENCHED with no end (``bench_until`` None never releases), cards cleared, so the
+    reconciler drains what runs there; discovery removes the box once nothing is left on it. Off the fraud ladder. Pure.
+    """
+    new = BoxState.from_dict(state.as_dict())
+    new.status = BENCHED
+    new.benched_at = now
+    new.bench_until = None
+    new.last_failed = [DEREGISTERED]
+    new.pinned_uuids = []
+    new.admitted_at = None
+    new.cards = {}
+    return new
 
 
 class StateStore:
@@ -367,12 +410,13 @@ class StateStore:
     The controller holds this in memory for as long as it runs, while an operator may ``admit`` beside it. So a save
     that finds the file changed since this store last read or wrote it merges first: boxes it does not know are
     added, and the operator's fields of the ones it does are taken from disk. Card and bench state stay the
-    controller's."""
+    controller's. A box this store removed is not merged back from an older file."""
 
     def __init__(self, path):
         self.path = Path(path)
         self.boxes: Dict[str, BoxState] = {}
         self._mtime_ns = 0
+        self._removed: set = set()
         if self.path.exists():
             self.boxes = self._read()
 
@@ -385,8 +429,14 @@ class StateStore:
         return self.boxes.get(box_id) or BoxState(box_id)
 
     def put(self, state: BoxState) -> None:
+        self._removed.discard(state.box_id)
         self.boxes[state.box_id] = state
         self.save()
+
+    def remove(self, box_id: str) -> None:
+        if self.boxes.pop(box_id, None) is not None:
+            self._removed.add(box_id)
+            self.save()
 
     def merge_from_disk(self) -> List[str]:
         """Pick up what someone else wrote since our last read or write. Returns the box ids added or changed."""
@@ -395,6 +445,8 @@ class StateStore:
         changed = []
         for box_id, theirs in self._read().items():
             ours = self.boxes.get(box_id)
+            if box_id in self._removed:
+                continue
             if ours is None:
                 self.boxes[box_id] = theirs
                 changed.append(box_id)

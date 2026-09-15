@@ -78,6 +78,7 @@ from gittensor.controller.runspec import (
     BoxHttp,
     HttpClient,
     PlacementError,
+    host_port_client,
     inspect_container,
     probe_health,
     repo_digests_command,
@@ -663,7 +664,8 @@ class Watch:
     def _health(self, box_id, box, runner, record: InstanceRecord, manifest: Manifest, report: WatchReport) -> bool:
         started, now = self.clock(), self.wall()
         try:
-            outcome = probe_health(self.http_for(runner, box), manifest, runner, record.container_id)
+            client = host_port_client(self.http_for(runner, box), manifest, record.host_port)
+            outcome = probe_health(client, manifest, runner, record.container_id)
         except (*_TRANSPORT, PlacementError) as e:
             with self.lock:
                 report.unreachable[box_id] = f'{type(e).__name__}: {e}'[:300]

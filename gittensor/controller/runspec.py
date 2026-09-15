@@ -62,7 +62,8 @@ class RunSpec:
     entry_id: str
     image: str  # repo[:tag]@sha256:..., as signed
     uuid: str
-    port: int | None
+    port: int | None  # the manifest's front-door port, inside the container
+    host_port: int | None = None  # the box's port it is published on (``WORKLOAD_PORT_RANGE``); None: the same as port
     env: tuple[tuple[str, str], ...] = ()
     volumes: tuple[tuple[str, str, bool], ...] = ()  # (host dir, mount, read only)
     network: str = cfg.NOEGRESS_NETWORK
@@ -105,9 +106,12 @@ def artifact_host_path(manifest: Manifest, artifact: Artifact, root: str = cfg.M
     raise ArtifactError(f'artifact {artifact.path} is under no run.volumes mount: nowhere to stage it')
 
 
-def build_run_spec(entry_id: str, manifest: Manifest, uuid: str, instance_id: str) -> RunSpec:
-    """One instance of ``manifest`` pinned to one card. ``network.egress: []`` gets the no-egress bridge; a non-empty
-    allowlist is NOT enforced yet and runs on the default bridge, with a note saying so."""
+def build_run_spec(
+    entry_id: str, manifest: Manifest, uuid: str, instance_id: str, host_port: int | None = None
+) -> RunSpec:
+    """One instance of ``manifest`` pinned to one card, its front-door port published on ``host_port`` (the box's
+    port the placement assigned; None publishes the manifest's port as-is). ``network.egress: []`` gets the no-egress
+    bridge; a non-empty allowlist is NOT enforced yet and runs on the default bridge, with a note saying so."""
     if manifest.placement.cards_per_instance != 1:
         raise PlacementError(f'{entry_id}: cards_per_instance {manifest.placement.cards_per_instance} (only 1 for now)')
     if not _INSTANCE_ID.match(instance_id):
@@ -127,6 +131,7 @@ def build_run_spec(entry_id: str, manifest: Manifest, uuid: str, instance_id: st
         image=manifest.image,
         uuid=uuid,
         port=manifest.front_door.port,
+        host_port=host_port if manifest.front_door.port is not None else None,
         env=tuple(sorted(manifest.run.env.items())),
         volumes=volumes,
         network=network,
@@ -145,11 +150,12 @@ def run_command(spec: RunSpec) -> str:
         f'--label {shlex.quote(f"{ENTRY_LABEL}={spec.entry_id}")}',
         f'--label {shlex.quote(f"{UUID_LABEL}={spec.uuid}")}',
     ]
+    host_port = spec.host_port if spec.host_port is not None else spec.port
     if spec.port is not None:
-        parts.append(f'--label {shlex.quote(f"{PORT_LABEL}={spec.port}")}')
+        parts.append(f'--label {shlex.quote(f"{PORT_LABEL}={host_port}")}')  # the host port: what a restart re-adopts
     parts.append(f'--gpus "device={spec.uuid}"')
     if spec.port is not None:
-        parts.append(f'-p {spec.port}:{spec.port}')
+        parts.append(f'-p {host_port}:{spec.port}')
     parts.append('--restart no')
     parts += [f'-e {shlex.quote(f"{k}={v}")}' for k, v in spec.env]
     parts += [f'-v {shlex.quote(f"{host}:{mount}" + (":ro" if ro else ""))}' for host, mount, ro in spec.volumes]
@@ -523,6 +529,22 @@ def parse_curl_response(result: CommandResult) -> HttpResponse:
     body, _, code = result.stdout.rpartition('\n')
     status = int(code) if code.strip().isdigit() else 0
     return HttpResponse(status, body, '' if result.ok else (result.stderr.strip()[:300] or f'exit {result.exit_code}'))
+
+
+class _HostPortClient:
+    def __init__(self, inner: HttpClient, ports: dict[int, int]):
+        self.inner, self.ports = inner, ports
+
+    def request(self, method, port, path, body=None, timeout=cfg.HTTP_PROBE_TIMEOUT_S) -> HttpResponse:
+        return self.inner.request(method, self.ports.get(int(port), port), path, body, timeout)
+
+
+def host_port_client(client: HttpClient, manifest: Manifest, host_port: int | None) -> HttpClient:
+    """Probes and canaries name the manifest's container port; the instance answers on the box at its host port. Only
+    the front-door port is published, so that is the one mapped."""
+    if host_port is None or manifest.front_door.port is None or host_port == manifest.front_door.port:
+        return client
+    return _HostPortClient(client, {int(manifest.front_door.port): int(host_port)})
 
 
 @dataclass

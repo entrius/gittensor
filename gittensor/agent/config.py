@@ -27,7 +27,9 @@ AGENT_VERSION = __version__
 # SHA256:NFES+v4hRuN2GMTeGBnTFch3jIBP/oEtNzQmi+pqNns). Its private half is the GT_RELEASE_KEY Actions secret. With it
 # empty `gitt up` would refuse to start a runner. Dev keys come from docker/agent/keys/make-dev-keys.sh; they carry
 # DEV_KEY_MARKER in their comment and the agent refuses to start on one unless GT_AGENT_ALLOW_DEV_KEYS=1.
-RELEASE_PUBKEY_OPENSSH = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGqwZgf8OHuUQmyeVLxDXXjLAcjMJwypNEKDEv7ltaLr gittensor-release'
+RELEASE_PUBKEY_OPENSSH = (
+    'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGqwZgf8OHuUQmyeVLxDXXjLAcjMJwypNEKDEv7ltaLr gittensor-release'
+)
 RELEASE_SIGNER_IDENTITY = 'gittensor-release'  # the principal in the runner's allowed_signers file
 RELEASE_SIGN_NAMESPACE = 'gt-agent-channel'  # `ssh-keygen -Y sign -n`; a signature for another purpose does not verify
 DEV_KEY_MARKER = 'DO-NOT-SHIP'  # in a dev key's comment; images built on one refuse to start without the override
@@ -46,6 +48,26 @@ SSH_HOSTKEY_VOLUME = 'gt-agent-ssh'  # named volume: the sshd host key survives 
 SSH_HOSTKEY_VOLUME_MOUNT = '/var/lib/gt-agent'
 AGENT_CONTAINER_NAME = 'gt-agent'
 RUNNER_CONTAINER_NAME = 'gt-agent-runner'
+
+# --- Workload ports ----------------------------------------------------------------------------------------------------
+# What a box opens besides the sshd port. The controller gives each placement instance one host port from this range
+# (first free on the box) and publishes it as `-p <host port>:<manifest port>`, so two instances of one image on a
+# two-card box never collide. 16 ports: 8 cards (the most a box may carry) and a replacement starting beside each.
+WORKLOAD_PORT_RANGE = (20000, 20015)  # inclusive
+
+# --- The box on chain ------------------------------------------------------------------------------------------------
+# `gitt up` serves the box's public IP and sshd port as the hotkey's axon (the standard `serve_axon` extrinsic, signed by
+# the miner's hotkey); the controller reads the metagraph and admits every endpoint carrying this marker. `protocol`
+# stays bittensor's own 4 so tools that read axons are not surprised; `placeholder1` / `placeholder2` (u8 fields the
+# chain stores and never interprets) carry the marker. A phase-0 serving miner's axon has both at 0.
+COMPUTE_AXON_PROTOCOL = 4
+COMPUTE_AXON_MARKER = 74  # placeholder1: a Gittensor compute box
+COMPUTE_AXON_SCHEMA = 1  # placeholder2: what the endpoint means; 1 = the port is the agent's sshd
+
+
+def is_compute_axon(protocol: int, placeholder1: int, placeholder2: int) -> bool:
+    return (protocol, placeholder1, placeholder2) == (COMPUTE_AXON_PROTOCOL, COMPUTE_AXON_MARKER, COMPUTE_AXON_SCHEMA)
+
 
 # --- Images and the release channel --------------------------------------------------------------------------------
 # Docker Hub under `entrius` (vault 23 §8, 26 §7). Trust is the digest + the signature, never the registry or a tag:

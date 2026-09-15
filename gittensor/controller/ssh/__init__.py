@@ -10,7 +10,14 @@ certificate expires on its own.
 """
 
 from gittensor.controller.ssh.certs import CertificateAuthority, VisitCredential, cert_details
-from gittensor.controller.ssh.runner import SshRunner, SshTransportError, known_hosts_line, scan_host_key
+from gittensor.controller.ssh.runner import (
+    SshRunner,
+    SshTransportError,
+    known_hosts_line,
+    pinned_host_key,
+    scan_host_key,
+    write_host_key,
+)
 
 __all__ = [
     'CertificateAuthority',
@@ -19,5 +26,7 @@ __all__ = [
     'VisitCredential',
     'cert_details',
     'known_hosts_line',
+    'pinned_host_key',
     'scan_host_key',
+    'write_host_key',
 ]

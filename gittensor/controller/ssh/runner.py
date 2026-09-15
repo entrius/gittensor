@@ -47,6 +47,31 @@ def known_hosts_line(host: str, port: int, host_key: str) -> str:
     return f'[{host}]:{port} {key}\n'
 
 
+def _host_field(host: str, port: int) -> str:
+    return f'[{host}]:{port}'
+
+
+def pinned_host_key(known_hosts: Path, host: str, port: int) -> str:
+    """The key ``known_hosts`` pins for ``[host]:port``, or ''."""
+    if not known_hosts.exists():
+        return ''
+    for line in known_hosts.read_text().splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[0] == _host_field(host, port):
+            return f'{parts[1]} {parts[2]}'
+    return ''
+
+
+def write_host_key(known_hosts: Path, host: str, port: int, host_key: str | None) -> None:
+    """Replace the ``[host]:port`` entry with ``host_key`` (or drop it when None)."""
+    lines = known_hosts.read_text().splitlines() if known_hosts.exists() else []
+    kept = [line for line in lines if line.strip() and line.split()[0] != _host_field(host, port)]
+    text = ''.join(f'{line}\n' for line in kept)
+    if host_key:
+        text += known_hosts_line(host, port, host_key)
+    known_hosts.write_text(text)
+
+
 def scan_host_key(
     host: str, port: int = AGENT_SSH_PORT, run: Callable[..., subprocess.CompletedProcess] = subprocess.run
 ) -> str:

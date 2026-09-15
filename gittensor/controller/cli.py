@@ -59,7 +59,7 @@ import yaml
 from rich.markup import escape
 from rich.table import Table
 
-from gittensor.agent.config import AGENT_SSH_PORT
+from gittensor.agent.config import AGENT_SSH_PORT, WORKLOAD_PORT_RANGE
 from gittensor.cli.help import StyledGroup
 from gittensor.cli.helpers import console, err_console
 from gittensor.cli.json_output import emit_error_json, emit_json
@@ -127,7 +127,14 @@ from gittensor.controller.registry import (
     sign_bytes,
 )
 from gittensor.controller.runspec import PullToken
-from gittensor.controller.ssh import CertificateAuthority, SshRunner, SshTransportError, known_hosts_line, scan_host_key
+from gittensor.controller.ssh import (
+    CertificateAuthority,
+    SshRunner,
+    SshTransportError,
+    pinned_host_key,
+    scan_host_key,
+    write_host_key,
+)
 from gittensor.controller.ssh.certs import CertificateError
 from gittensor.controller.standing import standing
 
@@ -241,27 +248,6 @@ class ControllerRunning(Exception):
 
 def _host_field(host: str, port: int) -> str:
     return f'[{host}]:{port}'
-
-
-def pinned_host_key(known_hosts: Path, host: str, port: int) -> str:
-    """The key ``known_hosts`` pins for ``[host]:port``, or ''."""
-    if not known_hosts.exists():
-        return ''
-    for line in known_hosts.read_text().splitlines():
-        parts = line.split()
-        if len(parts) >= 3 and parts[0] == _host_field(host, port):
-            return f'{parts[1]} {parts[2]}'
-    return ''
-
-
-def write_host_key(known_hosts: Path, host: str, port: int, host_key: str | None) -> None:
-    """Replace the ``[host]:port`` entry with ``host_key`` (or drop it when None)."""
-    lines = known_hosts.read_text().splitlines() if known_hosts.exists() else []
-    kept = [line for line in lines if line.strip() and line.split()[0] != _host_field(host, port)]
-    text = ''.join(f'{line}\n' for line in kept)
-    if host_key:
-        text += known_hosts_line(host, port, host_key)
-    known_hosts.write_text(text)
 
 
 # ---------------------------------------------------------------- the proof, by config ------------------------------
@@ -1060,6 +1046,14 @@ def _parse_port_maps(values: Sequence[str]) -> dict[str, int]:
     return out
 
 
+def _parse_port_range(value: str) -> list[int]:
+    low, sep, high = value.partition('-')
+    high = high if sep else low
+    if not low.isdigit() or not high.isdigit() or not 1 <= int(low) <= int(high) <= 65535:
+        raise ValueError(f'--workload-ports {value!r}: expected LOW-HIGH (1-65535, LOW <= HIGH)')
+    return [int(low), int(high)]
+
+
 @controller_group.command('admit')
 @click.argument('hotkey')
 @click.option('--host', required=True, help="The box's address.")
@@ -1072,16 +1066,26 @@ def _parse_port_maps(values: Sequence[str]) -> dict[str, int]:
     'port_maps',
     multiple=True,
     metavar='PORT=PUBLIC',
-    help='A host that remaps published ports (a Lium pod): instances on PORT are reached on PUBLIC.',
+    help='A host that remaps published ports (a Lium pod): instances on host port PORT are reached on PUBLIC.',
+)
+@click.option(
+    '--workload-ports',
+    default=None,
+    metavar='LOW-HIGH',
+    help=f'Host ports instances are published on (default: {WORKLOAD_PORT_RANGE[0]}-{WORKLOAD_PORT_RANGE[1]}, '
+    'what `gitt up` opens). A dev box whose provider exposes other ports: e.g. 8080-8080 with --port-map.',
 )
 @_state_options
-def admit_command(hotkey, host, port, force_rekey, port_maps, state_dir, json_mode):
+def admit_command(hotkey, host, port, force_rekey, port_maps, workload_ports, state_dir, json_mode):
     """Pin a box's SSH host key (trust on first use, once) and create it at ADMIT.
 
-    A changed host key is refused unless --force-rekey. Re-admitting keeps the box's status, pin and bench.
+    A changed host key is refused unless --force-rekey. Re-admitting keeps the box's status, pin and bench, and clears
+    an endpoint change discovery flagged. `gitt controller discover` admits registered boxes by itself; this stays for
+    dev boxes and for resolving an endpoint change.
     """
     try:
         port_map = _parse_port_maps(port_maps)
+        port_range = _parse_port_range(workload_ports) if workload_ports else None
     except ValueError as e:
         _fail(str(e), json_mode, EXIT_NO_VERDICT)
     state = StateDir(Path(state_dir).expanduser()).ensure()
@@ -1101,12 +1105,15 @@ def admit_command(hotkey, host, port, force_rekey, port_maps, state_dir, json_mo
             EXIT_BENCH,
         )
     new = box is None
-    box = BoxState(hotkey) if new else BoxState.from_dict(box.as_dict())
+    box = BoxState(hotkey, source='operator') if new else BoxState.from_dict(box.as_dict())
     if box.host and (box.host, box.port) != (host, port):
         write_host_key(state.known_hosts, box.host, box.port, None)  # the box moved: drop its old address
     box.host, box.port, box.host_key = host, port, key
+    box.endpoint_changed = {}
     if port_maps:
         box.port_map = port_map
+    if port_range:
+        box.workload_ports = port_range
     write_host_key(state.known_hosts, host, port, key)
     store.put(box)
     if json_mode:
@@ -1121,6 +1128,7 @@ def admit_command(hotkey, host, port, force_rekey, port_maps, state_dir, json_mo
                 'new': new,
                 'rekeyed': bool(changed),
                 'port_map': box.port_map,
+                'workload_ports': box.workload_ports,
             }
         )
         return

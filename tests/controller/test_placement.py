@@ -23,6 +23,7 @@ import yaml
 import gittensor.cli.main  # noqa: F401  (the CLI package must load before gittensor.controller.cli: circular import)
 from gittensor.controller import cli as ctl
 from gittensor.controller.checks.runner import CommandResult, FakeRunner, regex
+from gittensor.controller.checks.scrape import NVML_MD5_COMMAND
 from gittensor.controller.checks.state import (
     BENCHED,
     CHECKING,
@@ -57,7 +58,7 @@ from gittensor.controller.runspec import (
     run_command,
     run_entry_canary,
 )
-from tests.controller.conftest import UUID_5090, UUID_5090_B, fixture
+from tests.controller.conftest import NVML_MD5, NVML_PATH, UUID_5090, UUID_5090_B, fixture
 from tests.controller.test_cli import (
     AGENT_DIGEST,
     FAKE_PROOF,
@@ -258,17 +259,91 @@ def test_fetch_writes_the_revision_marker_and_takes_data_urls():
 class FakeDocker:
     """The host docker daemon of one box, as the controller's commands see it."""
 
-    def __init__(self, healthy=True, image_present=True, artifact_sha='', fetch_gives=ARTIFACT_SHA, stop_exit=0):
+    def __init__(
+        self,
+        healthy=True,
+        image_present=True,
+        artifact_sha='',
+        fetch_gives=ARTIFACT_SHA,
+        stop_exit=0,
+        gpus=(UUID_5090, UUID_5090_B),
+        hold=None,
+    ):
         self.containers: dict[str, dict] = {}
         self.healthy, self.image_present = healthy, image_present
         self.artifact_sha, self.fetch_gives = artifact_sha, fetch_gives
         self.stop_exit = stop_exit  # 137: the workload ignored SIGTERM and docker stop killed it at drain.max_s
+        # What the heartbeat reads: the cards nvidia-smi lists and their power limit, the NVML lib, and GPU processes
+        # as pid -> (card, the container whose cgroup holds it, None = outside any container). A pid in `hidden` has
+        # no /proc entry on the host.
+        self.gpus, self.power_w, self.nvml_md5 = list(gpus), 575.0, NVML_MD5
+        self.processes: dict[int, tuple[str, str | None]] = {}
+        self.hidden: set[int] = set()
+        self.hold = hold  # a threading.Event: `docker run` blocks until it is set (a slow model load)
+        self._pid, self._starts = 4000, 0
         self.runner = FakeRunner().on(regex(r'.'), self.respond)
 
     def commands(self, prefix):
         return [c for c in self.runner.calls if c.startswith(prefix)]
 
+    def gpu_process(self, uuid, container_id=None):
+        self._pid += 1
+        self.processes[self._pid] = (uuid, container_id)
+        return self._pid
+
+    def restart(self, cid):
+        """`docker restart` by the miner: the same ID, a new StartedAt."""
+        self._starts += 1
+        self.containers[cid].update(state='running', started_at=f'2026-09-15T13:00:{self._starts:02d}.000000000Z')
+
+    def recreate(self, cid):
+        """`docker rm` + `docker run` of the same labels and image by the miner: a new ID and StartedAt."""
+        old = self.containers.pop(cid)
+        new = hashlib.sha256(f'recreated:{cid}'.encode()).hexdigest()
+        self._starts += 1
+        self.containers[new] = {**old, 'id': new, 'started_at': f'2026-09-15T14:00:{self._starts:02d}.000000000Z'}
+        self.processes = {p: (u, new if c == cid else c) for p, (u, c) in self.processes.items()}
+        return new
+
+    def pause(self, cid):
+        """`docker pause`: still our container on our card, and the workload stops answering."""
+        self.containers[cid]['state'] = 'paused'
+        self.healthy = False
+
+    def _heartbeat_respond(self, command):
+        if command.startswith('docker inspect --type container'):
+            container = self.containers.get(command.split()[-1])
+            if container is None:
+                return CommandResult(1, '', f'Error: No such container: {command.split()[-1]}')
+            fields = (container['id'], container['state'], container['started_at'], container['image_id'])
+            return '\t'.join((*fields, PLACEHOLDER_IMAGE)) + '\n'
+        if command.startswith('docker image inspect') and 'RepoDigests' in command:
+            return f'{PLACEHOLDER_IMAGE}\n'
+        if command.startswith('nvidia-smi --query-gpu='):
+            line = fixture('nvidia_smi_5090.csv').strip().replace('575.00, 575.00', f'{self.power_w:.2f}, 575.00')
+            return ''.join(line.replace(UUID_5090, uuid) + '\n' for uuid in self.gpus)
+        if command == NVML_MD5_COMMAND:
+            return f'{self.nvml_md5}  {NVML_PATH}\n'
+        if command.startswith('nvidia-smi --query-compute-apps'):
+            return ''.join(f'{pid}, {uuid}\n' for pid, (uuid, _) in sorted(self.processes.items()))
+        if command.startswith('for p in '):
+            out = []
+            for pid in map(int, re.search(r'for p in ([\d ]+);', command).group(1).split()):
+                out.append(f'== {pid}')
+                if pid in self.hidden or pid not in self.processes:
+                    out.append('MISSING')
+                    continue
+                cid = self.processes[pid][1]
+                out.append(
+                    f'0::/system.slice/docker-{cid}.scope' if cid else '0::/user.slice/user-0.slice/session-1.scope'
+                )
+            return '\n'.join(out) + '\n'
+        return None
+
     def respond(self, command):
+        answer = self._heartbeat_respond(command)
+        if answer is not None:
+            return answer
         if command.startswith('docker ps -a --no-trunc'):
             m = re.search(r'label=io\.gittensor\.instance=([\w-]+)', command)
             rows = [c for c in self.containers.values() if not m or c['instance'] == m.group(1)]
@@ -293,8 +368,11 @@ class FakeDocker:
             self.artifact_sha = self.fetch_gives
             return ''
         if command.startswith('docker run -d --name'):
+            if self.hold is not None:
+                self.hold.wait()
             labels = dict(re.findall(r'--label io\.gittensor\.(\w+)=(\S+)', command))
             cid = hashlib.sha256(command.encode()).hexdigest()
+            self._starts += 1
             self.containers[cid] = {
                 'id': cid,
                 'state': 'running',
@@ -302,7 +380,10 @@ class FakeDocker:
                 'entry': labels['entry'],
                 'uuid': labels['uuid'],
                 'port': labels.get('port', ''),
+                'started_at': f'2026-09-15T12:00:{self._starts:02d}.000000000Z',
+                'image_id': 'sha256:' + 'e' * 64,
             }
+            self.gpu_process(labels['uuid'], cid)  # the workload's own process on its card
             return cid + '\n'
         if command.startswith('curl '):
             if self.healthy:
@@ -314,12 +395,14 @@ class FakeDocker:
         if command.startswith('docker stop --time'):
             for cid in command.split()[4:]:
                 self.containers[cid]['state'] = 'exited'
+                self.processes = {p: v for p, v in self.processes.items() if v[1] != cid}
             return ''
         if command.startswith("docker inspect --format '{{.State.ExitCode}}'"):
             return ''.join(f'{self.stop_exit}\n' for _ in command.split()[4:])
         if command.startswith('docker rm -f'):
             for cid in command.split()[3:]:
                 self.containers.pop(cid, None)
+                self.processes = {p: v for p, v in self.processes.items() if v[1] != cid}
             return ''
         if command.startswith('docker logs'):
             return 'loading weights\n'
@@ -346,14 +429,18 @@ def keypair(tmp_path):
     return key, (tmp_path / 'release.pub').read_text().strip()
 
 
-@pytest.fixture
-def world(tmp_path):
+def make_world(tmp_path):
     """A signed placeholder entry, an operator deployment file and a box state file."""
     key, pub = keypair(tmp_path)
     registry = Registry(tmp_path / 'registry', pub)
     verified = make_entry(placeholder_doc(), now=1.0)
     registry.write(verified, sign_bytes(verified.entry.canonical_bytes(), key))
     return tmp_path, registry
+
+
+@pytest.fixture
+def world(tmp_path):
+    return make_world(tmp_path)
 
 
 def reconciler(root, registry, boxes, clock=None, **kw):
@@ -554,13 +641,16 @@ def test_a_restarted_controller_re_adopts_running_containers_by_label(world):
     }
     assert len(box.commands('docker run -d')) == 2  # nothing restarted
 
-    # a container that vanished under a LEASED card is lost: the card goes through CHECKING, then a replacement starts
+    # a container that vanished under a LEASED card is a heartbeat failure, not a restart (Kimbo 9/15): the box is
+    # benched with its pay withheld, and every instance on it is undeployed in the same pass
     victim = next(iter(after.values()))
     box.containers.pop(victim.container_id)
     report = reconciler(root, registry, {'hk1': box}).run_pass()
     lost = next(a for a in report.actions if a.kind == 'lost')
-    assert lost.instance == victim.id and lost.states == [LEASED, DRAINING, CHECKING]
-    assert StateStore(root / 'boxes.json').get('hk1').cards[victim.uuid].state == CHECKING
+    assert lost.instance == victim.id and lost.states == [LEASED, BENCHED] and 'heartbeat failure' in lost.detail
+    benched = StateStore(root / 'boxes.json').get('hk1')
+    assert benched.status == BENCHED and benched.last_failed == ['heartbeat:our_container'] and benched.withheld_from
+    assert box.containers == {} and InstanceStore(root / 'instances.json').instances == {}
 
 
 def test_a_leftover_mid_start_container_is_undeployed(world):

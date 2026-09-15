@@ -96,3 +96,15 @@ NOEGRESS_NETWORK = 'gt-noegress'
 HEALTH_POLL_S = 2.0
 HTTP_PROBE_TIMEOUT_S = 10.0
 RECONCILE_INTERVAL_S = 30.0
+
+# The in-lease watch (24 §3 WS-D, 23 §5). One SSH visit per box with a LEASED card asks: same card, our container
+# running, card ours alone. Any failure benches the box and withholds pay from that instant. The manifest health probe
+# runs on its own `health.interval_s` in the same visit.
+HEARTBEAT_INTERVAL_S = 60.0
+WATCH_TICK_S = 5.0  # how often the watch looks for a heartbeat or health probe that is due
+POWER_LIMIT_TOLERANCE_W = 1.0  # nvidia-smi rounds the limit; a real change is tens of watts
+# `gitt controller run` (one process). A box mid-start or mid-drain holds its lock for minutes: the proof round waits
+# this long for it (a heartbeat visit takes seconds), then skips the box until the next round.
+ROUND_BOX_LOCK_WAIT_S = 30.0
+SHUTDOWN_GRACE_S = 120.0  # SIGTERM: how long the loops get to finish the visit in flight
+STANDING_EVENTS_KEEP = 200  # dated events per box for WS-E to fold; the oldest drop off

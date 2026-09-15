@@ -33,6 +33,7 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -45,12 +46,16 @@ from gittensor.controller.checks.state import (
     DRAINING,
     IDLE,
     LEASED,
+    OUR_CONTAINER,
     STARTING,
     BoxState,
+    CardTransitionError,
     StateStore,
+    apply_heartbeat_failure,
     record_start,
     transition_card,
 )
+from gittensor.controller.locks import BoxLocks
 from gittensor.controller.manifest import Drain, Manifest, gpu_type_of
 from gittensor.controller.registry import DeploymentStore, Registry, RegistryError, VerifiedEntry
 from gittensor.controller.runspec import (
@@ -62,6 +67,7 @@ from gittensor.controller.runspec import (
     PullToken,
     build_run_spec,
     deploy,
+    inspect_container,
     list_containers,
     new_instance_id,
     prestage,
@@ -97,6 +103,19 @@ class InstanceRecord:
     leased_at: float | None = None  # first passing health probe after the canary
     drain_type: str = 'kill'
     drain_max_s: int = 0
+    # What `docker inspect` said right after our `docker run`: the heartbeat holds the container to both (a restart
+    # changes StartedAt, a recreate changes the ID, a swapped image changes the image ID).
+    docker_started_at: str = ''
+    image_id: str = ''
+    # The in-lease watch (WS-D). heartbeat_ok None: no conclusive heartbeat yet (WS-F pays nothing without one).
+    last_heartbeat_at: float | None = None
+    heartbeat_ok: bool | None = None
+    heartbeat: dict = field(default_factory=dict)  # the three answers and the four pay conditions, last visit
+    heartbeat_misses: int = 0  # consecutive visits with no answer (SSH or docker failed); no bench, no pay
+    last_health_at: float | None = None
+    health_ok: bool | None = None
+    health_failures: int = 0  # consecutive; manifest.health.failure_threshold replaces the replica
+    health_detail: str = ''
 
     @classmethod
     def from_dict(cls, d: dict) -> InstanceRecord:
@@ -173,6 +192,8 @@ class ReconcileReport:
     errors: list[str] = field(default_factory=list)
     unreachable: dict[str, str] = field(default_factory=dict)
     timings_ms: dict[str, float] = field(default_factory=dict)
+    launched: list[str] = field(default_factory=list)  # background mode: boxes whose starts / drains went to a thread
+    in_flight: list[str] = field(default_factory=list)  # background mode: boxes still busy from an earlier pass
 
     @property
     def ok(self) -> bool:
@@ -193,7 +214,14 @@ class Reconciler:
     sleep: Callable[[float], None] = time.sleep
     rng: random.Random = field(default_factory=random.Random)
     visit_all: bool = True  # list containers on every admitted box (a restarted controller); later passes: only busy
+    # `gitt controller run`: a box's starts and drains hold its lock (the proof round skips a box mid-start), run on
+    # their own thread (`background`), and the pass returns without waiting for a model load; boxes still busy are
+    # left alone by later passes until their thread is done.
+    box_locks: BoxLocks | None = None
+    background: bool = False
+    on_background: Callable[[ReconcileReport], None] | None = None
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
+    _in_flight: dict[str, threading.Thread] = field(default_factory=dict, repr=False)
 
     # -- state writes (single writer; every change saved before the next step) -----------------------------------
 
@@ -211,7 +239,10 @@ class Reconciler:
                 return  # benched meanwhile: the cards are gone with the pin
             if box.cards[uuid].state == to:
                 return
-            self.boxes.put(transition_card(box, uuid, to, self.wall(), instance_id))
+            try:
+                self.boxes.put(transition_card(box, uuid, to, self.wall(), instance_id))
+            except CardTransitionError:
+                return  # another loop moved the card first (the watch replaced the replica)
             action.states.append(to)
 
     def _put_record(self, record: InstanceRecord) -> None:
@@ -227,15 +258,22 @@ class Reconciler:
     def run_pass(self) -> ReconcileReport:
         report = ReconcileReport()
         started = self.clock()
+        with self._lock:
+            busy = {box_id for box_id, thread in self._in_flight.items() if thread.is_alive()}
+        report.in_flight = sorted(busy)
         entries, report.desired = self._desired(report)
         runners: dict[str, HostRunner] = {}
         try:
-            seen = self._confirm(report, entries, runners)
+            seen = self._confirm(report, entries, runners, busy)
             report.timings_ms['confirm'] = round((self.clock() - started) * 1000.0, 1)
-            ops = self._plan(report, entries, seen)
+            ops = self._plan(report, entries, seen, busy)
             planned = self.clock()
             boxes = sorted(ops)
-            if boxes:
+            if self.background:
+                for box_id in boxes:
+                    self._launch(box_id, ops[box_id], entries)
+                report.launched = boxes
+            elif boxes:
                 with ThreadPoolExecutor(max_workers=len(boxes)) as pool:
                     list(pool.map(lambda box_id: self._execute(box_id, ops[box_id], entries, runners, report), boxes))
             report.timings_ms['execute'] = round((self.clock() - planned) * 1000.0, 1)
@@ -243,11 +281,41 @@ class Reconciler:
             for runner in runners.values():
                 getattr(runner, 'close', lambda: None)()
         self.visit_all = False
-        for record in self.instances.instances.values():
+        for record in list(self.instances.instances.values()):
             if not record.draining:
                 report.running[record.entry] = report.running.get(record.entry, 0) + 1
         report.timings_ms['total'] = round((self.clock() - started) * 1000.0, 1)
         return report
+
+    def _launch(self, box_id: str, box_ops: list[tuple[str, object]], entries: dict[str, VerifiedEntry]) -> None:
+        """One box's starts and drains on their own thread, with their own SSH visit. Its actions reach
+        ``on_background`` as a report when it is done."""
+
+        def work() -> None:
+            sub = ReconcileReport()
+            runners: dict[str, HostRunner] = {}
+            try:
+                self._execute(box_id, box_ops, entries, runners, sub)
+            except Exception as e:  # never kill the loop: the state is saved step by step and the next pass retries
+                sub.errors.append(f'{box_id}: {type(e).__name__}: {e}'[:300])
+            finally:
+                for runner in runners.values():
+                    getattr(runner, 'close', lambda: None)()
+                if self.on_background is not None:
+                    self.on_background(sub)
+
+        thread = threading.Thread(target=work, name=f'reconcile-{box_id[:16]}', daemon=True)
+        with self._lock:
+            self._in_flight[box_id] = thread
+        thread.start()
+
+    def join(self, timeout: float | None = None) -> bool:
+        """Wait for background starts and drains; True when none is left running."""
+        with self._lock:
+            threads = list(self._in_flight.values())
+        for thread in threads:
+            thread.join(timeout)
+        return not any(thread.is_alive() for thread in threads)
 
     def _desired(self, report: ReconcileReport) -> tuple[dict[str, VerifiedEntry], dict[str, int]]:
         entries: dict[str, VerifiedEntry] = {}
@@ -272,13 +340,19 @@ class Reconciler:
             return runners[box.box_id]
 
     def _confirm(
-        self, report: ReconcileReport, entries: dict[str, VerifiedEntry], runners: dict[str, HostRunner]
+        self,
+        report: ReconcileReport,
+        entries: dict[str, VerifiedEntry],
+        runners: dict[str, HostRunner],
+        busy: set[str] = frozenset(),
     ) -> dict[str, list[BoxContainer]]:
-        """List our containers on every box that has (or may have) any, then settle records against them."""
+        """List our containers on every box that has (or may have) any, then settle records against them. A box still
+        busy with an earlier pass's starts is not visited: its records are mid-flight, not lost."""
         visit = [
             box
-            for box in self.boxes.boxes.values()
+            for box in list(self.boxes.boxes.values())
             if box.host
+            and box.box_id not in busy
             and (
                 self.instances.on_box(box.box_id)
                 or any(c.state in BUSY for c in box.cards.values())
@@ -302,19 +376,23 @@ class Reconciler:
                 list(pool.map(list_box, visit))
 
         for box_id, containers in sorted(seen.items()):
-            box = self._box(box_id)
             by_instance = {c.instance_id: c for c in containers}
             for record in self.instances.on_box(box_id):
+                box = self._box(box_id)
                 container = by_instance.get(record.id)
                 if container is not None and container.running and container.container_id == record.container_id:
                     continue
                 if record.container_id == '' and box.card(record.uuid).state == STARTING and container is None:
                     continue  # recorded before docker run; the start is resolved below as a mid-start leftover
-                action = Action('lost', box_id, record.id, record.entry, record.uuid, False)
-                action.states.append(box.card(record.uuid).state)
+                state = box.card(record.uuid).state if box.status == IDLE else box.status
+                action = Action('lost', box_id, record.id, record.entry, record.uuid, False, states=[state])
                 action.detail = (
                     f'container {container.state} ({container.container_id[:12]})' if container else 'container gone'
                 )
+                if state == LEASED and not record.draining:
+                    self._bench_vanished(box_id, record, action)
+                    report.actions.append(action)
+                    continue
                 self._drop_record(record.id)
                 self._to_checking(box_id, record.uuid, action)
                 report.actions.append(action)
@@ -365,6 +443,23 @@ class Reconciler:
             drain_max_s=drain.max_s,
         )
 
+    def _bench_vanished(self, box_id: str, record: InstanceRecord, action: Action) -> None:
+        """A container gone or stopped under a LEASED card, without our stop, is a heartbeat failure, not a restart
+        (Kimbo 9/15): BENCHED on the ladder, pay withheld from now, and every instance on the box is marked for a kill
+        drain, which this pass's plan carries out."""
+        with self._lock:
+            self.boxes.put(
+                apply_heartbeat_failure(
+                    self._box(box_id), [OUR_CONTAINER], self.wall(), instance=record.id, reason=action.detail
+                )
+            )
+            for other in self.instances.on_box(box_id):
+                other.draining, other.healthy, other.heartbeat_ok = True, False, False
+                other.drain_type, other.drain_max_s = 'kill', 0
+                self.instances.put(other)
+        action.states.append(BENCHED)
+        action.detail += ': not stopped by us, a heartbeat failure; box BENCHED, pay withheld'
+
     def _to_checking(self, box_id: str, uuid: str, action: Action) -> None:
         box = self._box(box_id)
         if box.status != IDLE or uuid not in box.cards:
@@ -376,7 +471,11 @@ class Reconciler:
             self._move(box_id, uuid, CHECKING, action)
 
     def _plan(
-        self, report: ReconcileReport, entries: dict[str, VerifiedEntry], seen: dict[str, list[BoxContainer]]
+        self,
+        report: ReconcileReport,
+        entries: dict[str, VerifiedEntry],
+        seen: dict[str, list[BoxContainer]],
+        busy: set[str] = frozenset(),
     ) -> dict[str, list[tuple[str, object]]]:
         ops: dict[str, list[tuple[str, object]]] = {}
 
@@ -384,11 +483,16 @@ class Reconciler:
             ops.setdefault(box_id, []).append((op, arg))
 
         # Drains: leftovers, benched boxes, disabled or unverifiable entries, then any excess over the replica count.
+        # A busy box's starts count as running but nothing on it is touched until its thread is done.
         by_entry: dict[str, list[InstanceRecord]] = {}
-        for record in sorted(self.instances.instances.values(), key=lambda r: r.id):
+        for record in sorted(list(self.instances.instances.values()), key=lambda r: r.id):
             box = self.boxes.boxes.get(record.box)
             if record.box in report.unreachable:
                 continue  # never judged on a failed visit; next pass
+            if record.box in busy:
+                if not record.draining:
+                    by_entry.setdefault(record.entry, []).append(record)
+                continue
             if record.draining or box is None or box.status == BENCHED or report.desired.get(record.entry, 0) <= 0:
                 add(record.box, 'drain', record)
                 continue
@@ -396,18 +500,19 @@ class Reconciler:
         for entry_id, records in sorted(by_entry.items()):
             excess = len(records) - report.desired.get(entry_id, 0)
             if excess > 0:
-                victims = sorted(records, key=lambda r: (r.healthy, -(r.started_at or 0.0)))[
+                movable = [r for r in records if r.box not in busy]
+                victims = sorted(movable, key=lambda r: (r.healthy, -(r.started_at or 0.0)))[
                     :excess
                 ]  # unhealthy, newest
                 for record in victims:
                     add(record.box, 'drain', record)
 
         # Starts: IDLE cards on reachable IDLE boxes, freshest last check first, one instance per card.
-        used = {(r.box, r.uuid) for r in self.instances.instances.values()}
+        used = {(r.box, r.uuid) for r in list(self.instances.instances.values())}
         candidates = [
             (box, uuid)
-            for box in sorted(self.boxes.boxes.values(), key=lambda b: (-(b.last_check_at or 0.0), b.box_id))
-            if box.status == IDLE and box.host and box.box_id not in report.unreachable
+            for box in sorted(list(self.boxes.boxes.values()), key=lambda b: (-(b.last_check_at or 0.0), b.box_id))
+            if box.status == IDLE and box.host and box.box_id not in report.unreachable and box.box_id not in busy
             for uuid in box.pinned_uuids
             if box.card(uuid).state == IDLE and (box.box_id, uuid) not in used
         ]
@@ -435,21 +540,23 @@ class Reconciler:
         runners: dict[str, HostRunner],
         report: ReconcileReport,
     ) -> None:
-        """One box's work, in one visit: drains first (they free cards), then starts."""
+        """One box's work, in one visit: drains first (they free cards), then starts. Holds the box's lock throughout
+        when there are box locks, so no proof round lands on a card mid-start."""
         box = self._box(box_id)
         runner = self._runner(box, runners)
-        for op, arg in sorted(box_ops, key=lambda o: o[0] != 'drain'):
-            if op == 'drain':
-                action = self._drain(box_id, runner, arg)
-            else:
-                entry_id, uuid = arg
-                action = self._start(box_id, runner, entries[entry_id], uuid)
-            with self._lock:
-                report.actions.append(action)
-            if action.detail.startswith('transport:'):
+        with self.box_locks.hold(box_id) if self.box_locks is not None else nullcontext():
+            for op, arg in sorted(box_ops, key=lambda o: o[0] != 'drain'):
+                if op == 'drain':
+                    action = self._drain(box_id, runner, arg)
+                else:
+                    entry_id, uuid = arg
+                    action = self._start(box_id, runner, entries[entry_id], uuid)
                 with self._lock:
-                    report.unreachable[box_id] = action.detail
-                return
+                    report.actions.append(action)
+                if action.detail.startswith('transport:'):
+                    with self._lock:
+                        report.unreachable[box_id] = action.detail
+                    return
 
     def _drain(self, box_id: str, runner: HostRunner, record: InstanceRecord) -> Action:
         action = Action('drain', box_id, record.id, record.entry, record.uuid)
@@ -506,6 +613,12 @@ class Reconciler:
             marks.append(('prestage', self.clock()))
             record.container_id = deploy(runner, spec)
             record.started_at = self.wall()
+            try:
+                info = inspect_container(runner, record.container_id)
+            except PlacementError:
+                info = None  # the first heartbeat records it instead
+            if info is not None:
+                record.docker_started_at, record.image_id = info.started_at, info.image_id
             self._put_record(record)
             marks.append(('docker_run', self.clock()))
             health = wait_healthy(
@@ -537,6 +650,7 @@ class Reconciler:
             }
             return action
         record.healthy, record.leased_at = True, self.wall()
+        record.health_ok, record.last_health_at, record.health_detail = True, record.leased_at, first.detail
         self._put_record(record)
         self._move(box_id, uuid, LEASED, action)
         self._put_box(record_start(self._box(box_id), True, self.wall()))

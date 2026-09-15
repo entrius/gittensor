@@ -382,7 +382,9 @@ class BoxContainer:
 
     @property
     def running(self) -> bool:
-        return self.state == 'running'
+        """Up: running or paused. A paused workload is still our container on our card; it fails its health probe,
+        not the heartbeat (docker's own ``State.Running`` is true for a paused container too)."""
+        return self.state in ('running', 'paused')
 
 
 _PS_FORMAT = '\t'.join(
@@ -542,6 +544,46 @@ def probe_health(
     argv = ' '.join(shlex.quote(a) for a in manifest.health.command)
     result = runner.run(f'docker exec {shlex.quote(container)} {argv}', timeout=cfg.HTTP_PROBE_TIMEOUT_S + 15)
     return ProbeOutcome(result.ok, f'exec {manifest.health.command[0]} -> exit {result.exit_code}')
+
+
+@dataclass(frozen=True)
+class ContainerInfo:
+    """What the heartbeat holds a container to: the ID and start time our ``docker run`` produced, and its image."""
+
+    container_id: str
+    status: str  # running, paused, exited, dead, created, restarting
+    started_at: str  # .State.StartedAt exactly as docker prints it; a restart changes it, the ID stays
+    image_id: str  # .Image: the local image ID the container runs
+    image_ref: str  # .Config.Image: the reference it was started from
+
+    @property
+    def up(self) -> bool:
+        return self.status in ('running', 'paused')
+
+
+_INSPECT_FORMAT = '{{.Id}}\t{{.State.Status}}\t{{.State.StartedAt}}\t{{.Image}}\t{{.Config.Image}}'
+
+
+def inspect_container_command(container_id: str) -> str:
+    return f'docker inspect --type container --format {shlex.quote(_INSPECT_FORMAT)} {shlex.quote(container_id)}'
+
+
+def inspect_container(runner: HostRunner, container_id: str) -> ContainerInfo | None:
+    """None when docker says the container does not exist. Any other docker failure raises ``PlacementError``: that
+    is no answer, not a missing container."""
+    result = runner.run(inspect_container_command(container_id), timeout=cfg.SSH_COMMAND_TIMEOUT_S)
+    if not result.ok:
+        if 'no such' in (result.stderr + result.stdout).lower():
+            return None
+        raise PlacementError(f'docker inspect {container_id[:12]}: exit {result.exit_code}: {result.stderr[-200:]}')
+    cols = result.stdout.strip().split('\t')
+    if len(cols) != 5 or not _CONTAINER_ID.match(cols[0]):
+        raise PlacementError(f'docker inspect {container_id[:12]}: unreadable {result.stdout.strip()[:200]!r}')
+    return ContainerInfo(*cols)
+
+
+def repo_digests_command(image_id: str) -> str:
+    return f'docker image inspect --format \'{{{{join .RepoDigests ","}}}}\' {shlex.quote(image_id)}'
 
 
 def container_running(runner: HostRunner, container_id: str) -> bool:

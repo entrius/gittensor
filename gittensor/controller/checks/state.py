@@ -86,6 +86,13 @@ class BoxState:
     # Published port -> the port the outside world reaches it on, for hosts that remap ports (a Lium pod). Empty on a
     # real miner box, where the manifest's port is published as-is.
     port_map: Dict[str, int] = field(default_factory=dict)
+    # What the last passing full check saw, for the in-lease heartbeat's "same card?": {'power_limits': {uuid: W},
+    # 'nvml_md5': md5}.
+    identity: Dict[str, object] = field(default_factory=dict)
+    # Dated events WS-E folds into standing: {'at', 'kind', ...}. Kept across a bench.
+    standing_events: List[dict] = field(default_factory=list)
+    # When a hard in-lease failure (a heartbeat) stopped this box's pay; WS-F withholds the leased accrual from it.
+    withheld_from: Optional[float] = None
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -141,14 +148,17 @@ def apply_verdict(
     now: float,
     ladder: Sequence[int] = cfg.BENCH_BACKOFF_LADDER_S,
     ladder_reset_after_s: float = cfg.BENCH_LADDER_RESET_AFTER_S,
+    proved: Optional[Sequence[str]] = None,
 ) -> BoxState:
     """The state after a full check. Pure: returns a new ``BoxState``. A pass at ADMIT makes every pinned card IDLE;
-    a pass at IDLE returns CHECKING cards to IDLE and leaves busy cards alone."""
+    a pass at IDLE returns CHECKING cards to IDLE and leaves busy cards alone. With ``proved`` (the cards the proof
+    actually ran on) only those return: a card that reached CHECKING mid-round was not proved."""
     new = BoxState.from_dict(state.as_dict())
     new.last_check_at = now
     new.last_failed = list(verdict.failed)
     new.unreachable_count = 0
     if verdict.admitted:
+        new.identity = identity_baseline(verdict) or new.identity
         if new.status == ADMIT:
             new.pinned_uuids = list(verdict.gpu_uuids)
             new.card_name = verdict.card_name
@@ -156,7 +166,7 @@ def apply_verdict(
             new.cards = {}
         for uuid in new.pinned_uuids:
             card = new.cards.get(uuid)
-            if card is None or card.state == CHECKING:
+            if card is None or (card.state == CHECKING and (proved is None or uuid in proved)):
                 new.cards[uuid] = CardState(IDLE, '', now)
         new.status = IDLE
         return new
@@ -237,6 +247,46 @@ def record_start(state: BoxState, ok: bool, now: float, bench_after: int = cfg.F
     return new
 
 
+def identity_baseline(verdict: CheckVerdict) -> dict:
+    """The power limit per card and the NVML library md5 a passing full check saw: the heartbeat's "same card?"
+    compares against these. Empty when the verdict carries neither."""
+    out: dict = {}
+    power = verdict.check('power_limit')
+    if power is not None and power.passed:
+        out['power_limits'] = {
+            r['uuid']: r['limit_w'] for r in power.evidence.get('readings', []) if r.get('limit_w') is not None
+        }
+    nvml = verdict.check('nvml_digest')
+    if nvml is not None and nvml.passed and nvml.evidence.get('md5'):
+        out['nvml_md5'] = nvml.evidence['md5']
+    return out
+
+
+HEARTBEAT_FAILED = 'heartbeat_failed'
+HEALTH_FAILED = 'health_failed'
+# The heartbeat's three questions (``23`` §5), as they are named in a bench reason and in ``instances.json``.
+SAME_CARD = 'same_card'
+OUR_CONTAINER = 'our_container'
+CARD_OURS_ALONE = 'card_ours_alone'
+
+
+def add_event(state: BoxState, kind: str, now: float, keep: int = cfg.STANDING_EVENTS_KEEP, **detail) -> BoxState:
+    """Append a dated standing event (WS-E folds them). Pure."""
+    new = BoxState.from_dict(state.as_dict())
+    new.standing_events = [*new.standing_events, {'at': now, 'kind': kind, **detail}][-keep:]
+    return new
+
+
+def apply_heartbeat_failure(state: BoxState, failed: Sequence[str], now: float, **detail) -> BoxState:
+    """A failed in-lease heartbeat (``23`` §4a, §5): BENCHED on the fraud ladder, pay withheld from ``now``, and a
+    ``heartbeat_failed`` standing event. Pure. A box already benched keeps its bench and only gains the event."""
+    new = add_event(state, HEARTBEAT_FAILED, now, failed=list(failed), **detail)
+    new.withheld_from = now
+    if new.status == BENCHED:
+        return new
+    return _bench(new, now, [f'heartbeat:{name}' for name in failed])
+
+
 def provable_uuids(state: BoxState, reported: Sequence[str]) -> List[str]:
     """The reported cards the proof may run on this round: every card of a box at ADMIT; on an IDLE box, cards in IDLE
     or CHECKING plus any card that is not pinned (it fails the UUID pin anyway). A STARTING, LEASED or DRAINING card
@@ -246,15 +296,28 @@ def provable_uuids(state: BoxState, reported: Sequence[str]) -> List[str]:
     return [uuid for uuid in reported if uuid not in state.cards or state.cards[uuid].state in PROVABLE]
 
 
+OPERATOR_FIELDS = ('host', 'port', 'host_key', 'port_map')  # what `gitt controller admit` writes
+
+
 class StateStore:
-    """All boxes in one JSON file: ``{box_id: BoxState}``. Small enough to rewrite whole."""
+    """All boxes in one JSON file: ``{box_id: BoxState}``. Small enough to rewrite whole.
+
+    The controller holds this in memory for as long as it runs, while an operator may ``admit`` beside it. So a save
+    that finds the file changed since this store last read or wrote it merges first: boxes it does not know are
+    added, and the operator's fields of the ones it does are taken from disk. Card and bench state stay the
+    controller's."""
 
     def __init__(self, path):
         self.path = Path(path)
         self.boxes: Dict[str, BoxState] = {}
+        self._mtime_ns = 0
         if self.path.exists():
-            raw = json.loads(self.path.read_text() or '{}')
-            self.boxes = {k: BoxState.from_dict(v) for k, v in raw.items()}
+            self.boxes = self._read()
+
+    def _read(self) -> Dict[str, BoxState]:
+        self._mtime_ns = self.path.stat().st_mtime_ns
+        raw = json.loads(self.path.read_text() or '{}')
+        return {k: BoxState.from_dict(v) for k, v in raw.items()}
 
     def get(self, box_id: str) -> BoxState:
         return self.boxes.get(box_id) or BoxState(box_id)
@@ -263,10 +326,28 @@ class StateStore:
         self.boxes[state.box_id] = state
         self.save()
 
+    def merge_from_disk(self) -> List[str]:
+        """Pick up what someone else wrote since our last read or write. Returns the box ids added or changed."""
+        if not self.path.exists() or self.path.stat().st_mtime_ns == self._mtime_ns:
+            return []
+        changed = []
+        for box_id, theirs in self._read().items():
+            ours = self.boxes.get(box_id)
+            if ours is None:
+                self.boxes[box_id] = theirs
+                changed.append(box_id)
+            elif any(getattr(ours, f) != getattr(theirs, f) for f in OPERATOR_FIELDS):
+                for f in OPERATOR_FIELDS:
+                    setattr(ours, f, getattr(theirs, f))
+                changed.append(box_id)
+        return changed
+
     def save(self) -> None:
+        self.merge_from_disk()
         tmp = self.path.with_suffix(self.path.suffix + '.tmp')
         tmp.write_text(json.dumps({k: v.as_dict() for k, v in sorted(self.boxes.items())}, indent=1))
         tmp.replace(self.path)
+        self._mtime_ns = self.path.stat().st_mtime_ns
 
     def by_status(self, status: str) -> List[BoxState]:
         return [b for b in self.boxes.values() if b.status == status]

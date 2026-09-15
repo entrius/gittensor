@@ -1479,23 +1479,34 @@ def _open_registry(state: StateDir, release_pubkey: Path | None, allow_dev_keys:
 @click.option(
     '--sign-key', required=True, type=click.Path(exists=True, dir_okay=False, path_type=Path), help='Release key.'
 )
+@click.option(
+    '--qualified',
+    'qualified_path',
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help='JSON of our qualification measurements {at, box, driver, load_s, health_ok, canary_ok, vram_gb, '
+    'decode_tps_single?, prefill_tps?, notes}: signed beside the manifest, never inside it.',
+)
 @_registry_options
 @_state_options
-def bless_command(manifest_path, image, sign_key, release_pubkey, allow_dev_keys, state_dir, json_mode):
+def bless_command(manifest_path, image, sign_key, qualified_path, release_pubkey, allow_dev_keys, state_dir, json_mode):
     """Sign a manifest and its digest-pinned image together into the registry as <name>@<version>.
 
     The manifest must pass the schema and the consistency checks. The signature is checked against the key the
-    controller trusts before the entry is written. A different entry under the same name@version is refused: bump
-    the version.
+    controller trusts before the entry is written. A different entry under the same name@version (a changed image,
+    manifest or qualified block) is refused: bump the version.
     """
     state = StateDir(Path(state_dir).expanduser()).ensure()
     registry = _open_registry(state, release_pubkey, allow_dev_keys, json_mode)
     try:
         document = yaml.safe_load(manifest_path.read_text())
-        verified = make_entry(document if isinstance(document, dict) else {}, image)
+        qualified = json.loads(qualified_path.read_text()) if qualified_path else None
+        verified = make_entry(document if isinstance(document, dict) else {}, image, qualified=qualified)
     except (yaml.YAMLError, ManifestError) as e:
         problems = getattr(e, 'problems', [str(e)])
         _fail(f'{manifest_path}: ' + '; '.join(problems), json_mode, EXIT_BENCH, problems=problems)
+    except (ValueError, RegistryError) as e:  # the --qualified file: not JSON, or not a valid block
+        _fail(f'{qualified_path}: {e}', json_mode, EXIT_BENCH)
     entry = verified.entry
     path, _ = registry.paths(entry.entry_id)
     if path.exists():
@@ -1503,7 +1514,11 @@ def bless_command(manifest_path, image, sign_key, release_pubkey, allow_dev_keys
             current = registry.read(entry.entry_id).entry
         except RegistryError:
             current = None
-        if current is not None and (current.image, current.manifest) == (entry.image, entry.manifest):
+        if current is not None and (current.image, current.manifest, current.qualified) == (
+            entry.image,
+            entry.manifest,
+            entry.qualified,
+        ):
             _bless_output(json_mode, entry.entry_id, current.image, path, already=True)
             return
         _fail(f'{entry.entry_id} is already blessed with different content: bump version', json_mode, EXIT_BENCH)
@@ -1576,16 +1591,17 @@ def registry_show(release_pubkey, allow_dev_keys, state_dir, json_mode):
         }
         try:
             verified = registry.read(entry_id)
-            row.update(verified=True, image=verified.entry.image, blessed_at=verified.entry.blessed_at, error='')
+            e = verified.entry
+            row.update(verified=True, image=e.image, blessed_at=e.blessed_at, qualified=e.qualified, error='')
         except RegistryError as e:
-            row.update(verified=False, image='', blessed_at=None, error=str(e))
+            row.update(verified=False, image='', blessed_at=None, qualified=None, error=str(e))
         rows.append(row)
     if json_mode:
         emit_json({'success': all(r['verified'] for r in rows), 'entries': rows})
         return
     table = Table(title=escape(str(state.registry)), show_header=True)
-    for column in ('Entry', 'Verified', 'Enabled', 'Replicas', 'Running', 'Image / error'):
-        table.add_column(column, no_wrap=column != 'Image / error')
+    for column in ('Entry', 'Verified', 'Enabled', 'Replicas', 'Running', 'Qualified', 'Image / error'):
+        table.add_column(column, no_wrap=column not in ('Qualified', 'Image / error'))
     for r in rows:
         table.add_row(
             escape(r['entry']),
@@ -1593,9 +1609,30 @@ def registry_show(release_pubkey, allow_dev_keys, state_dir, json_mode):
             'yes' if r['enabled'] else 'no',
             str(r['replicas']),
             str(r['running']),
+            escape(_qualified_text(r['qualified'])),
             escape(r['image'] or r['error']),
         )
     console.print(table)
+
+
+def _qualified_text(q: dict | None) -> str:
+    """One line of our qualification measurements for `registry show`."""
+    if not q:
+        return '—'
+    parts = [
+        f'{str(q["box"])[:16]}, driver {q["driver"]}',
+        f'load {q["load_s"]} s',
+        f'health {"ok" if q["health_ok"] else "FAIL"}',
+        f'canary {"ok" if q["canary_ok"] else "FAIL"}',
+        f'{q["vram_gb"]} GB',
+    ]
+    if 'decode_tps_single' in q:
+        parts.append(f'{q["decode_tps_single"]} tok/s single')
+    if 'prefill_tps' in q:
+        parts.append(f'prefill {q["prefill_tps"]} tok/s')
+    if q.get('notes'):
+        parts.append(str(q['notes']))
+    return ' · '.join(parts)
 
 
 @controller_group.command('reconcile')

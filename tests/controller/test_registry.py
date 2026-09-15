@@ -25,6 +25,17 @@ from gittensor.controller.registry import (
 
 FIXTURE = Path(__file__).parent / 'fixtures' / 'manifest_27b.yaml'
 IMAGE = 'entrius/sparkinfer:19ef39ec2@sha256:' + 'ab' * 32
+QUALIFIED = {
+    'at': 1_757_900_000,
+    'box': 'local',
+    'driver': '580.65.06',
+    'load_s': 16.5,
+    'health_ok': True,
+    'canary_ok': True,
+    'vram_gb': 25.1,
+    'decode_tps_single': 99.0,
+    'notes': 'page cache warm',
+}
 
 
 def keypair(tmp_path: Path, name: str, comment: str = 'test-release') -> tuple[Path, str]:
@@ -96,6 +107,66 @@ def test_non_canonical_or_mismatched_entries_are_refused(tmp_path, release):
         Registry(tmp_path / 'nowhere', pub).read('qwen3.8-27b-nvfp4@1')
     with pytest.raises(RegistryError, match='not an entry id'):
         registry.read('../boxes')
+
+
+def test_the_qualified_block_is_signed_beside_the_manifest_and_entries_without_it_still_verify(tmp_path, release):
+    key, pub = release
+    registry = Registry(tmp_path / 'registry', pub)
+    verified = make_entry(yaml.safe_load(FIXTURE.read_text()), IMAGE, now=1_757_000_000, qualified=QUALIFIED)
+    registry.write(verified, sign_bytes(verified.entry.canonical_bytes(), key))
+    read = registry.read('qwen3.8-27b-nvfp4@1')
+    assert read.entry == verified.entry and read.entry.qualified == QUALIFIED
+    assert 'qualified' not in read.entry.manifest  # beside the author's manifest, never inside it
+
+    path = tmp_path / 'registry' / 'qwen3.8-27b-nvfp4@1.json'
+    path.write_bytes(path.read_bytes().replace(b'"load_s":16.5', b'"load_s":9.5'))  # signed with the rest
+    with pytest.raises(RegistryError, match='does not verify'):
+        registry.read('qwen3.8-27b-nvfp4@1')
+
+    # every entry blessed before the block existed: the same bytes as ever, and it still verifies
+    old_registry, old = blessed(tmp_path / 'old', release)
+    fields = {k: old.entry.as_dict()[k] for k in ('name', 'version', 'image', 'manifest', 'blessed_at')}
+    assert old.entry.canonical_bytes() == canonical_json(fields)
+    assert old_registry.read('qwen3.8-27b-nvfp4@1').entry.qualified is None
+
+
+def test_a_malformed_qualified_block_is_refused():
+    document = yaml.safe_load(FIXTURE.read_text())
+    without_driver = {k: v for k, v in QUALIFIED.items() if k != 'driver'}
+    for block, why in (
+        ({**QUALIFIED, 'load_s': '16.5'}, 'load_s must be a number'),
+        (without_driver, 'driver missing'),
+        ({**QUALIFIED, 'health_ok': 1}, 'health_ok must be a boolean'),
+        ({**QUALIFIED, 'vram_gb': float('nan')}, 'vram_gb must be a number'),
+        ({**QUALIFIED, 'tokens': 3}, r'unknown field\(s\): tokens'),
+        ({**QUALIFIED, 'box': ' '}, 'hotkey or "local"'),
+        ([], 'expected an object'),
+    ):
+        with pytest.raises(RegistryError, match=why):
+            make_entry(document, IMAGE, qualified=block)
+
+
+def test_bless_qualified_and_registry_show_print_it(tmp_path, release, monkeypatch):
+    from tests.controller.test_cli import invoke  # loads the CLI package first (circular import)
+
+    monkeypatch.setenv('COLUMNS', '300')
+    key, _ = release
+    manifest = tmp_path / 'manifest.yaml'
+    manifest.write_text(FIXTURE.read_text())
+    qualified = tmp_path / 'qualified.json'
+    qualified.write_text(json.dumps(QUALIFIED))
+    common = ['--release-pubkey', tmp_path / 'release.pub', '--state-dir', tmp_path / 'state']
+    blessed_ = invoke('bless', manifest, '--image', IMAGE, '--sign-key', key, '--qualified', qualified, *common)
+    assert blessed_.exit_code == 0, blessed_.output
+    (row,) = json.loads(invoke('registry', 'show', *common, '--json').stdout)['entries']
+    assert row['verified'] and row['qualified'] == QUALIFIED
+    shown = invoke('registry', 'show', *common).output
+    assert 'local, driver 580.65.06' in shown and 'load 16.5 s' in shown and '99.0 tok/s single' in shown
+
+    bad = tmp_path / 'bad.json'
+    bad.write_text('{"box": "local"}')
+    refused = invoke('bless', manifest, '--image', IMAGE, '--sign-key', key, '--qualified', bad, *common)
+    assert refused.exit_code == 1 and 'qualified: at missing' in refused.output
 
 
 def test_bless_refuses_a_placeholder_digest_or_an_unpinned_image():

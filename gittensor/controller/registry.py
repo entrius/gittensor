@@ -7,6 +7,9 @@ and registry", ``23`` §6, §8, ``26`` §3-4).
 A **registry entry** is ``{name, version, image, manifest, blessed_at}``: the digest-pinned image and its
 author-owned manifest, verbatim, signed together by the release key (an OpenSSH signature over the entry's canonical
 JSON bytes, namespace ``gt-registry``). Entries live in ``<state-dir>/registry/<name>@<version>.json`` + ``.sig``.
+An entry may also carry ``qualified``: **our** measurements from qualifying the image on our own card (``25``
+"Blessing"), signed with the rest but kept beside the author's manifest, never inside it. It is optional (an entry
+without it has exactly the bytes it always had) and nothing reads it yet.
 The controller **re-verifies the signature every time it reads an entry** and never runs one that does not verify:
 the files (later the database) are a request, not trusted input.
 
@@ -18,6 +21,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import re
 import subprocess
 import time
@@ -31,7 +35,20 @@ from gittensor.controller.manifest import Manifest, ManifestError, parse_manifes
 
 REGISTRY_NAMESPACE = 'gt-registry'  # `ssh-keygen -Y sign -n`; a channel signature does not verify as an entry
 ENTRY_FIELDS = ('blessed_at', 'image', 'manifest', 'name', 'version')
+QUALIFIED = 'qualified'  # the one optional entry field
 _ENTRY_ID = re.compile(r'^[a-z0-9][a-z0-9._-]{1,63}@[1-9][0-9]*$')
+# The qualification block: field -> type. `box` is the hotkey of the box it was measured on, or "local".
+QUALIFIED_REQUIRED = {
+    'at': 'number',
+    'box': 'string',
+    'driver': 'string',
+    'load_s': 'number',
+    'health_ok': 'boolean',
+    'canary_ok': 'boolean',
+    'vram_gb': 'number',
+    'notes': 'string',
+}
+QUALIFIED_OPTIONAL = {'decode_tps_single': 'number', 'prefill_tps': 'number'}
 
 
 class RegistryError(Exception):
@@ -43,6 +60,34 @@ def canonical_json(obj: Any) -> bytes:
     return json.dumps(obj, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()
 
 
+def _of_type(value: Any, kind: str) -> bool:
+    if kind == 'boolean':
+        return isinstance(value, bool)
+    if kind == 'number':
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    return isinstance(value, str)
+
+
+def parse_qualified(block: Any) -> dict[str, Any]:
+    """The ``qualified`` block, checked: every required field with its type, the optional ones typed when present, and
+    nothing else. Raises ``RegistryError`` naming every problem."""
+    if not isinstance(block, dict):
+        raise RegistryError(f'{QUALIFIED}: expected an object')
+    fields = {**QUALIFIED_REQUIRED, **QUALIFIED_OPTIONAL}
+    problems = [f'{key} missing' for key in QUALIFIED_REQUIRED if key not in block]
+    problems += [
+        f'{key} must be a {kind}' for key, kind in fields.items() if key in block and not _of_type(block[key], kind)
+    ]
+    unknown = sorted(set(block) - set(fields))
+    if unknown:
+        problems.append('unknown field(s): ' + ', '.join(map(str, unknown)))
+    if isinstance(block.get('box'), str) and not block['box'].strip():
+        problems.append('box must be a hotkey or "local"')
+    if problems:
+        raise RegistryError(f'{QUALIFIED}: ' + '; '.join(problems))
+    return copy.deepcopy(block)
+
+
 @dataclass(frozen=True)
 class RegistryEntry:
     name: str
@@ -50,19 +95,23 @@ class RegistryEntry:
     image: str
     manifest: dict[str, Any]
     blessed_at: int
+    qualified: dict[str, Any] | None = None  # our measurements, beside the manifest; None on entries blessed without
 
     @property
     def entry_id(self) -> str:
         return f'{self.name}@{self.version}'
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             'name': self.name,
             'version': self.version,
             'image': self.image,
             'manifest': self.manifest,
             'blessed_at': self.blessed_at,
         }
+        if self.qualified is not None:
+            out[QUALIFIED] = self.qualified
+        return out
 
     def canonical_bytes(self) -> bytes:
         return canonical_json(self.as_dict())
@@ -80,15 +129,22 @@ class VerifiedEntry:
         return self.entry.entry_id
 
 
-def make_entry(document: dict[str, Any], image: str | None = None, now: float | None = None) -> VerifiedEntry:
-    """An unsigned entry from a manifest document, with ``image`` (``repo@sha256:...``) pinned over the manifest's own.
-    The manifest must pass the schema and the consistency checks, placeholder digest refused."""
+def make_entry(
+    document: dict[str, Any],
+    image: str | None = None,
+    now: float | None = None,
+    qualified: dict[str, Any] | None = None,
+) -> VerifiedEntry:
+    """An unsigned entry from a manifest document, with ``image`` (``repo@sha256:...``) pinned over the manifest's own
+    and, optionally, our ``qualified`` measurements beside it. The manifest must pass the schema and the consistency
+    checks, placeholder digest refused; a malformed ``qualified`` block raises ``RegistryError``."""
     doc = copy.deepcopy(document)
     if image:
         doc['image'] = image
     manifest = parse_manifest(doc)
+    block = parse_qualified(qualified) if qualified is not None else None
     entry = RegistryEntry(
-        manifest.name, manifest.version, manifest.image, doc, int(time.time() if now is None else now)
+        manifest.name, manifest.version, manifest.image, doc, int(time.time() if now is None else now), block
     )
     return VerifiedEntry(entry, manifest)
 
@@ -166,16 +222,23 @@ class Registry:
             doc = json.loads(payload)
         except ValueError as e:
             raise RegistryError(f'{entry_id}: not JSON: {e}') from e
-        if not isinstance(doc, dict) or sorted(doc) != list(ENTRY_FIELDS):
-            raise RegistryError(f'{entry_id}: an entry has exactly the fields {", ".join(ENTRY_FIELDS)}')
+        if not isinstance(doc, dict) or sorted(set(doc) - {QUALIFIED}) != list(ENTRY_FIELDS):
+            raise RegistryError(
+                f'{entry_id}: an entry has exactly the fields {", ".join(ENTRY_FIELDS)}, and optionally {QUALIFIED}'
+            )
         if canonical_json(doc) != payload:
             raise RegistryError(f'{entry_id}: not in canonical form')
         try:
             entry = RegistryEntry(
-                str(doc['name']), int(doc['version']), str(doc['image']), dict(doc['manifest']), int(doc['blessed_at'])
+                str(doc['name']),
+                int(doc['version']),
+                str(doc['image']),
+                dict(doc['manifest']),
+                int(doc['blessed_at']),
+                parse_qualified(doc[QUALIFIED]) if QUALIFIED in doc else None,
             )
             manifest = parse_manifest(entry.manifest)
-        except (TypeError, ValueError, ManifestError) as e:
+        except (TypeError, ValueError, ManifestError, RegistryError) as e:
             raise RegistryError(f'{entry_id}: {e}') from e
         if entry.entry_id != entry_id or (manifest.name, manifest.version, manifest.image) != (
             entry.name,

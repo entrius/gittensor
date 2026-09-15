@@ -237,10 +237,6 @@ def record_start(state: BoxState, ok: bool, now: float, bench_after: int = cfg.F
     return new
 
 
-def cards_in(state: BoxState, *states: str) -> List[str]:
-    return [uuid for uuid in state.pinned_uuids if state.card(uuid).state in states]
-
-
 def provable_uuids(state: BoxState, reported: Sequence[str]) -> List[str]:
     """The reported cards the proof may run on this round: every card of a box at ADMIT; on an IDLE box, cards in IDLE
     or CHECKING plus any card that is not pinned (it fails the UUID pin anyway). A STARTING, LEASED or DRAINING card

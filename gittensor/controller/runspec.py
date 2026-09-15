@@ -20,7 +20,7 @@ import re
 import secrets
 import shlex
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -600,11 +600,3 @@ def run_entry_canary(
         'all pass' if not failed else '; '.join(sorted(set(failed)))
     )
     return CanaryOutcome(not failed, detail, index, results)
-
-
-def sequence_ms(marks: Sequence[tuple[str, float]]) -> dict[str, float]:
-    """``[(name, t), ...]`` monotonic marks -> each phase's duration in ms (name = the phase that ended at ``t``)."""
-    out = {}
-    for (_, a), (name, b) in zip(marks, marks[1:]):
-        out[name] = round((b - a) * 1000.0, 1)
-    return out

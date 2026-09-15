@@ -25,6 +25,7 @@ placement:
 run:
   env:
     MODELS_DIR: /models
+    SPARKINFER_DETERMINISTIC: '0'   # v5: no output audits any more; determinism off (TTFT +2-8% when on)
     MODEL_DIR_REPO: gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090
     MODEL_DIR_REVISION: 8e2c0cd25468ac5c1f85f621c2b8edb15ea1f03a
     MODEL_DIR_SHA256: model-00001-of-00002.safetensors=cdd37b0e61eccc8a3d7d08f9d1a4f52856a9d88e4e8b42089bd18a970e3a01ec,model-00002-of-00002.safetensors=713b84b8287e2193290214766c5384fa6475c5626a628e4021c2c9ca90aa61df

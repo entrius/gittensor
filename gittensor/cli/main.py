@@ -223,6 +223,11 @@ from gittensor.controller.cli import register_controller_commands  # noqa: E402
 
 register_controller_commands(cli)
 
+# Register the compute gateway (gitt gateway)
+from gittensor.gateway.cli import register_gateway_commands  # noqa: E402
+
+register_gateway_commands(cli)
+
 
 def main():
     """Main entry point for the CLI"""

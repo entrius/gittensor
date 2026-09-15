@@ -15,14 +15,21 @@ One pass, one SSH visit per box:
   mid-start (card STARTING) or on a card we did not lease is undeployed.
 * **Too many** (or a disabled / unverifiable entry, or a benched box): DRAINING, undeploy with the manifest's drain,
   CHECKING. The next proof round returns the card to IDLE after a pass.
+* **Too many** releases the lowest standing first, then the oldest last full check.
 * **Too few**: pick an IDLE card that satisfies ``placement`` (GPU type from the pinned card name, ``min_vram_gb``
-  against our spec table, one card per instance), freshest last check first; STARTING, pre-stage, deploy, health within
-  ``placement.max_load_s``, the entry canary, then LEASED at the first passing probe after it. A failed start undeploys
-  and goes to CHECKING with no bench; ``FAILED_STARTS_BENCH_AFTER`` in a row on one box benches it.
+  against our spec table, one card per instance), best standing first, then freshest last check; STARTING, pre-stage,
+  deploy, health within ``placement.max_load_s``, the entry canary, then LEASED at the first passing probe after it,
+  with its lease cap drawn from its box's standing. A failed start undeploys and goes to CHECKING with no bench (a
+  ``start_failed`` standing event); ``FAILED_STARTS_BENCH_AFTER`` in a row on one box benches it.
+* **Rotation** (``23`` §8, WS-E): a lease past its cap gets a replacement started on the best free card, and is drained
+  on a later pass once that replacement is LEASED and healthy: replacement first, never below the replica count, at
+  most ``ROTATION_MAX_FRACTION`` of leased cards cycling at once, oldest check first; no free card, no rotation. Cycle
+  time is unpaid by construction: neither card is LEASED-and-paid while it moves. A normal drain of a LEASED card
+  records a ``clean_lease`` standing event with its leased seconds, a late one ``drain_failed``.
 
 Every step is saved before the next begins and every docker operation is idempotent, so a pass killed anywhere is
 finished by the next one. Not here: the gateway (it reads ``instances.json``), the in-lease heartbeat and health watch
-(WS-D), standing and rotation (WS-E), pay (WS-F).
+(WS-D, which keeps each instance's pay span), pay (WS-F, ``pay/ledger.py``).
 """
 
 from __future__ import annotations
@@ -43,6 +50,8 @@ from gittensor.controller.checks.state import (
     BENCHED,
     BUSY,
     CHECKING,
+    CLEAN_LEASE,
+    DRAIN_FAILED,
     DRAINING,
     IDLE,
     LEASED,
@@ -51,6 +60,7 @@ from gittensor.controller.checks.state import (
     BoxState,
     CardTransitionError,
     StateStore,
+    add_event,
     apply_heartbeat_failure,
     record_start,
     transition_card,
@@ -78,6 +88,7 @@ from gittensor.controller.runspec import (
 )
 from gittensor.controller.ssh import SshTransportError
 from gittensor.controller.ssh.certs import CertificateError
+from gittensor.controller.standing import lease_cap_s, rank, standing
 
 _TRANSPORT = (SshTransportError, CertificateError)
 _SPEC_VRAM_GB = {'RTX5090': cfg.RTX_5090.vram_total_mib_min / 1024}  # our spec table, never the box's self-report
@@ -116,6 +127,19 @@ class InstanceRecord:
     health_ok: bool | None = None
     health_failures: int = 0  # consecutive; manifest.health.failure_threshold replaces the replica
     health_detail: str = ''
+    # Rotation (WS-E). The cap is drawn when the lease starts (standing x jitter). A lease past it gets a replacement
+    # started first (`replaces` on the new record, `rotating` = the replacement's box on the old one) and is drained
+    # once that replacement is LEASED.
+    lease_cap_s: float | None = None
+    replaces: str = ''
+    rotating: str = ''
+    stopped_at: float | None = None  # when the controller marked it draining: pay never runs past it
+    # Pay (WS-F): the current span in which the four pay conditions held at every check, [pay_from, pay_through].
+    # The watch extends pay_through as checks pass, closes the span (pay_open False) on any failure or miss, and opens
+    # a new one at the next fully passing check. The ledger pays each span once.
+    pay_from: float | None = None
+    pay_through: float | None = None
+    pay_open: bool = False
 
     @classmethod
     def from_dict(cls, d: dict) -> InstanceRecord:
@@ -194,6 +218,7 @@ class ReconcileReport:
     timings_ms: dict[str, float] = field(default_factory=dict)
     launched: list[str] = field(default_factory=list)  # background mode: boxes whose starts / drains went to a thread
     in_flight: list[str] = field(default_factory=list)  # background mode: boxes still busy from an earlier pass
+    rotations: list[str] = field(default_factory=list)  # leases past their cap that got a replacement this pass
 
     @property
     def ok(self) -> bool:
@@ -454,7 +479,8 @@ class Reconciler:
                 )
             )
             for other in self.instances.on_box(box_id):
-                other.draining, other.healthy, other.heartbeat_ok = True, False, False
+                other.draining, other.healthy, other.heartbeat_ok, other.pay_open = True, False, False, False
+                other.stopped_at = other.stopped_at or self.wall()
                 other.drain_type, other.drain_max_s = 'kill', 0
                 self.instances.put(other)
         action.states.append(BENCHED)
@@ -482,55 +508,111 @@ class Reconciler:
         def add(box_id: str, op: str, arg: object) -> None:
             ops.setdefault(box_id, []).append((op, arg))
 
+        now = self.wall()
+        boxes = list(self.boxes.boxes.values())
+        levels = {b.box_id: standing(b.standing_events, now) for b in boxes}
+
+        def release_order(record: InstanceRecord) -> tuple:
+            """Who goes first when leases are released: lowest standing, then the oldest last full check."""
+            box = self.boxes.boxes.get(record.box)
+            return (rank(levels.get(record.box, '')), (box.last_check_at if box else None) or 0.0, record.id)
+
+        # A rotation whose replacement is gone (its start failed) is called off; the lease is rotated again later.
+        records = sorted(list(self.instances.instances.values()), key=lambda r: r.id)
+        replacements = {r.replaces: r for r in records if r.replaces}
+        for record in records:
+            if record.rotating and record.id not in replacements and record.rotating not in busy:
+                record.rotating = ''
+                self._put_record(record)
+
         # Drains: leftovers, benched boxes, disabled or unverifiable entries, then any excess over the replica count.
-        # A busy box's starts count as running but nothing on it is touched until its thread is done.
+        # A busy box's starts count as running but nothing on it is touched until its thread is done. A lease being
+        # rotated does not count: its replacement does.
         by_entry: dict[str, list[InstanceRecord]] = {}
-        for record in sorted(list(self.instances.instances.values()), key=lambda r: r.id):
+        rotating: list[InstanceRecord] = []
+        for record in records:
             box = self.boxes.boxes.get(record.box)
             if record.box in report.unreachable:
                 continue  # never judged on a failed visit; next pass
             if record.box in busy:
-                if not record.draining:
+                if not record.draining and not record.rotating:
                     by_entry.setdefault(record.entry, []).append(record)
                 continue
             if record.draining or box is None or box.status == BENCHED or report.desired.get(record.entry, 0) <= 0:
                 add(record.box, 'drain', record)
                 continue
+            if record.rotating:
+                rotating.append(record)
+                continue
             by_entry.setdefault(record.entry, []).append(record)
-        for entry_id, records in sorted(by_entry.items()):
-            excess = len(records) - report.desired.get(entry_id, 0)
+        for entry_id, entry_records in sorted(by_entry.items()):
+            excess = len(entry_records) - report.desired.get(entry_id, 0)
             if excess > 0:
-                movable = [r for r in records if r.box not in busy]
-                victims = sorted(movable, key=lambda r: (r.healthy, -(r.started_at or 0.0)))[
-                    :excess
-                ]  # unhealthy, newest
-                for record in victims:
+                movable = [r for r in entry_records if r.box not in busy]
+                for record in sorted(movable, key=lambda r: (r.healthy, *release_order(r)))[:excess]:
                     add(record.box, 'drain', record)
+        # A rotated lease is drained only once its replacement is LEASED and healthy: never below the replica count.
+        for record in rotating:
+            new = replacements.get(record.id)
+            if new is not None and self._leased(new):
+                add(record.box, 'drain', record)
 
-        # Starts: IDLE cards on reachable IDLE boxes, freshest last check first, one instance per card.
-        used = {(r.box, r.uuid) for r in list(self.instances.instances.values())}
+        # Starts: IDLE cards on reachable IDLE boxes, best standing first, then freshest last check, one per card.
+        used = {(r.box, r.uuid) for r in records}
         candidates = [
             (box, uuid)
-            for box in sorted(list(self.boxes.boxes.values()), key=lambda b: (-(b.last_check_at or 0.0), b.box_id))
+            for box in sorted(boxes, key=lambda b: (-rank(levels[b.box_id]), -(b.last_check_at or 0.0), b.box_id))
             if box.status == IDLE and box.host and box.box_id not in report.unreachable and box.box_id not in busy
             for uuid in box.pinned_uuids
             if box.card(uuid).state == IDLE and (box.box_id, uuid) not in used
         ]
+
+        def take(verified: VerifiedEntry) -> tuple[BoxState, str] | None:
+            for box, uuid in candidates:
+                if card_fits(box, verified.manifest)[0]:
+                    candidates.remove((box, uuid))
+                    return box, uuid
+            return None
+
         for entry_id, verified in sorted(entries.items()):
-            running = len(by_entry.get(entry_id, []))
-            need = report.desired[entry_id] - running
-            for box, uuid in list(candidates):
-                if need <= 0:
-                    break
-                fits, _ = card_fits(box, verified.manifest)
-                if not fits:
-                    continue
-                candidates.remove((box, uuid))
-                add(box.box_id, 'start', (entry_id, uuid))
+            need = report.desired[entry_id] - len(by_entry.get(entry_id, []))
+            while need > 0 and (pick := take(verified)) is not None:
+                add(pick[0].box_id, 'start', (entry_id, pick[1], ''))
                 need -= 1
             if need > 0:
                 report.errors.append(f'{entry_id}: {need} replica(s) short: no IDLE card fits its placement')
+
+        # Rotation (23 §8): a lease past its cap gets a replacement started on the best free card; it is drained on a
+        # later pass once the replacement is LEASED. Oldest full check first, at most ROTATION_MAX_FRACTION of leased
+        # cards at once (never fewer than one), and no free card means no rotation.
+        leased = [r for entry_records in by_entry.values() for r in entry_records if self._leased(r)]
+        for record in leased:
+            if record.lease_cap_s is None:  # adopted, or started by a controller from before rotation
+                record.lease_cap_s = lease_cap_s(levels.get(record.box, ''), self.rng)
+                self._put_record(record)
+        budget = max(1, int(cfg.ROTATION_MAX_FRACTION * (len(leased) + len(rotating)))) - len(rotating)
+        expired = [r for r in leased if r.leased_at is not None and now - r.leased_at >= (r.lease_cap_s or 0.0)]
+        for record in sorted(expired, key=release_order):
+            if budget <= 0:
+                break
+            verified = entries.get(record.entry)
+            pick = take(verified) if verified is not None else None
+            if pick is None:
+                continue
+            add(pick[0].box_id, 'start', (record.entry, pick[1], record.id))
+            record.rotating = pick[0].box_id
+            self._put_record(record)
+            report.rotations.append(record.id)
+            budget -= 1
         return ops
+
+    def _leased(self, record: InstanceRecord) -> bool:
+        """LEASED on its card, healthy, and not on its way out."""
+        box = self.boxes.boxes.get(record.box)
+        if box is None or box.status != IDLE or record.draining or not record.healthy:
+            return False
+        card = box.card(record.uuid)
+        return card.state == LEASED and card.instance_id == record.id
 
     def _execute(
         self,
@@ -549,8 +631,8 @@ class Reconciler:
                 if op == 'drain':
                     action = self._drain(box_id, runner, arg)
                 else:
-                    entry_id, uuid = arg
-                    action = self._start(box_id, runner, entries[entry_id], uuid)
+                    entry_id, uuid, replaces = arg
+                    action = self._start(box_id, runner, entries[entry_id], uuid, replaces)
                 with self._lock:
                     report.actions.append(action)
                 if action.detail.startswith('transport:'):
@@ -563,7 +645,8 @@ class Reconciler:
         box = self._box(box_id)
         action.states.append(box.card(record.uuid).state if box.status == IDLE else box.status)
         marks = [('begin', self.clock())]
-        record.draining, record.healthy = True, False
+        record.draining, record.healthy, record.pay_open = True, False, False
+        record.stopped_at = record.stopped_at or self.wall()  # the controller's stop: pay ends here at the latest
         self._put_record(record)  # the gateway stops routing before anything is stopped
         if box.status == IDLE and box.card(record.uuid).state in (STARTING, LEASED):
             self._move(box_id, record.uuid, DRAINING, action)
@@ -584,13 +667,29 @@ class Reconciler:
         action.detail = (f'drained in {result.elapsed_s:.1f} s' if result.found else 'no container left') + (
             '' if result.in_time else f' — past drain.max_s {record.drain_max_s} s: failed drain'
         )
+        if action.states[0] == LEASED and record.leased_at is not None:
+            self._lease_event(box_id, record, result.in_time)
         action.timings_ms = _durations(marks)
         return action
 
-    def _start(self, box_id: str, runner: HostRunner, verified: VerifiedEntry, uuid: str) -> Action:
+    def _lease_event(self, box_id: str, record: InstanceRecord, in_time: bool) -> None:
+        """A drained lease's standing event: ``clean_lease`` with its leased seconds, or ``drain_failed``. A box benched
+        meanwhile gets neither (its bench wrote its own)."""
+        with self._lock:
+            box = self._box(box_id)
+            if box.status != IDLE:
+                return
+            detail: dict = {'instance': record.id, 'uuid': record.uuid}
+            if in_time:
+                detail['leased_s'] = round(max(0.0, (record.stopped_at or self.wall()) - (record.leased_at or 0.0)), 1)
+            self.boxes.put(add_event(box, CLEAN_LEASE if in_time else DRAIN_FAILED, self.wall(), **detail))
+
+    def _start(self, box_id: str, runner: HostRunner, verified: VerifiedEntry, uuid: str, replaces: str = '') -> Action:
         manifest = verified.manifest
         instance_id = new_instance_id()
         action = Action('start', box_id, instance_id, verified.entry_id, uuid, False, states=[IDLE])
+        if replaces:
+            action.detail = f'replacing {replaces}; '
         box = self._box(box_id)
         marks = [('begin', self.clock())]
         self._move(box_id, uuid, STARTING, action, instance_id)
@@ -603,6 +702,7 @@ class Reconciler:
             port=box.public_port(manifest.front_door.port) if manifest.front_door.port else None,
             drain_type=manifest.drain.type,
             drain_max_s=manifest.drain.max_s,
+            replaces=replaces,
         )
         self._put_record(record)
         client = self.http_for(runner, box)
@@ -642,7 +742,7 @@ class Reconciler:
             action.timings_ms = _durations(marks)
             return action
         except PlacementError as e:
-            action.detail = f'failed start: {e}'[:700]
+            action.detail += f'failed start: {e}'[:700]
             self._fail_start(box_id, runner, record, action, manifest)
             action.timings_ms = {
                 **_durations(marks + [('undeploy', self.clock())]),
@@ -651,11 +751,15 @@ class Reconciler:
             return action
         record.healthy, record.leased_at = True, self.wall()
         record.health_ok, record.last_health_at, record.health_detail = True, record.leased_at, first.detail
+        # Pay starts at the first passing probe after the canary; the heartbeat and later probes confirm it onward.
+        record.pay_from = record.pay_through = record.leased_at
+        record.pay_open = True
+        record.lease_cap_s = lease_cap_s(standing(self._box(box_id).standing_events, record.leased_at), self.rng)
         self._put_record(record)
         self._move(box_id, uuid, LEASED, action)
         self._put_box(record_start(self._box(box_id), True, self.wall()))
         action.ok = True
-        action.detail = (
+        action.detail += (
             f'{manifest.image.split("@")[0]} on {uuid[:12]}…, container {record.container_id[:12]}, '
             f'{record.host}:{record.port}; image {"pulled" if staged.pulled else "pre-staged"}'
             + (f'; {len(staged.artifacts)} artifact(s) verified' if staged.artifacts else '')
@@ -677,7 +781,9 @@ class Reconciler:
             return
         self._drop_record(record.id)
         self._move(box_id, record.uuid, CHECKING, action)
-        after = record_start(self._box(box_id), False, self.wall())
+        after = record_start(
+            self._box(box_id), False, self.wall(), instance=record.id, uuid=record.uuid, reason=action.detail[:200]
+        )
         if after.status == BENCHED:
             action.detail += f'; {cfg.FAILED_STARTS_BENCH_AFTER} failed starts in a row: box BENCHED'
             action.states.append(BENCHED)

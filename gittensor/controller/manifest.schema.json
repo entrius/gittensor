@@ -1,0 +1,279 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/entrius/gittensor-compute-template/manifest.schema.json",
+  "title": "Gittensor compute pool image manifest (v0)",
+  "description": "What every blessed image provides to the controller. See MANIFEST.md. Deployment settings (enabled, replicas) and scaling fields are deliberately absent.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "version", "runtime", "image", "placement", "health", "front_door", "drain"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{1,63}$",
+      "description": "Registry key together with version. Lowercase, no spaces."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Bump on every change to the image or the manifest."
+    },
+    "description": { "type": "string", "maxLength": 500 },
+    "runtime": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$",
+      "description": "A label for grouping only: sparkinfer, vllm, sglang, custom, ..."
+    },
+    "image": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?@sha256:[a-f0-9]{64}$",
+      "description": "Pinned by digest. A tag may precede the digest for readability; the digest is the pin."
+    },
+    "placement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gpu_types", "cards_per_instance", "min_vram_gb", "max_load_s"],
+      "properties": {
+        "gpu_types": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "include": { "type": "array", "items": { "$ref": "#/$defs/gpu_type" }, "uniqueItems": true },
+            "exclude": { "type": "array", "items": { "$ref": "#/$defs/gpu_type" }, "uniqueItems": true }
+          },
+          "anyOf": [{ "required": ["include"] }, { "required": ["exclude"] }]
+        },
+        "cards_per_instance": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "min_vram_gb": { "type": "number", "exclusiveMinimum": 0 },
+        "max_load_s": { "type": "integer", "minimum": 1, "description": "Deadline from start to a passing health probe." }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "env": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[A-Z_][A-Z0-9_]*$" },
+          "additionalProperties": { "type": ["string", "integer", "number", "boolean"] }
+        },
+        "volumes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "mount"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+              "mount": { "$ref": "#/$defs/abs_path" },
+              "read_only": { "type": "boolean", "default": false }
+            }
+          }
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "egress": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9.-]+(:[0-9]{1,5})?$" },
+          "uniqueItems": true,
+          "default": [],
+          "description": "Host allowlist for run-time outbound traffic. Empty (the default) means none."
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "source", "revision", "sha256"],
+        "properties": {
+          "path": { "$ref": "#/$defs/abs_path", "description": "Where the controller stages it inside the container." },
+          "source": { "type": "string", "minLength": 1, "description": "e.g. hf://org/repo or https://..." },
+          "revision": { "type": "string", "minLength": 1, "description": "The immutable pin at the source (a commit sha)." },
+          "sha256": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    },
+    "health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["interval_s", "failure_threshold"],
+      "properties": {
+        "http": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "port"],
+          "properties": {
+            "path": { "$ref": "#/$defs/abs_path" },
+            "port": { "$ref": "#/$defs/port" },
+            "expect_status": { "type": "integer", "minimum": 100, "maximum": 599, "default": 200 }
+          }
+        },
+        "command": { "$ref": "#/$defs/argv" },
+        "interval_s": { "type": "integer", "minimum": 1 },
+        "failure_threshold": { "type": "integer", "minimum": 1 }
+      },
+      "oneOf": [{ "required": ["http"] }, { "required": ["command"] }]
+    },
+    "entry_canary": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["type", "pass"],
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "required": ["http", "body"],
+            "properties": {
+              "type": { "const": "http" },
+              "http": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["method", "path", "port"],
+                "properties": {
+                  "method": { "$ref": "#/$defs/method" },
+                  "path": { "$ref": "#/$defs/abs_path" },
+                  "port": { "$ref": "#/$defs/port" }
+                }
+              },
+              "body": { "type": ["object", "array", "string", "null"] },
+              "pass": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["status"],
+                "properties": {
+                  "status": { "type": "integer", "minimum": 100, "maximum": 599 },
+                  "contains": { "type": "string", "minLength": 1 },
+                  "json_field": { "type": "string", "minLength": 1, "description": "Dotted path into the JSON body." },
+                  "equals": {},
+                  "regex": { "type": "string", "minLength": 1 }
+                },
+                "dependentRequired": { "json_field": ["equals"], "equals": ["json_field"] }
+              }
+            }
+          },
+          {
+            "additionalProperties": false,
+            "required": ["command"],
+            "properties": {
+              "type": { "const": "command" },
+              "command": { "$ref": "#/$defs/argv" },
+              "pass": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "exit_code": { "type": "integer", "default": 0 },
+                  "contains": { "type": "string", "minLength": 1 },
+                  "regex": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          },
+          {
+            "additionalProperties": false,
+            "required": ["input"],
+            "properties": {
+              "type": { "const": "fixture" },
+              "input": { "$ref": "#/$defs/abs_path" },
+              "pass": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["output"],
+                "properties": {
+                  "output": { "$ref": "#/$defs/abs_path" },
+                  "sha256": { "$ref": "#/$defs/sha256" },
+                  "schema": { "type": "string", "minLength": 1 }
+                },
+                "anyOf": [{ "required": ["sha256"] }, { "required": ["schema"] }]
+              }
+            }
+          }
+        ]
+      }
+    },
+    "profile": {
+      "type": "object",
+      "description": "Healthy numbers recorded at qualification. Health and standing only, never pay. Any key; each value is a number or a [min, max] band.",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "number" },
+          {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        ]
+      }
+    },
+    "front_door": {
+      "type": "object",
+      "required": ["type"],
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "required": ["port", "concurrency", "routes"],
+          "properties": {
+            "type": { "enum": ["gateway-openai", "http"] },
+            "port": { "$ref": "#/$defs/port" },
+            "concurrency": { "type": "integer", "minimum": 1 },
+            "routes": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "method"],
+                "properties": {
+                  "path": { "$ref": "#/$defs/abs_path" },
+                  "method": { "$ref": "#/$defs/method" },
+                  "stream": { "type": "boolean", "default": false },
+                  "request_schema": { "type": "object" },
+                  "response_schema": { "type": "object" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "batch" }
+          }
+        }
+      ]
+    },
+    "drain": {
+      "type": "object",
+      "required": ["type"],
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "required": ["max_s"],
+          "properties": {
+            "type": { "enum": ["requests", "checkpoint"] },
+            "max_s": { "type": "integer", "minimum": 1 }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "properties": { "type": { "const": "kill" } }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "gpu_type": { "type": "string", "pattern": "^[A-Z0-9][A-Za-z0-9_-]*$", "examples": ["RTX5090", "H100"] },
+    "abs_path": { "type": "string", "pattern": "^/[^\\s]*$" },
+    "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "method": { "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"] },
+    "argv": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+  }
+}

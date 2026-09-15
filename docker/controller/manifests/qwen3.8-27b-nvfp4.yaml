@@ -12,7 +12,7 @@
 # The volume stays read-only: `read_only: false` would still fail on the tokenizer marker, and it would let the
 # workload rewrite the weights it is verified against.
 name: qwen3.8-27b-nvfp4
-version: 2
+version: 3
 description: Qwen3.8-27B (NVFP4) chat on sparkinfer 19ef39ec2, one RTX 5090 per instance
 runtime: sparkinfer
 image: entrius/sparkinfer:19ef39ec2@sha256:d35719b03f320f7c30abcb7f6b495e64fb7edbe4187c8744775277dc661a23bb
@@ -20,7 +20,8 @@ placement:
   gpu_types: {include: [RTX5090]}
   cards_per_instance: 1
   min_vram_gb: 30            # 25 GiB resident at CTX 131072 (9/8)
-  max_load_s: 900            # first cut; set to measured cold load × 1.5 after the first real start
+  max_load_s: 25             # measured × 1.5: 16.3 / 16.5 s docker run → healthy on a rented 5090 (9/15), weights in page
+                             # cache because the pre-start hash had just read them; a start that skips that hash reads cold
 run:
   env:
     MODELS_DIR: /models
@@ -78,17 +79,21 @@ entry_canary:                # one picked at random each start; sent at front_do
             name: get_weather
             parameters: {type: object, properties: {city: {type: string}}, required: [city]}
     pass: {status: 200, regex: '(?=[\s\S]*"finish_reason":\s*"tool_calls")(?=[\s\S]*"name":\s*"get_weather")(?=[\s\S]*\\"city\\":\s*\\"Paris)'}
-profile:                     # health and standing only, never pay; 2026-09-08 measurement
-  decode_tps_single: 99
-  decode_tps_aggregate: 338
+profile:                     # health and standing only, never pay
+  decode_tps_single: 93      # 9/15 client side, 256 tokens after 30 / 8k / 18k / 32k-token prompts: 92.6–97.9 tok/s
+  decode_tps_aggregate: 338  # 9/8, 16 concurrent short prompts; 9/15: 275 at 4 short, 67 at 4 × 8k (served in turn)
+  prefill_tps: [6700, 7500]  # 9/15 server ttft_ms: 7.5k tok/s at 8k, 7.0k at 18k, 6.75k at 32k tokens
   vram_gb: 25
 front_door:
   type: gateway-openai
   port: 8080
-  concurrency: 4             # first cut; see the qualification run
+  concurrency: 1             # 9/15: 4 concurrent 8k-token prompts are served one at a time (server TTFT 1.1 / 4.4 / 8.3 /
+                             # 12.2 s; the same with SPARKINFER_DETERMINISTIC=0), so a second slot only queues inside the
+                             # runtime, which never 429s (max_queue_depth unlimited). Short prompts do batch (275 tok/s at 4).
   routes:
     - {path: /v1/chat/completions, method: POST, stream: true}
     - {path: /v1/models, method: GET}
 drain:
   type: requests
-  max_s: 60                  # worst case 4096 tokens at ~90 tok/s ≈ 45 s
+  max_s: 60                  # worst case 4096 tokens at ~90 tok/s ≈ 45 s; but sparkinfer 19ef39ec2 forces exit 30 s after
+                             # SIGTERM, and an idle instance takes all 30 s (it reports requests still draining)

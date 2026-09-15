@@ -483,6 +483,12 @@ def test_prestage_pulls_with_a_token_for_that_pull_only_and_verifies_artifacts()
     assert box.runner.stdins[pull] == b'dckr_pat_x' and report.pulled
     fetch = box.commands('docker run --rm -v')[0]
     assert b'name: gt-placeholder' in box.manifest_written  # the blessed manifest lands on the box first
+    write = next(c for c in box.runner.calls if ' && cat > ' in c)
+    # on the HOST, where docker resolves `-v` sources, not in the agent container's own filesystem (real run, 9/15)
+    assert (
+        f'cat > /proc/1/root{spec.manifest_host_path}.tmp' in write
+        and f'rm -rf /proc/1/root{spec.manifest_host_path}' in write
+    )
     assert (
         '/var/lib/gt-models/gt-placeholder/models:/stage' in fetch and 'hf download org/tiny --revision abc123' in fetch
     )

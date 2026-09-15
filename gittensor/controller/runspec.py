@@ -84,11 +84,15 @@ def manifest_host_path(manifest: Manifest, entry_id: str, root: str = cfg.MODELS
     return f'{root.rstrip("/")}/{manifest.name}/manifest.{entry_id}.yaml'
 
 
-def manifest_write_command(path: str) -> str:
-    """Write the blessed manifest (given on stdin) onto the box, atomically."""
-    d = shlex.quote(str(PurePosixPath(path).parent))
-    q = shlex.quote(path)
-    return f'mkdir -p {d} && cat > {q}.tmp && mv -f {q}.tmp {q}'
+def manifest_write_command(path: str, host_root: str = cfg.HOST_ROOT) -> str:
+    """Write the blessed manifest (given on stdin) onto the HOST, atomically, through PID 1's root. The agent
+    container's own filesystem is not where the host docker daemon resolves ``-v`` sources: on the first real WS-D run
+    (9/15) the file landed inside gt-agent, docker created an empty directory at the host path for the bind mount, and
+    ``docker run`` failed mounting it over /manifest.yaml. A directory such a run left at the path is removed first."""
+    target = f'{host_root}{path}'
+    d = shlex.quote(str(PurePosixPath(target).parent))
+    q = shlex.quote(target)
+    return f'mkdir -p {d} && {{ [ ! -d {q} ] || rm -rf {q}; }} && cat > {q}.tmp && mv -f {q}.tmp {q}'
 
 
 def artifact_host_path(manifest: Manifest, artifact: Artifact, root: str = cfg.MODELS_ROOT) -> tuple[str, str]:

@@ -6,7 +6,8 @@
 Everything here drives library code that already exists — the SSH certificate transport (``controller.ssh``), the
 full check and box state (``controller.checks``), the GPU-proof slot (``controller.proof``):
 
-    gitt controller admit <hotkey> --host <ip> --port <port>   pin the box's host key, create it at ADMIT
+    gitt controller discover [--network --netuid]              admit / move / remove boxes from the metagraph (read-only)
+    gitt controller admit <hotkey> --host <ip> --port <port>   pin the box's host key, create it at ADMIT (dev boxes)
     gitt controller allowlist add <hotkey> | show              curate the NVML allowlist from a known-good box
     gitt controller check <hotkey>                             one full check: verdict, new state, exit 0 / 1 / 2
     gitt controller round [--loop]                             the 20-min two-phase probe over every idle card
@@ -61,8 +62,9 @@ from rich.table import Table
 
 from gittensor.agent.config import AGENT_SSH_PORT, WORKLOAD_PORT_RANGE
 from gittensor.cli.help import StyledGroup
-from gittensor.cli.helpers import console, err_console
+from gittensor.cli.helpers import NETWORK_CHOICE, console, err_console
 from gittensor.cli.json_output import emit_error_json, emit_json
+from gittensor.cli.miner_commands.helpers import NETUID_DEFAULT, _resolve_endpoint
 from gittensor.controller.checks import checks as ck
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.full_check import (
@@ -101,6 +103,7 @@ from gittensor.controller.checks.state import (
 )
 from gittensor.controller.checks.verdict import CheckResult, CheckVerdict
 from gittensor.controller.daemon import STATUS_FILE, Controller, Intervals
+from gittensor.controller.discovery import ChainReader, DiscoverReport, Discovery
 from gittensor.controller.heartbeat import WatchReport
 from gittensor.controller.locks import BoxLocks
 from gittensor.controller.manifest import ManifestError
@@ -578,6 +581,15 @@ def run_round(
             r.busy = f'{current.status if current else "removed"} meanwhile: not probed'
             return
         r.box = current  # no start can move its cards while we hold the lock
+        if current.endpoint_changed:
+            # Discovery saw the chain publish another address with another (or no) host key: no visit, no verdict, an
+            # unreachable round, until an operator re-pins it or the pinned key answers there.
+            moved = current.endpoint_changed
+            r.transport_error = (
+                f'endpoint_changed: chain publishes {moved.get("host")}:{moved.get("port")}, {moved.get("why", "")} '
+                '(`gitt controller admit --force-rekey` after verifying)'
+            )[:500]
+            return
         r.runner = TimedRunner(_make_runner(setup.state, r.box, setup.ca_key, 'round'), clock)
         try:
             r.runner.run(PREFLIGHT_COMMAND, timeout=config.ssh_timeout_s)
@@ -790,6 +802,24 @@ def _state_options(f: Callable) -> Callable:
         show_default=True,
         help='boxes.json, known_hosts, nvml_allowlist.json (and gt_ca by default).',
     )(f)
+
+
+def _chain_options(f: Callable) -> Callable:
+    """Which metagraph discovery reads (read-only: the controller holds no chain key)."""
+    options = [
+        click.option(
+            '--netuid', type=int, default=NETUID_DEFAULT, show_default=True, help='Subnet whose metagraph is read.'
+        ),
+        click.option('--network', type=NETWORK_CHOICE, default=None, help='Network name (local, test, finney).'),
+        click.option('--rpc-url', default=None, help='Subtensor RPC endpoint URL (overrides --network).'),
+    ]
+    for option in reversed(options):
+        f = option(f)
+    return f
+
+
+def _chain_reader(endpoint: str, netuid: int) -> ChainReader:
+    return ChainReader(endpoint, netuid)
 
 
 def _ca_key_option(f: Callable) -> Callable:
@@ -1869,6 +1899,7 @@ class _DaemonPrinter:
         self.json_mode = json_mode
         self._lock = threading.Lock()
         self._last_errors: list[str] = []
+        self._last_ignored: list[str] = []
 
     def _emit(self, event: str, payload: dict, line: str) -> None:
         with self._lock:
@@ -1944,6 +1975,16 @@ class _DaemonPrinter:
         self._actions('watch', report.actions)
         self._problems('watch', [], report.unreachable)
 
+    def discover(self, report: DiscoverReport) -> None:
+        for a in report.actions:
+            mark = '[green]✓[/green]' if a.ok else '[red]✗[/red]'
+            self._emit('discover', asdict(a), f'{mark} discover {a.kind} {escape(a.hotkey[:16])} {escape(a.detail)}')
+        ignored = [f'{hotkey}: {why}' for hotkey, why in sorted(report.ignored.items())]
+        if ignored != self._last_ignored:  # a bad address is published every read; say it once
+            for line in ignored:
+                self._emit('discover_ignored', {'ignored': line}, f'[yellow]discover ignored {escape(line)}[/yellow]')
+            self._last_ignored = ignored
+
     def note(self, loop: str, message: str) -> None:
         self._emit('note', {'loop': loop, 'message': message}, f'[yellow]{loop}:[/yellow] {escape(message)}')
 
@@ -1998,7 +2039,21 @@ class _DaemonPrinter:
 @click.option(
     '--static-alpha-tao', type=float, default=cfg.STATIC_ALPHA_TAO, show_default=True, help='Fallback TAO per alpha.'
 )
+@click.option(
+    '--discover',
+    is_flag=True,
+    default=False,
+    help='Also read the metagraph every --discover-interval and admit / move / remove boxes from it.',
+)
+@click.option(
+    '--discover-interval',
+    type=float,
+    default=cfg.DISCOVER_INTERVAL_S,
+    show_default=True,
+    help='Seconds between metagraph reads (with --discover).',
+)
 @click.option('--max-seconds', type=float, default=0, hidden=True)
+@_chain_options
 @_registry_options
 @_check_options
 @_state_options
@@ -2012,7 +2067,12 @@ def run_command(
     metagraphed_url,
     static_tao_usd,
     static_alpha_tao,
+    discover,
+    discover_interval,
     max_seconds,
+    netuid,
+    network,
+    rpc_url,
     release_pubkey,
     allow_dev_keys,
     state_dir,
@@ -2021,15 +2081,18 @@ def run_command(
 ):
     """The controller as one process: the proof round (every --round-interval, --build-cmd between rounds), the
     reconciler (every --reconcile-interval), the in-lease watch (heartbeat every --heartbeat-interval, manifest
-    health probe every health.interval_s) with the pay ledger's settlement tick, and the signed scorecard (every
-    --scorecard-interval), each on its own thread over one state. A card that reaches CHECKING is re-proved on its
-    own box at the next watch tick, not at the next round.
+    health probe every health.interval_s) with the pay ledger's settlement tick, the signed scorecard (every
+    --scorecard-interval) and, with --discover, discovery (the metagraph every --discover-interval), each on its own
+    thread over one state. A card that reaches CHECKING is re-proved on its own box at the next watch tick, not at
+    the next round.
 
     \b
-    It holds the state directory for its whole life: `check`, `round` and `reconcile` refuse beside it (use
-    `status`); `admit`, `deploy`, `release` and `check --force` on a BENCHED box keep working. SIGTERM finishes the visits in flight, writes state and exits 0.
-    Takes every `round` flag (--proof, --proof-args, --agent-image-digest, ...) and every `reconcile` flag.
+    It holds the state directory for its whole life: `check`, `round`, `reconcile` and `discover` refuse beside it
+    (use `status`); `admit`, `deploy`, `release` and `check --force` on a BENCHED box keep working. SIGTERM finishes
+    the visits in flight, writes state and exits 0. Takes every `round` flag (--proof, --proof-args,
+    --agent-image-digest, ...), every `reconcile` flag and, for --discover, --network / --rpc-url / --netuid.
     """
+    reader = _chain_reader(_resolve_endpoint(network, rpc_url), netuid) if discover else None
     setup = _setup(state_dir, **opts)
     setup.state.ensure()
     _require_ca_key(setup.ca_key, json_mode)
@@ -2059,18 +2122,29 @@ def run_command(
                 build_cmd=build_cmd,
                 pull_token=token,
                 intervals=Intervals(
-                    round_interval, reconcile_interval, heartbeat_interval, scorecard_s=scorecard_interval
+                    round_s=round_interval,
+                    reconcile_s=reconcile_interval,
+                    heartbeat_s=heartbeat_interval,
+                    scorecard_s=scorecard_interval,
+                    discover_s=discover_interval,
                 ),
                 reporter=printer,
                 sleep=_sleep,
                 oracle=oracle,
                 rates=rates,
+                read_chain=reader.read if reader is not None else None,
+                scan_host_key=_scan_host_key,
+            )
+            discovering = (
+                f', discover every {discover_interval:.0f} s ({reader.endpoint} netuid {reader.netuid})'
+                if reader
+                else ''
             )
             printer.note(
                 'controller',
                 f'running on {setup.state.root} (pid {os.getpid()}): round every {round_interval:.0f} s, reconcile '
                 f'every {reconcile_interval:.0f} s, heartbeat every {heartbeat_interval:.0f} s, scorecard every '
-                f'{scorecard_interval:.0f} s (prices: {"metagraphed" if metagraphed_url else "static"})',
+                f'{scorecard_interval:.0f} s (prices: {"metagraphed" if metagraphed_url else "static"}){discovering}',
             )
             clean = controller.serve(max_seconds=max_seconds or None)
     except ControllerRunning as e:
@@ -2158,6 +2232,8 @@ def status_command(state_dir, json_mode):
                 'bench_until': box.bench_until,
                 'withheld_from': box.withheld_from,
                 'release_requested': release_requested(box),
+                'source': box.source,
+                'endpoint_changed': box.endpoint_changed,
                 'standing_events': box.standing_events[-5:],
                 'pay': {k: entry.get(k) for k in ('weight', 'usd', 'idle_s', 'leased_s', 'withheld_s')}
                 if entry
@@ -2221,7 +2297,13 @@ def status_command(state_dir, json_mode):
         table.add_row(
             escape(b['hotkey'][:16]),
             escape(b['host']),
-            b['status'] + (f' ({", ".join(b["last_failed"])})' if b['status'] == BENCHED and b['last_failed'] else ''),
+            b['status']
+            + (f' ({", ".join(b["last_failed"])})' if b['status'] == BENCHED and b['last_failed'] else '')
+            + (
+                f' [red]endpoint changed → {b["endpoint_changed"].get("host")}:{b["endpoint_changed"].get("port")}[/red]'
+                if b['endpoint_changed']
+                else ''
+            ),
             b['standing'],
             escape(cards) or '[dim]—[/dim]',
             pay_cell,
@@ -2300,6 +2382,62 @@ def scorecard_command(state_dir, json_mode):
         )
     console.print(table)
     sys.exit(code)
+
+
+# ---------------------------------------------------------------- discovery: the chain is the registry --------------
+
+
+def _discover_payload(report: DiscoverReport) -> dict:
+    return {
+        'registered': report.registered,
+        'compute': report.compute,
+        'actions': [asdict(a) for a in report.actions],
+        'ignored': report.ignored,
+    }
+
+
+@controller_group.command('discover')
+@_chain_options
+@_state_options
+def discover_command(netuid, network, rpc_url, state_dir, json_mode):
+    """Read the metagraph once and settle the boxes against it: every registered hotkey serving a compute endpoint
+    (what `gitt up` publishes) is scanned, pinned and created at ADMIT; a box whose endpoint changed to another host
+    key is flagged, not re-pinned; a deregistered box is benched, drained by the reconciler and then removed.
+
+    \b
+    Read-only on chain: the controller holds no chain key. Boxes an operator admitted are left alone.
+    Exit 0 settled, 1 a scan failed / an endpoint changed / an address conflict, 2 the metagraph read failed.
+    `gitt controller run --discover` does this every --discover-interval.
+    """
+    state = StateDir(Path(state_dir).expanduser()).ensure()
+    endpoint = _resolve_endpoint(network, rpc_url)
+    with _one_shot_lock(state, json_mode):
+        try:
+            endpoints = _chain_reader(endpoint, netuid).read()
+        except Exception as e:
+            _fail(f'metagraph read failed ({endpoint}, netuid {netuid}): {type(e).__name__}: {e}'[:400], json_mode, EXIT_NO_VERDICT)  # fmt: skip
+        discovery = Discovery(state.store(), InstanceStore(state.instances), state.known_hosts, _scan_host_key)
+        report = discovery.run_pass(endpoints)
+    if json_mode:
+        emit_json({'success': report.ok, 'network': endpoint, 'netuid': netuid, **_discover_payload(report)})
+    else:
+        console.print(
+            f'[dim]{escape(endpoint)} netuid {netuid}: {report.registered} registered, '
+            f'{report.compute} compute endpoint(s)[/dim]'
+        )
+        if report.actions:
+            table = Table(title='gitt controller discover', show_header=True)
+            for column in ('Action', 'Hotkey', 'Detail'):
+                table.add_column(column, no_wrap=column != 'Detail')
+            for a in report.actions:
+                mark = '[green]✓[/green]' if a.ok else '[red]✗[/red]'
+                table.add_row(f'{mark} {a.kind}', escape(a.hotkey), escape(a.detail))
+            console.print(table)
+        else:
+            console.print('[dim]nothing to change[/dim]')
+        for hotkey, why in report.ignored.items():
+            err_console.print(f'[yellow]ignored[/yellow] {escape(hotkey)}: {escape(why)}')
+    sys.exit(EXIT_ADMIT if report.ok else EXIT_BENCH)
 
 
 def register_controller_commands(cli):

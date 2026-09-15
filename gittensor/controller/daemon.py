@@ -17,6 +17,8 @@ changes under one short lock and saves at once:
   ledger's settlement tick (``pay/ledger.py``) whenever one is due;
 * **the scorecard** every ``SCORECARD_INTERVAL_S``: the trailing window settled at the oracle's price and written as
   ``scorecard/latest.json`` + ``latest.sha256`` for the validator (``pay/scorecard.py``).
+* **discovery** (``--discover``) every ``DISCOVER_INTERVAL_S``: the metagraph, read-only, settles which boxes exist
+  (``discovery.py``); a new box waits for the next proof round.
 
 No lock is held across a model load: a start holds only its own box, the proof round skips a box whose lock stays held
 (its cards are STARTING anyway) and proves it next round, and the watch takes no box lock at all (``locks.py``). On
@@ -39,6 +41,7 @@ from typing import Any, Protocol
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import HostRunner
 from gittensor.controller.checks.state import CHECKING, IDLE, BoxState, StateStore
+from gittensor.controller.discovery import ChainEndpoint, DiscoverReport, Discovery
 from gittensor.controller.heartbeat import Watch, WatchReport
 from gittensor.controller.locks import BoxLocks
 from gittensor.controller.pay.ledger import Ledger, settle_window
@@ -52,12 +55,17 @@ from gittensor.controller.runspec import BoxHttp, HttpClient, PullToken
 STATUS_FILE = 'controller.json'
 
 
+def _no_scan(host: str, port: int) -> str:
+    raise RuntimeError('no host-key scanner configured')
+
+
 class Reporter(Protocol):
     def round(self, report: Any, n: int) -> None: ...
     def reconcile(self, report: ReconcileReport, n: int) -> None: ...
     def background(self, report: ReconcileReport) -> None: ...
     def watch(self, report: WatchReport) -> None: ...
     def reprove(self, report: Any) -> None: ...
+    def discover(self, report: DiscoverReport) -> None: ...
     def note(self, loop: str, message: str) -> None: ...
 
 
@@ -77,6 +85,9 @@ class SilentReporter:
     def watch(self, report):
         pass
 
+    def discover(self, report):
+        pass
+
     def note(self, loop, message):
         pass
 
@@ -88,6 +99,7 @@ class Intervals:
     heartbeat_s: float = cfg.HEARTBEAT_INTERVAL_S
     watch_tick_s: float = cfg.WATCH_TICK_S
     scorecard_s: float = cfg.SCORECARD_INTERVAL_S
+    discover_s: float = cfg.DISCOVER_INTERVAL_S
 
 
 class Controller:
@@ -113,11 +125,14 @@ class Controller:
         reprove: Callable[..., Any] | None = None,
         oracle: FailSafeOracle | None = None,
         rates: dict[str, GpuRate] | None = None,
+        read_chain: Callable[[], list[ChainEndpoint]] | None = None,
+        scan_host_key: Callable[[str, int], str] | None = None,
     ):
         self.state = state
         self.oracle = oracle or FailSafeOracle(StaticOracle())
         self.rates = rates if rates is not None else load_rates()
         self.ledger = Ledger(state.root / 'ledger')
+        self.read_chain = read_chain  # None: no discovery loop (boxes come from `gitt controller admit` only)
         self.intervals = intervals or Intervals()
         self.reporter = reporter or SilentReporter()
         self.write_lock = threading.RLock()
@@ -166,6 +181,9 @@ class Controller:
             self.intervals.heartbeat_s,
             lock=self.write_lock,
             box_locks=self.box_locks,
+        )
+        self.discovery = Discovery(
+            self.boxes, self.instances, state.known_hosts, scan_host_key or _no_scan, lock=self.write_lock
         )
         self._threads: list[threading.Thread] = []
 
@@ -368,6 +386,30 @@ class Controller:
         )
         self.reporter.reprove(report)
 
+    def discover_once(self) -> DiscoverReport | None:
+        """Read the metagraph and settle the boxes against it. A failed read changes nothing."""
+        if self.read_chain is None:
+            return None
+        try:
+            endpoints = self.read_chain()
+        except Exception as e:
+            self.reporter.note('discover', f'metagraph read failed, nothing changed: {type(e).__name__}: {e}')
+            self._set_status('discover', {'at': time.time(), 'error': f'{type(e).__name__}: {e}'[:300]})
+            return None
+        report = self.discovery.run_pass(endpoints)
+        self._set_status(
+            'discover',
+            {
+                'at': time.time(),
+                'registered': report.registered,
+                'compute': report.compute,
+                'actions': [asdict(a) for a in report.actions],
+                'ignored': report.ignored,
+            },
+        )
+        self.reporter.discover(report)
+        return report
+
     def _background_done(self, report: ReconcileReport) -> None:
         with self.write_lock:
             self.status['reconcile']['last_background'] = {
@@ -416,6 +458,8 @@ class Controller:
             ('watch', self.watch_once, self.intervals.watch_tick_s, None),
             ('scorecard', self.scorecard_once, self.intervals.scorecard_s, None),
         )
+        if self.read_chain is not None:
+            loops += (('discover', self.discover_once, self.intervals.discover_s, None),)
         for name, once, interval_s, after in loops:
             thread = threading.Thread(
                 target=self._loop, args=(name, once, interval_s, after), name=f'controller-{name}', daemon=True

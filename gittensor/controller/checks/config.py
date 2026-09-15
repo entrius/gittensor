@@ -110,6 +110,9 @@ ROUND_BOX_LOCK_WAIT_S = 30.0
 # watch tick instead of waiting for the 20-min round (Kimbo 9/15). A re-prove that got no verdict (box busy, SSH down)
 # is tried again after this long, not every tick.
 REPROVE_RETRY_S = 60.0
+# Discovery (24 §3 WS-A): how often `gitt controller run --discover` reads the metagraph for new, moved and deregistered
+# boxes. A new box waits at most this plus one proof round (20 min) for its first check; axons change rarely.
+DISCOVER_INTERVAL_S = 300.0
 SHUTDOWN_GRACE_S = 120.0  # SIGTERM: how long the loops get to finish the visit in flight
 STANDING_EVENTS_KEEP = 200  # dated events per box for WS-E to fold; the oldest are folded into one, never lost
 

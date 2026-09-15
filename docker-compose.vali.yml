@@ -10,12 +10,10 @@ services:
     ports:
       # Set AXON_PUBLISH=127.0.0.1:<port> to bind loopback-only behind a reverse proxy (unset = raw internet publish).
       - "${AXON_PUBLISH:-0.0.0.0:${PORT}}:${PORT}"
-      # Serving inference API (opt-in, see .env.example): loopback on the host by default; front it with your reverse proxy.
-      - "${SERVING_API_PUBLISH:-127.0.0.1:${SERVING_API_PORT:-8790}}:${SERVING_API_PORT:-8790}"
     volumes:
       # 'ro' = readonly
       - ${WALLET_PATH}:/root/.bittensor/wallets:ro
-      # state.npz, serving.db and the rotating bittensor.log live under ./data/<wallet>/<hotkey>/netuid<N>/validator
+      # state.npz and the rotating bittensor.log live under ./data/<wallet>/<hotkey>/netuid<N>/validator
       # (the entrypoint passes --logging.logging_dir /app/data), so they outlive the container.
       - ./data:/app/data
     # `docker logs` buffer: 3 x 10 MB, oldest dropped. Dies with the container — the durable copy is the
@@ -30,56 +28,6 @@ services:
     #   - gittensor_network
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
-
-  # Optional reference runtime for the serving audit loop (profile "reference"). Runs the same blessed
-  # sparkinfer_server image miners run (built by us from a pinned upstream commit, docker/sparkinfer.Dockerfile),
-  # on the validator's own GPU, so audits compare against a live honest copy instead of a bank snapshot.
-  #   SPARKINFER_TAG=<runtime_pin commit> docker compose -f docker-compose.vali.yml --profile reference up -d
-  # then set SERVING_REFERENCE_URL=http://reference:8080 and SERVING_ATTEST_REFERENCE_URL=http://attest:8081 in .env.
-  # See the Serving Runtime Contract in the miner docs.
-  reference:
-    image: entrius/sparkinfer:${SPARKINFER_TAG:-latest}
-    container_name: gt-vali-reference
-    restart: unless-stopped
-    profiles: ["reference"]
-    environment:
-      # The release's artifact, from serving_loadout.json: a GGUF (model_sha256) or a pinned Hugging Face model
-      # directory (model_dir.repo / revision / sha256) — docker/sparkinfer-entrypoint.sh. Same values a miner runs.
-      MODEL_SHA256: ${SPARKINFER_MODEL_SHA256:-}
-      MODEL_REPO: ${SPARKINFER_MODEL_REPO:-}
-      MODEL_FILE: ${SPARKINFER_MODEL_FILE:-}
-      MODEL_DIR_REPO: ${SPARKINFER_MODEL_DIR_REPO:-}
-      MODEL_DIR_REVISION: ${SPARKINFER_MODEL_DIR_REVISION:-}
-      MODEL_DIR_SHA256: ${SPARKINFER_MODEL_DIR_SHA256:-}
-      TOK_REPO: ${SPARKINFER_TOK_REPO:-}
-      MODEL_NAME: ${SPARKINFER_MODEL_NAME:-}
-      CTX: ${SPARKINFER_CTX:-}
-      # already baked into the image; repeated here so nobody turns it off by accident (contract D1)
-      SPARKINFER_DETERMINISTIC: "1"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    volumes:
-      - ./data/models:/opt/sparkinfer/models
-
-  # Attestation sidecar beside the reference (profile "reference"): the validator asks it for the expected digest
-  # and reference wall time of each round's challenge. Same image every miner box runs (attest.image in the loadout).
-  attest:
-    image: entrius/gt-attest:${GT_ATTEST_TAG:-v1}
-    container_name: gt-vali-attest
-    restart: unless-stopped
-    profiles: ["reference"]
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
 
   watchtower:
     image: nickfedor/watchtower

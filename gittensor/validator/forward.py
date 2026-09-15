@@ -13,14 +13,7 @@ from gittensor.validator.compute_pool import compute_pool_for
 from gittensor.validator.emission_allocation import blend_emission_pools
 from gittensor.validator.issue_discovery.scan import run_issue_discovery
 from gittensor.validator.oss_contributions.reward import get_rewards
-from gittensor.validator.serving.pricing import serving_pricing
-from gittensor.validator.utils.config import (
-    COMPUTE_SCORECARD_PATH,
-    SERVING_ENABLED,
-    SERVING_PAY_CAP_WITHOUT_PRICING,
-    VALIDATOR_STEPS_INTERVAL,
-    VALIDATOR_WAIT,
-)
+from gittensor.validator.utils.config import COMPUTE_SCORECARD_PATH, VALIDATOR_STEPS_INTERVAL, VALIDATOR_WAIT
 from gittensor.validator.utils.load_weights import (
     RepositoryConfig,
     load_master_repo_weights,
@@ -35,22 +28,18 @@ if TYPE_CHECKING:
 async def forward(self: 'Validator') -> None:
     """Execute the validator's forward pass.
 
-    Serving audits run on their own wall-clock thread (``ServingAuditThread``, SERVING_ENABLED only); the OSS
-    round blends the scores from the latest audit round.
-
     Performs the core validation cycle every VALIDATOR_STEPS_INTERVAL steps:
     1. Score OSS contributions (mirror PR scoring)
     2. Score issue discovery
     3. Store all evaluations to DB
-    4. Blend emission pools (with the latest serving scores) and update scores
+    4. Blend emission pools and update scores
 
     Emission blending:
     - Combined scoring pool: 90%, allocated by repository emission_share
     - Maintainer cut:        per-repo carve-out routed to maintainer miner neurons
     - Issue treasury:       10%, flat to UID 111
-    - Serving pool:          SERVING_GPU_HOUR_USD per settled card-equivalent, capped at SERVING_EMISSION_SHARE_CAP
-    - Compute pool:          COMPUTE_SCORECARD_PATH set only: replaces the serving pool; 1 - OSS_EMISSION_SHARE paid
-                             by the controller's signed scorecard, recycled when it is stale or invalid
+    - Compute pool:          1 - OSS_EMISSION_SHARE, paid by the controller's signed scorecard (COMPUTE_SCORECARD_PATH);
+                             recycled when it is stale, invalid or unset
     - Recycle:              registry slack and inactive repo slices to UID 0
     """
 
@@ -82,20 +71,11 @@ async def forward(self: 'Validator') -> None:
 
         # 5. Allocate repo-bounded emission shares into final rewards
         maintainer_uids_by_repo = build_maintainer_uids_by_repo(miner_evaluations, master_repositories, miner_uids)
-        serving_scores = self.serving_state.scores_for(self.metagraph.hotkeys) if SERVING_ENABLED else {}
-        pricing = serving_pricing(self) if SERVING_ENABLED and serving_scores else None
-        self.last_serving_pricing = pricing  # the serving audit thread stamps it on the rounds it persists
-        # COMPUTE_SCORECARD_PATH unset: the call below is exactly today's.
+        # The compute pool: the controller's signed scorecard, verified, committed and blended in; unset or refused
+        # means the compute share recycles (a dead controller must not keep paying).
         compute = {'compute_pool': compute_pool_for(self, COMPUTE_SCORECARD_PATH)} if COMPUTE_SCORECARD_PATH else {}
         rewards = blend_emission_pools(
-            miner_evaluations,
-            master_repositories,
-            miner_uids,
-            maintainer_uids_by_repo,
-            serving_scores,
-            pricing,
-            SERVING_PAY_CAP_WITHOUT_PRICING,
-            **compute,
+            miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo, **compute
         )
 
         self.update_scores(rewards, miner_uids, blacklisted_uids=sorted(penalized_uids))

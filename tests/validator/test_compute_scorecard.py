@@ -12,7 +12,7 @@ from typing import Any, cast
 import numpy as np
 import pytest
 
-from gittensor.constants import OSS_EMISSION_SHARE, RECYCLE_UID, SERVING_EMISSION_SHARE_CAP
+from gittensor.constants import OSS_EMISSION_SHARE, RECYCLE_UID
 from gittensor.controller.pay.scorecard import write_scorecard
 from gittensor.validator.compute_pool import COMMIT_LOG, ComputePool, compute_pool_for, pool_from_scorecard
 from gittensor.validator.emission_allocation import blend_emission_pools
@@ -73,7 +73,7 @@ def test_a_valid_scorecard_is_signed_committed_once_and_paid_as_the_compute_shar
     assert len(subtensor.commitments) == 1  # the same sha256 is not committed twice
 
     uids = {RECYCLE_UID, 1, 2}
-    rewards = blend_emission_pools({}, {}, uids, None, {2: 5.0}, None, True, pool)  # serving scores are ignored
+    rewards = blend_emission_pools({}, {}, uids, None, compute_pool=pool)
     assert rewards[1] == pytest.approx(COMPUTE_SHARE * weight_a)
     assert rewards[2] == 0.0
     assert rewards[0] == pytest.approx(OSS_EMISSION_SHARE + COMPUTE_SHARE * (1 - weight_a))  # no repos: OSS recycles
@@ -108,10 +108,11 @@ def test_a_failed_commit_still_pays_and_is_retried_next_round(scorecard):
     assert len(subtensor.commitments) == 2 and getattr(vali, 'last_scorecard_sha256') == sha
 
 
-def test_without_a_compute_pool_the_blend_is_todays():
+def test_without_a_compute_pool_the_compute_share_recycles():
+    # After the cutover there is no serving pool: with no scorecard, no repos and no compute pool, everything recycles.
     uids = {RECYCLE_UID, 1}
-    today = blend_emission_pools({}, {}, uids, None, {1: 1.0}, None, True)  # the serving pool, paid as it is today
-    assert today[1] == pytest.approx(SERVING_EMISSION_SHARE_CAP)
-    assert today[0] == pytest.approx(1 - SERVING_EMISSION_SHARE_CAP)  # no repos: OSS and the slack recycle
+    today = blend_emission_pools({}, {}, uids, None)
+    assert today[1] == pytest.approx(0.0)
+    assert today[0] == pytest.approx(1.0)
     empty = pool_from_scorecard('/nonexistent/latest.json', [], ISSUED)
     assert isinstance(empty, ComputePool) and empty.sha256 is None and 'nonexistent' in empty.reason

@@ -8,10 +8,9 @@ import pytest
 from gittensor.gateway.limits import MAX_TOKENS, RequestRefused, enforce_openai_limits, remote_media
 
 
-def test_the_cap_is_copied_from_phase_0():
-    from gittensor.constants import SERVING_MAX_TOKENS
-
-    assert MAX_TOKENS == SERVING_MAX_TOKENS == 4096
+def test_the_cap_is_4096():
+    # Phase 0's SERVING_MAX_TOKENS is gone with the cutover; the pool's cap stands on its own.
+    assert MAX_TOKENS == 4096
 
 
 @pytest.mark.parametrize(

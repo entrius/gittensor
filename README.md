@@ -54,30 +54,20 @@ gitt miner check --wallet <name> --hotkey <hotkey>
 
 See full guide **[here](https://docs.gittensor.io/miner.html)**
 
-### Compute miners (serving)
+### Compute miners
 
-Gittensor also pays verified GPU time: an RTX 5090 running the blessed inference release earns **$0.70 per
-verified GPU-hour** (paid in alpha, inside a 5% emission cap). Validators verify the traffic they route to you
-against their own reference GPU — there is no separate audit prompt set — so a new miner sits in *probation*
-until its rolling window passes, then goes READY. One card = one payout; extra hotkeys on the same card share it.
-
-No clone, no build — every image is published on Docker Hub:
+Gittensor also pays GPU time. A compute miner runs one command on a GPU box; the agent it starts is the whole
+miner, and the subnet's controller checks the cards, leases them out and pays per card.
 
 ```bash
-# 1. The whole box (runtime + attest + neuron) from one compose file. Fill .env from the
-#    "Current release" card on gittensor.io/compute (images + the model pin) plus wallet/network/port.
-curl -O https://raw.githubusercontent.com/entrius/gittensor/main/docker-compose.miner.yml
-curl -o .env https://raw.githubusercontent.com/entrius/gittensor/main/miner.env.example
-nano .env
-docker compose -f docker-compose.miner.yml up -d
+# Needs Docker with the NVIDIA runtime and a registered hotkey
+gitt up --wallet <name> --hotkey <hotkey>
 
-# 2. Prove the box is conformant before you serve (model id from the same card)
-docker run --rm --network host entrius/gt-checker \
-  --base-url http://127.0.0.1:8080 --model-id qwen3.8-27b --attest-url http://127.0.0.1:8081
+# Stop the agent and its runner
+gitt down
 ```
 
-Your status (READY / probation / quarantined, window, throughput, estimated payout, last miss reason) is on
-[gittensor.io/compute](https://gittensor.io/compute). See full guide **[here](https://docs.gittensor.io/compute-miner.html)**
+`gitt up --help` lists every option.
 
 ## Validators
 
@@ -95,20 +85,6 @@ docker-compose -f docker-compose.vali.yml up -d
 ```
 
 See full guide **[here](https://docs.gittensor.io/validator.html)**
-
-**Serving (compute):** to pay compute miners a validator needs its own RTX 5090 running the reference runtime —
-`SERVING_ENABLED=true` plus the `reference` compose profile:
-
-```bash
-# the release's artifact pins, from serving_loadout.json: a GGUF (SPARKINFER_MODEL_SHA256) or a pinned Hugging Face
-# model directory (SPARKINFER_MODEL_DIR_REPO / _REVISION / _SHA256) — docker-compose.vali.yml lists every variable
-SPARKINFER_TAG=<runtime_pin> SPARKINFER_MODEL_DIR_REPO=<model_dir.repo> SPARKINFER_MODEL_DIR_REVISION=<model_dir.revision> \
-  SPARKINFER_MODEL_DIR_SHA256=<model_dir.sha256> docker compose -f docker-compose.vali.yml --profile reference up -d
-```
-
-Without a reference the validator still validates OSS and sends the serving cap to UID 0. All `SERVING_*`
-variables are documented in `.env.example`; set `STORE_DB_RESULTS=true` to also publish serving rounds for
-[gittensor.io/compute](https://gittensor.io/compute).
 
 ## Reward Algorithm
 

@@ -28,10 +28,8 @@ from gittensor.validator.utils.load_weights import RepositoryConfig, load_master
 
 @pytest.fixture(autouse=True)
 def _oss_pool_only(monkeypatch):
-    """These tests cover the OSS pool's own allocation; the serving pool (which recycles whenever no
-    serving miner passes audits) is pinned to 0 so recycle expectations stay about OSS slack only.
-    (and OSS to the full round, so round totals stay 1.0). The serving pool is covered in test_serving.py."""
-    monkeypatch.setattr(emission_allocation, 'SERVING_EMISSION_SHARE_CAP', 0.0)
+    """These tests cover the OSS pool's own allocation: OSS is set to the full round so round totals stay 1.0
+    and recycle expectations stay about OSS slack only."""
     monkeypatch.setattr(emission_allocation, 'OSS_EMISSION_SHARE', 1.0)
     monkeypatch.setattr(sys.modules[__name__], 'OSS_EMISSION_SHARE', 1.0)
 

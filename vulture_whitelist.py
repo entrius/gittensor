@@ -6,32 +6,6 @@
 
 # ruff: noqa: F821
 
-# Serving beta: FastAPI route handlers are registered via decorator, not called directly;
-# telemetry fields/helpers are read by operators via /v1/serving/status and tests.
-health
-models
-chat_completions
-_close_dendrite
-serving_api
-completion_tokens
-latency_ms
-inflight
-as_dict
-reference_completion
-should_exit
-ts
-ECHO_LOADOUT_PATH
-# ServingMiner.resync_metagraph is dispatched by BaseNeuron.sync(); required_hash_fields is read by bt.Synapse
-resync_metagraph
-required_hash_fields
-# bt.Dendrite's lazily-created aiohttp session, preset by the audit thread with an uncapped connector
-_session
-# Reference.sample: reference-case generator kept on the protocol for the conformance checker, bank tooling and tests
-sample
-# bt.StreamingSynapse hooks called by the dendrite
-process_streaming_response
-extract_response_json
-
 # `__exit__(self, exc_type, exc, tb)` - PEP 343 signature, body unused args
 exc_type
 tb
@@ -115,5 +89,3 @@ _.get_help  # unused method (gittensor/cli/issue_commands/help.py:125)
 _.ttl_get_block  # unused method (gittensor/utils/misc.py:91)
 _.get_help  # unused method (gittensor/cli/issue_commands/help.py:180)
 add_validator_args  # unused function (gittensor/utils/config.py:81)
-neuron_type  # class attr read by BaseNeuron.should_set_weights (neurons/serving_miner.py:47)
-_.busy_count  # busy-ledger reader, exercised in tests; snapshot computes its hour view inline under the same lock

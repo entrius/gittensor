@@ -8,13 +8,11 @@ from typing import TYPE_CHECKING, Dict, Iterator, Optional
 import bittensor as bt
 import numpy as np
 
-from gittensor.classes import MinerEvaluation, RepoEmissionAllocation, ServingPricing
+from gittensor.classes import MinerEvaluation, RepoEmissionAllocation
 from gittensor.constants import (
     EMISSION_SHARE_TOLERANCE,
     OSS_EMISSION_SHARE,
     RECYCLE_UID,
-    SERVING_EMISSION_SHARE_CAP,
-    SERVING_GPU_HOUR_USD,
 )
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
@@ -27,9 +25,6 @@ def blend_emission_pools(
     master_repositories: Dict[str, RepositoryConfig],
     miner_uids: set[int],
     maintainer_uids_by_repo: Optional[Dict[str, list[int]]] = None,
-    serving_scores: Optional[Dict[int, float]] = None,
-    serving_pricing: Optional[ServingPricing] = None,
-    allow_unpriced_cap: bool = False,
     compute_pool: Optional['ComputePool'] = None,
 ) -> np.ndarray:
     """Allocate the combined scoring pool by bounded repository emission_share.
@@ -45,14 +40,9 @@ def blend_emission_pools(
     is carved off the top and split evenly among those maintainers; the
     remainder scores normally. Repos with no listed maintainers are unaffected.
 
-    ``serving_scores`` are settled card-equivalents per UID (served output tokens
-    over what one card decodes in the hour); ``serving_share`` prices them at
-    ``SERVING_GPU_HOUR_USD`` inside ``SERVING_EMISSION_SHARE_CAP`` and the pool is
-    split pro-rata by token share. Whatever the fleet does not earn recycles.
-
-    ``compute_pool`` (only with ``COMPUTE_SCORECARD_PATH`` set) replaces the serving pool: the whole share outside
-    ``OSS_EMISSION_SHARE`` is the compute pool, paid by the controller scorecard's per-UID shares of it; the unpaid
-    rest (recycle_share, unregistered hotkeys, or everything when the scorecard was refused) recycles.
+    ``compute_pool`` (with ``COMPUTE_SCORECARD_PATH`` set): the whole share outside ``OSS_EMISSION_SHARE`` is the
+    compute pool, paid by the controller scorecard's per-UID shares of it; the unpaid rest (recycle_share,
+    unregistered hotkeys, or everything when the scorecard was refused or there is none) recycles.
     """
     sorted_uids = sorted(miner_uids)
     uid_index = {uid: idx for idx, uid in enumerate(sorted_uids)}
@@ -60,10 +50,11 @@ def blend_emission_pools(
 
     total_configured_share = sum(config.emission_share for config in master_repositories.values())
     recycle_share = max(0.0, 1.0 - total_configured_share) * OSS_EMISSION_SHARE
-    # The slice reserved for neither pool burns explicitly: weights are normalized on chain, so leaving it
-    # unallocated would silently redistribute it pro-rata instead. The compute pool, when on, is that whole slice.
+    # The slice outside the OSS pool burns explicitly: weights are normalized on chain, so leaving it
+    # unallocated would silently redistribute it pro-rata instead. With a scorecard that whole slice is the
+    # compute pool (below); without one it recycles.
     if compute_pool is None:
-        recycle_share += max(0.0, 1.0 - OSS_EMISSION_SHARE - SERVING_EMISSION_SHARE_CAP)
+        recycle_share += max(0.0, 1.0 - OSS_EMISSION_SHARE)
 
     for allocation in calculate_repo_emission_breakdown(
         miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo
@@ -89,19 +80,6 @@ def blend_emission_pools(
             f'Compute pool: {paid * 100:.2f}% of the {compute_share * 100:g}% compute share paid to '
             f'{len(compute_pool.rewards)} miner(s)'
             + (f' from scorecard {compute_pool.sha256[:16]}…' if compute_pool.sha256 else f' ({compute_pool.reason})')
-        )
-    # Serving pool: served tokens priced as card-hours inside the cap; unclaimed recycles.
-    elif SERVING_EMISSION_SHARE_CAP > 0:
-        card_equiv = sum(serving_scores.values()) if serving_scores else 0.0
-        share = serving_share(card_equiv, serving_pricing, allow_unpriced_cap)
-        serving_rewards, serving_unallocated = _calculate_score_rewards(serving_scores or {}, share, miner_uids)
-        for uid, reward in serving_rewards.items():
-            rewards[uid_index[uid]] += reward
-        recycle_share += serving_unallocated + (SERVING_EMISSION_SHARE_CAP - share)
-        bt.logging.info(
-            f'Serving pool: {card_equiv:.2f} card-equivalents x ${SERVING_GPU_HOUR_USD:.2f}/h = '
-            f'{share * 100:.2f}% of emissions (cap {SERVING_EMISSION_SHARE_CAP * 100:g}%) across '
-            f'{sum(1 for r in serving_rewards.values() if r > 0)} serving miners'
         )
 
     # Recycle receives registry slack and empty repo slices.
@@ -227,24 +205,6 @@ def _repo_has_scorers(
     if issue_share > 0.0 and _collect_repo_issue_discovery_scores(miner_evaluations, repo_name, miner_uids):
         return True
     return False
-
-
-def serving_share(card_equiv: float, pricing: Optional[ServingPricing], allow_unpriced_cap: bool = False) -> float:
-    """Emission share that pays ``card_equiv`` card-hours of served tokens ``SERVING_GPU_HOUR_USD`` each, capped.
-
-    Without usable pricing the pool pays nothing and recycles, unless ``allow_unpriced_cap`` — a network with no
-    price to read (testnet) — where the whole cap is paid pro-rata. Paying the cap on a priced network would hand
-    one verified card the whole cap the moment a price read failed.
-    """
-    if card_equiv <= 0:
-        return 0.0
-    if pricing is None or not pricing.usable:
-        if not allow_unpriced_cap:
-            bt.logging.warning('Serving: no usable pricing this round; the serving pool pays nothing and recycles')
-            return 0.0
-        return SERVING_EMISSION_SHARE_CAP
-    want = card_equiv * SERVING_GPU_HOUR_USD / (pricing.alpha_per_hour_to_miners * pricing.alpha_usd)
-    return min(SERVING_EMISSION_SHARE_CAP, want)
 
 
 def _calculate_score_rewards(

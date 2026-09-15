@@ -193,6 +193,14 @@ def test_deployments_are_separate_and_round_trip(tmp_path):
     store.set('x@1', enabled=True, replicas=2)
     store.set('x@1', enabled=False)
     reopened = DeploymentStore(tmp_path / 'deployments.json')
-    assert vars(reopened.get('x@1')) == {'enabled': False, 'replicas': 2} and reopened.get('x@1').desired == 0
+    assert vars(reopened.get('x@1')) == {'enabled': False, 'replicas': 2, 'box': ''} and reopened.get('x@1').desired == 0
     with pytest.raises(ValueError):
         store.set('x@1', replicas=-1)
+
+
+def test_a_deployment_can_be_pinned_to_a_box_and_unpinned(tmp_path):
+    store = DeploymentStore(tmp_path / 'deployments.json')
+    assert store.set('e@1', True, 1, box='hk-ours').box == 'hk-ours'
+    assert DeploymentStore(tmp_path / 'deployments.json').get('e@1').box == 'hk-ours'
+    assert store.set('e@1', replicas=2).box == 'hk-ours'  # untouched when not passed
+    assert store.set('e@1', box='').box == ''

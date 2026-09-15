@@ -13,7 +13,7 @@
 # workload rewrite the weights it is verified against.
 name: qwen3.8-27b-nvfp4
 version: 5
-description: Qwen3.8-27B (NVFP4) chat on sparkinfer 19ef39ec2, one RTX 5090 per instance
+description: Qwen3.8-27B (NVFP4) chat on sparkinfer v0.5.7, one RTX 5090 per instance
 runtime: sparkinfer
 image: entrius/sparkinfer:v0.5.7@sha256:9968020928cfbed73796fbbbc86a330d4260cfa78b1f48908cde82c6f3a13f32
 placement:

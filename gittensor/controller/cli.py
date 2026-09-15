@@ -1658,28 +1658,43 @@ def _bless_output(json_mode: bool, entry_id: str, image: str, path: Path, alread
 @click.argument('entry_id')
 @click.option('--enabled/--disabled', 'enabled', default=None, help='Run it (desired = replicas) or not (desired = 0).')
 @click.option('--replicas', type=click.IntRange(min=0), default=None, help='Instances wanted while enabled.')
+@click.option('--box', 'box', default=None, help='Place only on this box (hotkey): a canary run on our own card.')
+@click.option('--any-box', is_flag=True, default=False, help='Clear a --box pin.')
 @_registry_options
 @_state_options
-def deploy_command(entry_id, enabled, replicas, release_pubkey, allow_dev_keys, state_dir, json_mode):
+def deploy_command(entry_id, enabled, replicas, box, any_box, release_pubkey, allow_dev_keys, state_dir, json_mode):
     """Operator deployment settings for one registry entry; the next reconcile acts on them.
 
     Enabling re-verifies the entry first; an entry that does not verify cannot be enabled.
     """
     state = StateDir(Path(state_dir).expanduser()).ensure()
-    if enabled is None and replicas is None:
-        _fail('nothing to change: pass --enabled/--disabled and/or --replicas', json_mode, EXIT_NO_VERDICT)
+    if enabled is None and replicas is None and box is None and not any_box:
+        _fail(
+            'nothing to change: pass --enabled/--disabled, --replicas, --box or --any-box', json_mode, EXIT_NO_VERDICT
+        )
+    if any_box:
+        box = ''
     if enabled:
         try:
             _open_registry(state, release_pubkey, allow_dev_keys, json_mode).read(entry_id)
         except RegistryError as e:
             _fail(f'not enabled: {e}', json_mode, EXIT_BENCH)
-    deployment = DeploymentStore(state.deployments).set(entry_id, enabled, replicas)
+    deployment = DeploymentStore(state.deployments).set(entry_id, enabled, replicas, box)
     if json_mode:
-        emit_json({'success': True, 'entry': entry_id, 'enabled': deployment.enabled, 'replicas': deployment.replicas})
+        emit_json(
+            {
+                'success': True,
+                'entry': entry_id,
+                'enabled': deployment.enabled,
+                'replicas': deployment.replicas,
+                'box': deployment.box,
+            }
+        )
         return
     err_console.print(
         f'{escape(entry_id)}: {"[green]enabled[/green]" if deployment.enabled else "[yellow]disabled[/yellow]"}, '
         f'replicas {deployment.replicas} (desired {deployment.desired})'
+        + (f', pinned to {escape(deployment.box)}' if deployment.box else '')
     )
 
 

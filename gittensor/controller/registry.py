@@ -14,7 +14,7 @@ The controller **re-verifies the signature every time it reads an entry** and ne
 the files (later the database) are a request, not trusted input.
 
 **Deployment settings** are separate and operator-owned: ``<state-dir>/deployments.json`` =
-``{entry_id: {enabled, replicas}}``. Enabling an entry never changes what was signed.
+``{entry_id: {enabled, replicas, box}}``. Enabling an entry never changes what was signed.
 """
 
 from __future__ import annotations
@@ -262,6 +262,7 @@ class Registry:
 class Deployment:
     enabled: bool = False
     replicas: int = 0
+    box: str = ''  # pin: place only on this box (hotkey); '' = any box. For canary runs on our own cards (Kimbo 9/15).
 
     @property
     def desired(self) -> int:
@@ -277,16 +278,21 @@ class DeploymentStore:
         if self.path.exists():
             raw = json.loads(self.path.read_text() or '{}')
             self.deployments = {
-                k: Deployment(bool(v.get('enabled', False)), max(0, int(v.get('replicas', 0)))) for k, v in raw.items()
+                k: Deployment(bool(v.get('enabled', False)), max(0, int(v.get('replicas', 0))), str(v.get('box') or ''))
+                for k, v in raw.items()
             }
 
     def get(self, entry_id: str) -> Deployment:
         return self.deployments.get(entry_id) or Deployment()
 
-    def set(self, entry_id: str, enabled: bool | None = None, replicas: int | None = None) -> Deployment:
+    def set(
+        self, entry_id: str, enabled: bool | None = None, replicas: int | None = None, box: str | None = None
+    ) -> Deployment:
         current = self.get(entry_id)
         new = Deployment(
-            current.enabled if enabled is None else enabled, current.replicas if replicas is None else replicas
+            current.enabled if enabled is None else enabled,
+            current.replicas if replicas is None else replicas,
+            current.box if box is None else box,
         )
         if new.replicas < 0:
             raise ValueError('replicas must be >= 0')

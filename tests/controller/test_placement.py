@@ -851,7 +851,7 @@ def test_the_committed_27b_manifest_stages_every_file_the_phase0_image_checks():
     model_dir = f'{env["MODELS_DIR"]}/{env["MODEL_DIR_REPO"].rsplit("/", 1)[1]}'
     assert [a.path for a in manifest.artifacts] == [model_dir, '/models/tokenizer.json', '/models/.tokenizer_repo']
     assert spec.volumes == (('/var/lib/gt-models/qwen3.8-27b-nvfp4/models', '/models', True),)
-    assert spec.network == 'gt-noegress' and manifest.image_digest.startswith('sha256:d35719b0')
+    assert spec.network == 'gt-noegress' and manifest.image_digest.startswith('sha256:9968020928')
     marker = manifest.artifacts[2]
     assert hashlib.sha256(env['TOK_REPO'].encode()).hexdigest() == marker.sha256  # run.sh compares it to TOK_REPO
     assert marker.source == 'data:,' + env['TOK_REPO'] and manifest.artifacts[0].revision == env['MODEL_DIR_REVISION']
@@ -913,3 +913,22 @@ def test_a_dev_box_with_its_own_port_range_and_a_port_map(world, state):
     assert json.loads(result.stdout)['workload_ports'] == [8080, 8080]
     assert store(state).get(HK_A).workload_port_range() == range(8080, 8081)
     assert admit(state, extra=['--workload-ports', '9-8']).exit_code == 2
+
+
+def test_a_pinned_deployment_lands_only_on_its_box(world):
+    """A canary run on our own card (Kimbo 9/15): the fresher, better box is skipped when the deployment is pinned."""
+    root, registry = world
+    ours = idle_box()
+    other = idle_box('hk2', ('GPU-other-1',), '10.0.0.2')
+    other.last_check_at = 200.0  # fresher than ours (100.0): the normal pick
+    seed(root, ours, other, replicas=1)
+    DeploymentStore(root / 'deployments.json').set(ENTRY, box='hk1')
+    boxes = {'hk1': FakeDocker(), 'hk2': FakeDocker()}
+    report = reconciler(root, registry, boxes).run_pass()
+    starts = [a for a in report.actions if a.kind == 'start']
+    assert len(starts) == 1 and starts[0].box == 'hk1', report
+    assert boxes['hk2'].commands('docker run -d') == []
+    # pinned to a box with nothing free: short, and the error names the pin
+    DeploymentStore(root / 'deployments.json').set(ENTRY, replicas=3)
+    report = reconciler(root, registry, boxes).run_pass()
+    assert any('pinned box hk1' in e for e in report.errors), report.errors

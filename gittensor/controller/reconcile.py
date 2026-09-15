@@ -586,8 +586,12 @@ class Reconciler:
 
         def take(verified: VerifiedEntry) -> tuple[BoxState, str, int | None] | None:
             """The best free card that fits, with a host port from its box's workload range; a box with no port left
-            is skipped and named in ``port_skips``."""
+            is skipped and named in ``port_skips``. A deployment pinned to a box (``Deployment.box``, canary runs on
+            our own cards) takes cards from that box only."""
+            pin = self.deployments.get(verified.entry_id).box
             for box, uuid in candidates:
+                if pin and box.box_id != pin:
+                    continue
                 if not card_fits(box, verified.manifest)[0]:
                     continue
                 host_port = None
@@ -610,7 +614,11 @@ class Reconciler:
                 need -= 1
             if need > 0:
                 why = ''.join(f'; {box_id}: {reason}' for box_id, reason in sorted(port_skips.items()))
-                report.errors.append(f'{entry_id}: {need} replica(s) short: no IDLE card fits its placement{why}')
+                pin = self.deployments.get(entry_id).box
+                where = f' on pinned box {pin}' if pin else ''
+                report.errors.append(
+                    f'{entry_id}: {need} replica(s) short: no IDLE card{where} fits its placement{why}'
+                )
 
         # Rotation (23 §8): a lease past its cap gets a replacement started on the best free card; it is drained on a
         # later pass once the replacement is LEASED. Oldest full check first, at most ROTATION_MAX_FRACTION of leased

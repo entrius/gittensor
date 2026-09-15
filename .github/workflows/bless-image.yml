@@ -4,11 +4,11 @@ name: bless image
 # produced + the manifest (+ our qualification measurements) into the public registry (docker/controller/registry/)
 # with the release key, and commits the entry to the branch the run was started from. Manual only.
 #
-# Interim rule (Kimbo 9/15): authors submit SOURCE, never images. A blessed image is always one we built ourselves
-# from a pinned commit of a repo we read (a fork of gittensor-compute-template, or our own Dockerfile here), so
-# nothing we never saw can be in a layer. Give `source_repo` + `source_ref` (+ `dockerfile`) and the workflow
-# builds and pushes `entrius/<manifest name>:<manifest version>` first; give `image` (a digest we already produced)
-# only to re-bless an existing build, e.g. with new qualification numbers.
+# Two ways in (Kimbo 9/15): the author publishes an image and we bless its DIGEST (the normal path: read the source,
+# pull that digest onto our own 5090, qualify, sign; a new push is a new digest and stays unblessed until we choose
+# it), or, when there is no published image yet, `source_repo` + `source_ref` (+ `dockerfile`) has this workflow
+# build the pinned commit and push it under entrius/ first. Either way only the signed digest ever runs, so
+# nothing auto-updates.
 #
 # Refuses dev keys and an entry that already exists under the same name@version with different content (bump the
 # manifest version).
@@ -36,7 +36,7 @@ on:
         required: false
         default: ""
       image:
-        description: "Re-bless only: an image WE built, as repo[:tag]@sha256:<64 hex>. Ignored when source_repo is set."
+        description: "The image to bless as repo[:tag]@sha256:<64 hex> (any registry). Ignored when source_repo is set."
         required: false
         default: ""
       qualified:
@@ -64,8 +64,8 @@ jobs:
             esac
           else
             case "${{ inputs.image }}" in
-              entrius/*@sha256:????????????????????????????????????????????????????????????????) ;;
-              *) echo "without source_repo, image must be an entrius/ image we built, repo[:tag]@sha256:<64 hex>: ${{ inputs.image }}"; exit 1 ;;
+              *@sha256:????????????????????????????????????????????????????????????????) ;;
+              *) echo "image must be digest-pinned, repo[:tag]@sha256:<64 hex>: ${{ inputs.image }}"; exit 1 ;;
             esac
           fi
 

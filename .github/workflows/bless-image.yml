@@ -1,12 +1,17 @@
 name: bless image
 
-# Signs a workload image digest + its manifest (+ our qualification measurements) into the public registry
-# (docker/controller/registry/) with the release key, and commits the entry to the branch the run was started from.
-# Manual only. This is the "bless" step of vault 25: curation, after the image was qualified on our own 5090.
+# Blesses a workload: BUILDS it from source we can read, pushes it under entrius/, then signs the digest our build
+# produced + the manifest (+ our qualification measurements) into the public registry (docker/controller/registry/)
+# with the release key, and commits the entry to the branch the run was started from. Manual only.
 #
-# Inputs: the manifest path in the repo, the image as repo[:tag]@sha256:<digest> (the workflow refuses a tag
-# without a digest), and optionally a qualification JSON committed alongside. Refuses dev keys and an entry that
-# already exists under the same name@version with different content (bump the manifest version).
+# Interim rule (Kimbo 9/15): authors submit SOURCE, never images. A blessed image is always one we built ourselves
+# from a pinned commit of a repo we read (a fork of gittensor-compute-template, or our own Dockerfile here), so
+# nothing we never saw can be in a layer. Give `source_repo` + `source_ref` (+ `dockerfile`) and the workflow
+# builds and pushes `entrius/<manifest name>:<manifest version>` first; give `image` (a digest we already produced)
+# only to re-bless an existing build, e.g. with new qualification numbers.
+#
+# Refuses dev keys and an entry that already exists under the same name@version with different content (bump the
+# manifest version).
 
 on:
   workflow_dispatch:
@@ -14,9 +19,26 @@ on:
       manifest:
         description: "Path to the manifest in the repo, e.g. docker/controller/manifests/qwen3.8-27b-nvfp4.yaml"
         required: true
+      source_repo:
+        description: "Build from source: git URL of the workload repo (a template fork, or this repo). Empty = re-bless `image`."
+        required: false
+        default: ""
+      source_ref:
+        description: "The commit to build (40 hex). Required with source_repo."
+        required: false
+        default: ""
+      dockerfile:
+        description: "Dockerfile path inside source_repo (default: Dockerfile; this repo's sparkinfer image is docker/sparkinfer.Dockerfile)."
+        required: false
+        default: "Dockerfile"
+      build_args:
+        description: "Extra --build-arg lines, newline-separated (e.g. SPARKINFER_REF=<commit>)."
+        required: false
+        default: ""
       image:
-        description: "Image to pin: repo[:tag]@sha256:<64 hex>"
-        required: true
+        description: "Re-bless only: an image WE built, as repo[:tag]@sha256:<64 hex>. Ignored when source_repo is set."
+        required: false
+        default: ""
       qualified:
         description: "Optional path to the qualification JSON ({at, box, driver, load_s, health_ok, canary_ok, vram_gb, ...})"
         required: false
@@ -32,17 +54,83 @@ jobs:
       - name: Check out the repo
         uses: actions/checkout@v4
 
-      - name: Refuse anything but a digest-pinned image
+      - name: Check the inputs
         run: |
-          case "${{ inputs.image }}" in
-            *@sha256:????????????????????????????????????????????????????????????????) ;;
-            *) echo "image must be repo[:tag]@sha256:<64 hex>: ${{ inputs.image }}"; exit 1 ;;
-          esac
           test -f "${{ inputs.manifest }}" || { echo "no such manifest: ${{ inputs.manifest }}"; exit 1; }
+          if [ -n "${{ inputs.source_repo }}" ]; then
+            case "${{ inputs.source_ref }}" in
+              ????????????????????????????????????????) ;;
+              *) echo "source_ref must be a 40-hex commit: ${{ inputs.source_ref }}"; exit 1 ;;
+            esac
+          else
+            case "${{ inputs.image }}" in
+              entrius/*@sha256:????????????????????????????????????????????????????????????????) ;;
+              *) echo "without source_repo, image must be an entrius/ image we built, repo[:tag]@sha256:<64 hex>: ${{ inputs.image }}"; exit 1 ;;
+            esac
+          fi
 
       - name: Install uv + the package
         uses: astral-sh/setup-uv@v5
       - run: uv sync --extra dev
+
+      - name: Name the image from the manifest
+        id: name
+        run: |
+          uv run python - "${{ inputs.manifest }}" <<'PY' >> "$GITHUB_OUTPUT"
+          import sys
+          from gittensor.controller.manifest import load_manifest
+          m = load_manifest(sys.argv[1], allow_placeholder_digest=True)
+          print(f'tag=entrius/{m.name}:{m.version}')
+          PY
+
+      - name: Check out the source to build
+        if: inputs.source_repo != ''
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.source_repo }}
+          ref: ${{ inputs.source_ref }}
+          path: workload-src
+          fetch-depth: 1
+
+      - name: Free disk space
+        if: inputs.source_repo != ''
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker system prune -af >/dev/null
+
+      - name: Log in to Docker Hub
+        if: inputs.source_repo != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Set up Buildx
+        if: inputs.source_repo != ''
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build from source and push under entrius/
+        if: inputs.source_repo != ''
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: workload-src
+          file: workload-src/${{ inputs.dockerfile }}
+          push: true
+          build-args: ${{ inputs.build_args }}
+          tags: ${{ steps.name.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Resolve the digest to bless
+        id: digest
+        run: |
+          if [ -n "${{ inputs.source_repo }}" ]; then
+            echo "image=${{ steps.name.outputs.tag }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+            echo "built ${{ steps.name.outputs.tag }}@${{ steps.build.outputs.digest }} from ${{ inputs.source_repo }}@${{ inputs.source_ref }}"
+          else
+            echo "image=${{ inputs.image }}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Bless with the release key
         env:
@@ -57,7 +145,7 @@ jobs:
           cp docker/controller/registry/*.json docker/controller/registry/*.sig "$STATE/registry/" 2>/dev/null || true
           Q=""
           if [ -n "${{ inputs.qualified }}" ]; then Q="--qualified ${{ inputs.qualified }}"; fi
-          uv run gitt controller bless "${{ inputs.manifest }}" --image "${{ inputs.image }}" \
+          uv run gitt controller bless "${{ inputs.manifest }}" --image "${{ steps.digest.outputs.image }}" \
             --sign-key "$KEY" $Q --state-dir "$STATE" --json | tee bless.json
           shred -u "$KEY"
           ENTRY="$(python3 -c "import json;print(json.load(open('bless.json'))['entry'])")"
@@ -73,5 +161,5 @@ jobs:
           git config user.name "gittensor-release"
           git config user.email "release@gittensor.io"
           git add docker/controller/registry/
-          git commit -m "registry: bless ${{ env.entry }} (${{ inputs.image }})"
+          git commit -m "registry: bless ${{ env.entry }} (${{ steps.digest.outputs.image }})$( [ -n "${{ inputs.source_repo }}" ] && echo " built from ${{ inputs.source_repo }}@${{ inputs.source_ref }}" )"
           git push origin HEAD:${{ github.ref_name }}

@@ -6,8 +6,8 @@
 #
 #   docker build -f docker/controller/Dockerfile -t entrius/gt-controller:dev .
 #
-# Run line and mounts: docker/controller/README.md. The per-round proof build is NOT in this image; `round --loop
-# --build-cmd` is the seam for it.
+# Run line and mounts: docker/controller/README.md. The per-round proof build is NOT in this image; `run --build-cmd`
+# is the seam for it.
 FROM python:3.12-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -39,4 +39,5 @@ RUN groupadd -g "$CONTROLLER_GID" controller \
 USER controller
 ENV HOME=/home/controller
 WORKDIR /state
-ENTRYPOINT ["gitt", "controller"]
+# The controller as one process (round + reconcile + watch). One-shots override the entrypoint: see README.md.
+ENTRYPOINT ["gitt", "controller", "run"]

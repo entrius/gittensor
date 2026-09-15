@@ -1,0 +1,318 @@
+# The MIT License (MIT)
+# Copyright © 2025 Entrius
+
+"""``gitt controller run``: the controller as one process (vault ``24`` §3 WS-D, ``26`` §3).
+
+Three loops, each on its own thread, over one in-memory state (``boxes.json`` + ``instances.json``) that every write
+changes under one short lock and saves at once:
+
+* **the proof round** every ``FULL_CHECK_INTERVAL_S`` (20 min), the proof build (``--build-cmd``) between rounds;
+* **the reconciler** every ``RECONCILE_INTERVAL_S`` (30 s); its starts and drains run on their own threads holding
+  their box's lock, so a pass never waits for a model load;
+* **the watch** every ``WATCH_TICK_S``: the generic heartbeat (``HEARTBEAT_INTERVAL_S``) and the manifest health probe
+  wherever one is due.
+
+No lock is held across a model load: a start holds only its own box, the proof round skips a box whose lock stays held
+(its cards are STARTING anyway) and proves it next round, and the watch takes no box lock at all (``locks.py``). On
+SIGTERM the loops finish the visit in flight, state is written, and the process exits; a start still loading is left
+to the next process, which finds its labelled container (``reconcile.py``).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import signal
+import subprocess
+import threading
+import time
+from collections.abc import Callable
+from dataclasses import asdict, dataclass
+from typing import Any, Protocol
+
+from gittensor.controller.checks import config as cfg
+from gittensor.controller.checks.runner import HostRunner
+from gittensor.controller.checks.state import BoxState, StateStore
+from gittensor.controller.heartbeat import Watch, WatchReport
+from gittensor.controller.locks import BoxLocks
+from gittensor.controller.reconcile import InstanceStore, Reconciler, ReconcileReport
+from gittensor.controller.registry import DeploymentStore, Registry
+from gittensor.controller.runspec import BoxHttp, HttpClient, PullToken
+
+STATUS_FILE = 'controller.json'
+
+
+class Reporter(Protocol):
+    def round(self, report: Any, n: int) -> None: ...
+    def reconcile(self, report: ReconcileReport, n: int) -> None: ...
+    def background(self, report: ReconcileReport) -> None: ...
+    def watch(self, report: WatchReport) -> None: ...
+    def note(self, loop: str, message: str) -> None: ...
+
+
+class SilentReporter:
+    def round(self, report, n):
+        pass
+
+    def reconcile(self, report, n):
+        pass
+
+    def background(self, report):
+        pass
+
+    def watch(self, report):
+        pass
+
+    def note(self, loop, message):
+        pass
+
+
+@dataclass
+class Intervals:
+    round_s: float = cfg.FULL_CHECK_INTERVAL_S
+    reconcile_s: float = cfg.RECONCILE_INTERVAL_S
+    heartbeat_s: float = cfg.HEARTBEAT_INTERVAL_S
+    watch_tick_s: float = cfg.WATCH_TICK_S
+
+
+class Controller:
+    """``state`` names the files (``StateDir``). ``run_round(proof, store=, write_lock=, box_locks=)`` is the fleet
+    round and ``load_proof()`` builds the provider, both from the CLI; ``make_runner(box, purpose)`` opens a visit."""
+
+    def __init__(
+        self,
+        state: Any,
+        registry: Registry,
+        make_runner: Callable[[BoxState, str], HostRunner],
+        run_round: Callable[..., Any],
+        load_proof: Callable[[], Any],
+        *,
+        build: Callable[[str], subprocess.CompletedProcess] | None = None,
+        build_cmd: str | None = None,
+        pull_token: PullToken | None = None,
+        intervals: Intervals | None = None,
+        reporter: Reporter | None = None,
+        http_for: Callable[[HostRunner, BoxState], HttpClient] | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+    ):
+        self.state = state
+        self.intervals = intervals or Intervals()
+        self.reporter = reporter or SilentReporter()
+        self.write_lock = threading.RLock()
+        self.box_locks = BoxLocks()
+        self.boxes = StateStore(state.boxes)
+        self.instances = InstanceStore(state.instances)
+        self.stop = threading.Event()
+        self._run_round, self._load_proof = run_round, load_proof
+        self._build, self.build_cmd = build, build_cmd
+        self.proof = None
+        self.counts = {'round': 0, 'reconcile': 0}
+        self.status: dict[str, Any] = {
+            'pid': os.getpid(),
+            'started_at': time.time(),
+            'stopped_at': None,
+            'intervals': asdict(self.intervals),
+            'round': {},
+            'reconcile': {},
+            'watch': {},
+        }
+        http_for = http_for or (lambda runner, box: BoxHttp(runner))
+        self.reconciler = Reconciler(
+            boxes=self.boxes,
+            instances=self.instances,
+            deployments=DeploymentStore(state.deployments),
+            registry=registry,
+            make_runner=lambda box: make_runner(box, 'reconcile'),
+            http_for=http_for,
+            pull_token=pull_token,
+            sleep=sleep,
+            box_locks=self.box_locks,
+            background=True,
+            on_background=self._background_done,
+            _lock=self.write_lock,
+        )
+        self.watch = Watch(
+            self.boxes,
+            self.instances,
+            registry,
+            lambda box: make_runner(box, 'watch'),
+            http_for,
+            self.intervals.heartbeat_s,
+            lock=self.write_lock,
+        )
+        self._threads: list[threading.Thread] = []
+
+    # -- one pass of each loop (tests call these directly) ---------------------------------------------------------
+
+    def round_once(self) -> Any:
+        self.counts['round'] += 1
+        n = self.counts['round']
+        try:
+            self.proof = self._load_proof()
+        except Exception as e:
+            if self.proof is None:
+                self.reporter.note('round', f'round {n} not run: no proof provider ({e})')
+                self._set_status('round', {'n': n, 'at': time.time(), 'error': str(e)[:300]})
+                return None
+            self.reporter.note('round', f'round {n}: keeping the previous proof ({e})')
+        started = time.time()
+        report = self._run_round(self.proof, store=self.boxes, write_lock=self.write_lock, box_locks=self.box_locks)
+        boxes = {
+            r.box.box_id: {
+                'before': r.status_before,
+                'after': (r.after or r.box).status,
+                'verdict': r.verdict.verdict if r.verdict else None,
+                'busy': r.busy,
+                'transport_error': r.transport_error,
+            }
+            for r in report.boxes
+        }
+        self._set_status(
+            'round',
+            {
+                'n': n,
+                'started_at': started,
+                'finished_at': time.time(),
+                'exit_code': report.exit_code,
+                'provider': report.provider,
+                'timings_ms': report.timings_ms,
+                'boxes': boxes,
+            },
+        )
+        self.reporter.round(report, n)
+        return report
+
+    def build_once(self) -> None:
+        if not self.build_cmd or self._build is None:
+            return
+        started = time.monotonic()
+        proc = self._build(self.build_cmd)
+        tail = (proc.stdout or proc.stderr or '').strip().splitlines()[-1:] or ['']
+        took = (time.monotonic() - started) * 1000.0
+        self.reporter.note('round', f'build exit {proc.returncode} in {took:.0f} ms: {tail[0][:200]}')
+
+    def reconcile_once(self) -> ReconcileReport:
+        self.counts['reconcile'] += 1
+        n = self.counts['reconcile']
+        with self.write_lock:
+            self.boxes.merge_from_disk()  # boxes an operator admitted beside us
+        self.reconciler.deployments = DeploymentStore(self.state.deployments)  # operator-owned: read fresh each pass
+        report = self.reconciler.run_pass()
+        self._set_status(
+            'reconcile',
+            {
+                'n': n,
+                'at': time.time(),
+                'ok': report.ok,
+                'desired': report.desired,
+                'running': report.running,
+                'actions': [asdict(a) for a in report.actions],
+                'errors': report.errors,
+                'unreachable': report.unreachable,
+                'launched': report.launched,
+                'in_flight': report.in_flight,
+            },
+        )
+        self.reporter.reconcile(report, n)
+        return report
+
+    def watch_once(self) -> WatchReport:
+        report = self.watch.run_pass()
+        if report.visited:
+            self._set_status(
+                'watch',
+                {
+                    'at': time.time(),
+                    'visited': report.visited,
+                    'actions': [asdict(a) for a in report.actions],
+                    'unreachable': report.unreachable,
+                },
+            )
+            self.reporter.watch(report)
+        return report
+
+    def _background_done(self, report: ReconcileReport) -> None:
+        with self.write_lock:
+            self.status['reconcile']['last_background'] = {
+                'at': time.time(),
+                'actions': [asdict(a) for a in report.actions],
+                'errors': report.errors,
+                'unreachable': report.unreachable,
+            }
+        self._write_status()
+        self.reporter.background(report)
+
+    # -- status file ------------------------------------------------------------------------------------------------
+
+    def _set_status(self, key: str, value: dict) -> None:
+        with self.write_lock:
+            self.status[key] = value
+        self._write_status()
+
+    def _write_status(self) -> None:
+        path = self.state.root / STATUS_FILE
+        with self.write_lock:
+            tmp = path.with_suffix('.json.tmp')
+            tmp.write_text(json.dumps(self.status, indent=1, default=str))
+            tmp.replace(path)
+
+    # -- the loops --------------------------------------------------------------------------------------------------
+
+    def _loop(self, name: str, once: Callable[[], Any], interval_s: float, after: Callable[[], None] | None) -> None:
+        while not self.stop.is_set():
+            started = time.monotonic()
+            try:
+                once()
+            except Exception as e:  # one bad pass never ends a loop; state is saved write by write
+                self.reporter.note(name, f'{type(e).__name__}: {e}')
+            if after is not None and not self.stop.is_set():
+                try:
+                    after()
+                except Exception as e:
+                    self.reporter.note(name, f'{type(e).__name__}: {e}')
+            self.stop.wait(max(0.0, interval_s - (time.monotonic() - started)))
+
+    def start(self) -> None:
+        loops = (
+            ('round', self.round_once, self.intervals.round_s, self.build_once),
+            ('reconcile', self.reconcile_once, self.intervals.reconcile_s, None),
+            ('watch', self.watch_once, self.intervals.watch_tick_s, None),
+        )
+        for name, once, interval_s, after in loops:
+            thread = threading.Thread(
+                target=self._loop, args=(name, once, interval_s, after), name=f'controller-{name}', daemon=True
+            )
+            thread.start()
+            self._threads.append(thread)
+
+    def shutdown(self, grace_s: float = cfg.SHUTDOWN_GRACE_S) -> bool:
+        """Stop the loops, let each finish the visit in flight (up to ``grace_s``), write state. True when every loop
+        stopped in time. Background starts are not waited for."""
+        self.stop.set()
+        deadline = time.monotonic() + grace_s
+        for thread in self._threads:
+            thread.join(max(0.0, deadline - time.monotonic()))
+        clean = not any(thread.is_alive() for thread in self._threads)
+        with self.write_lock:
+            self.boxes.save()
+            self.instances.save()
+            self.status['stopped_at'] = time.time()
+        self._write_status()
+        return clean
+
+    def serve(self, max_seconds: float | None = None, install_signals: bool = True) -> bool:
+        previous = {}
+        if install_signals:
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                previous[sig] = signal.signal(sig, lambda *_: self.stop.set())
+        try:
+            self.start()
+            began = time.monotonic()
+            while not self.stop.wait(1.0):
+                if max_seconds and time.monotonic() - began >= max_seconds:
+                    break
+            self.reporter.note('controller', 'stopping: finishing the visits in flight')
+            return self.shutdown()
+        finally:
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)

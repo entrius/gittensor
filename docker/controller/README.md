@@ -14,27 +14,55 @@ ssh-keygen refuse a uid with no passwd entry.
 
 | Mount | In the container | What |
 |---|---|---|
-| state dir (owned by `CONTROLLER_UID`) | `/state` | `boxes.json`, `known_hosts`, `nvml_allowlist.json` |
+| state dir (owned by `CONTROLLER_UID`) | `/state` | `boxes.json`, `instances.json`, `known_hosts`, `nvml_allowlist.json`, `registry/`, `deployments.json`, `controller.json` |
 | SSH CA private key | `/secrets/gt_ca` (read-only) | signs the ~5-minute per-visit certificates |
 | proof provider source | `/opt/proof` (read-only, on `PYTHONPATH`) | the private `GpuProof` implementation |
 | proof binary + secret store | `/opt/proof-dist` (read-only) | e.g. `gt_proof`, `gt_proof.version`, `secret_store.json` |
+| pull token (optional) | `/secrets/pull_token` (read-only) | `username:token`, read-only Docker Hub |
+
+The image's entrypoint is **`gitt controller run`**: the controller as one long-lived process.
 
 ```bash
-docker run --rm \
+docker run -d --name gt-controller --restart unless-stopped --stop-timeout 150 \
     -v ~/.gittensor/controller:/state \
     -v /path/to/gt_ca:/secrets/gt_ca:ro \
     -v /path/to/provider:/opt/proof:ro -e PYTHONPATH=/opt/proof \
     -v /path/to/dist:/opt/proof-dist:ro \
     entrius/gt-controller:dev \
-    check <hotkey> --state-dir /state --ca-key /secrets/gt_ca \
-        --agent-image-digest sha256:<published agent digest> \
-        --proof <module:Class> \
-        --proof-args secret_store=/opt/proof-dist/secret_store.json \
-        --proof-args version=@/opt/proof-dist/gt_proof.version \
-        --proof-args binary_path=/opt/proof-dist/gt_proof
+    --state-dir /state --ca-key /secrets/gt_ca \
+    --agent-image-digest sha256:<published agent digest> \
+    --proof <module:Class> \
+    --proof-args secret_store=/opt/proof-dist/secret_store.json \
+    --proof-args version=@/opt/proof-dist/gt_proof.version \
+    --proof-args binary_path=/opt/proof-dist/gt_proof
 ```
 
-The same flags drive `round` (add `--loop` for the 20-minute cycle). `admit <hotkey> --host <ip> --port <port>` and
-`allowlist add <hotkey>` come first; see `gitt controller --help`. A per-round proof build needs the private build
-pipeline, which this image deliberately does not carry: run it where that lives and point `--build-cmd` at it, or
-rebuild outside and let each round re-read the mounted `dist`.
+| `run` flag | Default | What |
+|---|---|---|
+| `--round-interval` | 1200 s | the two-phase GPU proof over every IDLE / CHECKING card |
+| `--build-cmd` | none | shell command after every round (a fresh proof build); the provider is re-read next round |
+| `--reconcile-interval` | 30 s | desired replicas vs running; starts and drains run on their own threads |
+| `--heartbeat-interval` | 60 s | same card / our container running / card ours alone, per box with a LEASED card |
+| `--pull-token-file` | none | installed for each image pull and removed after |
+| `--release-pubkey`, `--allow-dev-keys` | compiled release key | what registry entries must verify against |
+| every `check` / `round` flag | | `--proof`, `--proof-args`, `--agent-image-digest`, `--agent-image-id`, `--proof-image`, `--allowlist`, `--network-target`, `--disk-min-gb`, `--ca-key` |
+| `--json` | off | one JSON object per event on stdout instead of log lines on stderr |
+
+The manifest health probe runs per instance on the manifest's own `health.interval_s`. `docker stop` sends SIGTERM: the
+loops finish the SSH visit in flight (up to 120 s, hence `--stop-timeout 150`), state is written, and the process exits;
+a start still loading is picked up by the next process through its container label.
+
+`run` holds the state directory for its whole life. Beside it, `check`, `round` and `reconcile` refuse ("controller
+running, use `gitt controller status`"); `status`, `instances`, `registry show`, `admit` and `deploy` work (the daemon
+merges newly admitted boxes and reads `deployments.json` every pass). A one-shot overrides the entrypoint:
+
+```bash
+docker run --rm -v ~/.gittensor/controller:/state --entrypoint gitt entrius/gt-controller:dev \
+    controller status --state-dir /state
+docker run --rm -v ~/.gittensor/controller:/state --entrypoint gitt entrius/gt-controller:dev \
+    controller admit <hotkey> --host <ip> --port <port> --state-dir /state
+```
+
+`admit <hotkey> --host <ip> --port <port>` and `allowlist add <hotkey>` come first; see `gitt controller --help`. A
+per-round proof build needs the private build pipeline, which this image deliberately does not carry: run it where
+that lives and point `--build-cmd` at it, or rebuild outside and let each round re-read the mounted `dist`.

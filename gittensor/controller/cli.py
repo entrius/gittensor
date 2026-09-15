@@ -15,12 +15,18 @@ full check and box state (``controller.checks``), the GPU-proof slot (``controll
     gitt controller registry show                              entries (re-verified), deployments, running counts
     gitt controller reconcile [--loop]                         desired replicas vs running instances, over SSH
     gitt controller instances                                  what runs where (what the gateway will read)
+    gitt controller run                                        the controller as one process: round + reconcile + watch
+    gitt controller status                                     boxes, cards, instances, last round / reconcile (read-only)
 
 State lives in one directory (``--state-dir``, default ``~/.gittensor/controller``): ``boxes.json`` (the
 ``StateStore``, cards included), ``known_hosts`` (host keys pinned at admit), ``nvml_allowlist.json``,
-``registry/`` (signed entries), ``deployments.json`` and ``instances.json``; the CA private key defaults to ``gt_ca``
-beside them. Commands that change box or card state hold ``controller.lock``, so a proof round never lands on a card
-mid-start. The GPU proof is chosen by config, never by code: ``--proof module:Class`` plus ``--proof-args key=value``
+``registry/`` (signed entries), ``deployments.json``, ``instances.json`` and ``controller.json`` (what ``run`` last
+did); the CA private key defaults to ``gt_ca`` beside them. The one-shot commands that change box or card state
+(``check``, ``round``, ``reconcile``) hold ``controller.lock``, so a proof round never lands on a card mid-start. ``run``
+holds it, and ``controller.run.lock``, for its whole life: a one-shot beside it refuses and points at ``status``.
+Inside ``run`` the loops share the state in memory with per-box locks (``daemon.py``, ``locks.py``); ``admit`` and
+``deploy`` stay usable beside it (the daemon merges admitted boxes and reads deployments fresh each pass).
+The GPU proof is chosen by config, never by code: ``--proof module:Class`` plus ``--proof-args key=value``
 kwargs. Without one the fail-closed ``UnconfiguredProof`` benches every box with the reason named. No inbound
 endpoints and no chain access: outbound SSH and local files only (``26`` §3).
 """
@@ -31,6 +37,7 @@ import base64
 import fcntl
 import importlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -39,7 +46,7 @@ import time
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import NoReturn
 
@@ -86,6 +93,9 @@ from gittensor.controller.checks.state import (
     release_from_bench,
 )
 from gittensor.controller.checks.verdict import CheckResult, CheckVerdict
+from gittensor.controller.daemon import STATUS_FILE, Controller, Intervals
+from gittensor.controller.heartbeat import WatchReport
+from gittensor.controller.locks import BoxLocks
 from gittensor.controller.manifest import ManifestError
 from gittensor.controller.proof.slot import (
     GpuProof,
@@ -160,16 +170,62 @@ class StateDir:
     def store(self) -> StateStore:
         return StateStore(self.boxes)
 
+    def daemon_running(self) -> bool:
+        """True while a `gitt controller run` holds this state directory."""
+        path = self.root / 'controller.run.lock'
+        if not path.exists():
+            return False
+        with open(path, 'a') as handle:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(handle, fcntl.LOCK_UN)
+            return False
+
     @contextmanager
     def lock(self) -> Iterator[None]:
-        """Exclusive across processes: one writer of box and card state at a time (round, check, reconcile)."""
+        """Exclusive across processes: one writer of box and card state at a time (round, check, reconcile). Waits for
+        another one-shot; raises ``ControllerRunning`` while `gitt controller run` owns the directory."""
         self.ensure()
         with open(self.root / 'controller.lock', 'w') as handle:
-            fcntl.flock(handle, fcntl.LOCK_EX)
+            while True:
+                if self.daemon_running():
+                    raise ControllerRunning(self.root)
+                try:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    time.sleep(0.5)
             try:
                 yield
             finally:
                 fcntl.flock(handle, fcntl.LOCK_UN)
+
+    @contextmanager
+    def run_lock(self) -> Iterator[None]:
+        """`gitt controller run` for its whole life: ``controller.run.lock`` (a second `run` refuses) and then
+        ``controller.lock`` (waiting for a one-shot already in flight to finish)."""
+        self.ensure()
+        with open(self.root / 'controller.run.lock', 'w') as run_handle:
+            try:
+                fcntl.flock(run_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise ControllerRunning(self.root) from None
+            try:
+                with open(self.root / 'controller.lock', 'w') as handle:
+                    fcntl.flock(handle, fcntl.LOCK_EX)
+                    try:
+                        yield
+                    finally:
+                        fcntl.flock(handle, fcntl.LOCK_UN)
+            finally:
+                fcntl.flock(run_handle, fcntl.LOCK_UN)
+
+
+class ControllerRunning(Exception):
+    def __init__(self, root: Path):
+        super().__init__(f'controller running on {root}, use `gitt controller status`')
 
 
 def _host_field(host: str, port: int) -> str:
@@ -439,6 +495,8 @@ class BoxRound:
     transport_error: str = ''
     verdict: CheckVerdict | None = None
     after: BoxState | None = None
+    locked: bool = False  # this round holds the box's lock
+    busy: str = ''  # not probed this round: its lock stayed held (a start or drain), or it was benched meanwhile
 
 
 @dataclass
@@ -464,30 +522,58 @@ def _each(rows: Sequence, fn: Callable) -> None:
             list(pool.map(fn, rows))
 
 
-def run_round(setup: CheckSetup, proof: GpuProof, clock: Callable[[], float] = time.monotonic) -> RoundReport:
+def run_round(
+    setup: CheckSetup,
+    proof: GpuProof,
+    clock: Callable[[], float] = time.monotonic,
+    *,
+    store: StateStore | None = None,
+    write_lock: threading.RLock | None = None,
+    box_locks: BoxLocks | None = None,
+    lock_wait_s: float = cfg.ROUND_BOX_LOCK_WAIT_S,
+) -> RoundReport:
     """One probe cycle over every ADMIT / IDLE box (``23`` §3b). Benches that have expired are released first.
 
     Phase 1: connect and scrape every box in parallel; judge identity with fleet-wide UUID uniqueness over every pin
     and every card reported this round; stage the proof on every box that passed, in parallel. Phase 2: one start
     signal — every staged box fires at once (a thread per box, cards parallel inside ``fire_box``). Then clean up,
     judge, ``apply_verdict``. A box lost to SSH gets no verdict; its unreachable count goes up and three in a row
-    bench it for 12 h (``apply_unreachable``)."""
-    store = setup.state.store()
+    bench it for 12 h (``apply_unreachable``).
+
+    Inside `gitt controller run` the round shares the daemon's ``store`` and ``write_lock`` and holds each box's lock
+    from connect to verdict. A box whose lock stays held for ``lock_wait_s`` (a start or drain in flight) is skipped
+    until the next round; a box the watch benched mid-round keeps its bench and gets no verdict; and only the cards the
+    proof ran on return from CHECKING to IDLE."""
+    store = store if store is not None else setup.state.store()
+    write_lock = write_lock if write_lock is not None else threading.RLock()
+    box_locks = box_locks if box_locks is not None else BoxLocks()
     now = time.time()
     rows: list[BoxRound] = []
     not_probed: list[BoxState] = []
-    for box_id in sorted(store.boxes):
-        before = store.boxes[box_id]
-        box = store.boxes[box_id] = release_from_bench(before, now)
-        if box.status in (ADMIT, IDLE) and box.host:
-            rows.append(BoxRound(box, before.status))
-        else:
-            not_probed.append(box)
+    with write_lock:
+        store.merge_from_disk()
+        for box_id in sorted(store.boxes):
+            before = store.boxes[box_id]
+            box = store.boxes[box_id] = release_from_bench(before, now)
+            if box.status in (ADMIT, IDLE) and box.host:
+                rows.append(BoxRound(box, before.status))
+            else:
+                not_probed.append(box)
     config, allowlist = setup.config, setup.allowlist()
     provider = str(getattr(proof, 'version', '?'))
     marks = {'start': clock()}
 
     def connect_and_scrape(r: BoxRound) -> None:
+        if not box_locks.acquire(r.box.box_id, lock_wait_s):
+            r.busy = f'box busy {lock_wait_s:.0f} s (a start or drain in flight): skipped until the next round'
+            return
+        r.locked = True
+        with write_lock:
+            current = store.boxes.get(r.box.box_id)
+        if current is None or current.status not in (ADMIT, IDLE):
+            r.busy = f'{current.status if current else "removed"} meanwhile: not probed'
+            return
+        r.box = current  # no start can move its cards while we hold the lock
         r.runner = TimedRunner(_make_runner(setup.state, r.box, setup.ca_key, 'round'), clock)
         try:
             r.runner.run(PREFLIGHT_COMMAND, timeout=config.ssh_timeout_s)
@@ -521,56 +607,72 @@ def run_round(setup: CheckSetup, proof: GpuProof, clock: Callable[[], float] = t
 
     armed: list[BoxRound] = []
     try:
-        _each(rows, connect_and_scrape)
-        marks['scraped'] = clock()
-        fleet: dict[str, set[str]] = {box_id: set(b.pinned_uuids) for box_id, b in store.boxes.items()}
-        for r in rows:
-            if r.scrape is not None:
-                fleet.setdefault(r.box.box_id, set()).update(r.scrape.uuids)
-        for r in rows:
-            if r.scrape is not None:
-                r.checks = judge_identity(r.scrape, allowlist, r.box.pinned_uuids or None, config, r.box.box_id, fleet)
-        _each([r for r in rows if r.scrape is not None and identity_passed(r.checks)], stage)
-        marks['staged'] = clock()
-        armed = [r for r in rows if r.staged is not None]
-        if armed:
-            gate = threading.Barrier(len(armed))
+        try:
+            _each(rows, connect_and_scrape)
+            marks['scraped'] = clock()
+            with write_lock:
+                fleet: dict[str, set[str]] = {box_id: set(b.pinned_uuids) for box_id, b in store.boxes.items()}
+            for r in rows:
+                if r.scrape is not None:
+                    fleet.setdefault(r.box.box_id, set()).update(r.scrape.uuids)
+            for r in rows:
+                if r.scrape is not None:
+                    r.checks = judge_identity(
+                        r.scrape, allowlist, r.box.pinned_uuids or None, config, r.box.box_id, fleet
+                    )
+            _each([r for r in rows if r.scrape is not None and identity_passed(r.checks)], stage)
+            marks['staged'] = clock()
+            armed = [r for r in rows if r.staged is not None]
+            if armed:
+                gate = threading.Barrier(len(armed))
 
-            def fire(r: BoxRound) -> None:
-                gate.wait()
-                r.fired_at = clock()
-                try:
-                    r.cards = fire_box(r.runner, r.proved, proof, r.staged, config.proof_timeout_s, clock)
-                except Exception as e:
-                    r.stage_error = f'fire failed: {type(e).__name__}: {e}'[:300]
+                def fire(r: BoxRound) -> None:
+                    gate.wait()
+                    r.fired_at = clock()
+                    try:
+                        r.cards = fire_box(r.runner, r.proved, proof, r.staged, config.proof_timeout_s, clock)
+                    except Exception as e:
+                        r.stage_error = f'fire failed: {type(e).__name__}: {e}'[:300]
 
-            _each(armed, fire)
-        marks['fired'] = clock()
+                _each(armed, fire)
+            marks['fired'] = clock()
+        finally:
+            _each(armed, cleanup)
+            marks['cleaned'] = clock()
+            for r in rows:
+                if r.runner is not None:
+                    r.runner.close()
+
+        now = time.time()
+        with write_lock:
+            for r in rows:
+                if r.busy:
+                    continue
+                current = store.boxes.get(r.box.box_id)
+                if current is None or current.status != r.box.status:
+                    r.after = current  # benched by the watch mid-round: the bench stands, no verdict applied
+                    continue
+                if r.scrape is None:
+                    if r.transport_error:
+                        r.after = store.boxes[r.box.box_id] = apply_unreachable(current, now)
+                    continue
+                if not identity_passed(r.checks):
+                    r.checks.append(proof_skipped(r.checks))
+                elif not r.proved:
+                    r.after = current  # identity passed and every card is busy: nothing proved, nothing applied
+                    continue
+                elif r.stage_error:
+                    r.checks.append(ck.proof_result(ProbeResult(provider, cards=r.cards, error=r.stage_error)))
+                else:
+                    r.checks.append(ck.proof_result(ProbeResult(provider, cards=r.cards)))
+                r.verdict = finish_verdict(r.checks, r.scrape, now)
+                proved = [g.uuid for g in r.proved]
+                r.after = store.boxes[r.box.box_id] = apply_verdict(current, r.verdict, now, proved=proved)
+            store.save()
     finally:
-        _each(armed, cleanup)
-        marks['cleaned'] = clock()
         for r in rows:
-            if r.runner is not None:
-                r.runner.close()
-
-    now = time.time()
-    for r in rows:
-        if r.scrape is None:
-            if r.transport_error:
-                r.after = store.boxes[r.box.box_id] = apply_unreachable(r.box, now)
-            continue
-        if not identity_passed(r.checks):
-            r.checks.append(proof_skipped(r.checks))
-        elif not r.proved:
-            r.after = r.box  # identity passed and every card is busy: nothing proved, nothing applied
-            continue
-        elif r.stage_error:
-            r.checks.append(ck.proof_result(ProbeResult(provider, cards=r.cards, error=r.stage_error)))
-        else:
-            r.checks.append(ck.proof_result(ProbeResult(provider, cards=r.cards)))
-        r.verdict = finish_verdict(r.checks, r.scrape, now)
-        r.after = store.boxes[r.box.box_id] = apply_verdict(r.box, r.verdict, now)
-    store.save()
+            if r.locked:
+                box_locks.release(r.box.box_id)
 
     def between(a: str, b: str) -> float | None:
         return round((marks[b] - marks[a]) * 1000.0, 1) if a in marks and b in marks else None
@@ -731,6 +833,25 @@ def _setup(
     )
 
 
+@contextmanager
+def _one_shot_lock(state: StateDir, json_mode: bool) -> Iterator[None]:
+    """``controller.lock`` for a one-shot; refuses (exit 2) while `gitt controller run` owns the state directory."""
+    try:
+        with state.lock():
+            yield
+    except ControllerRunning as e:
+        _fail(str(e), json_mode, EXIT_NO_VERDICT)
+
+
+def _read_pull_token(path: Path | None, json_mode: bool) -> PullToken | None:
+    if not path:
+        return None
+    try:
+        return PullToken.parse(path.read_text())
+    except (OSError, ValueError) as e:
+        _fail(str(e), json_mode, EXIT_NO_VERDICT)
+
+
 def _admitted_box(store: StateStore, hotkey: str, json_mode: bool) -> BoxState:
     box = store.boxes.get(hotkey)
     if box is None or not box.host:
@@ -839,6 +960,8 @@ def controller_group():
         registry   Show the registry, re-verified, with deployments
         reconcile  Place and drain instances until running matches desired (--loop: every 30 s)
         instances  List placement instances: entry, box, card, container, host:port, healthy
+        run        The controller as one process: proof round, reconcile, heartbeat + health watch
+        status     Boxes, cards, instances, last round / reconcile / watch (read-only, safe beside run)
     """
 
 
@@ -945,7 +1068,7 @@ def check_command(hotkey, force, state_dir, json_mode, **opts):
             --proof-args version=@dist/gt_proof.version --proof-args binary_path=dist/gt_proof
     """
     setup = _setup(state_dir, **opts)
-    with setup.state.lock():
+    with _one_shot_lock(setup.state, json_mode):
         _check_one(setup, hotkey, force, json_mode)
 
 
@@ -1059,7 +1182,7 @@ def round_command(loop, interval, build_cmd, max_rounds, state_dir, json_mode, *
             if proof is None:
                 _fail(str(e), json_mode, EXIT_NO_VERDICT)
             err_console.print(f'[yellow]Round {n}: keeping the previous proof — {escape(str(e))}[/yellow]')
-        with setup.state.lock():
+        with _one_shot_lock(setup.state, json_mode):
             report = run_round(setup, proof)
         _print_round(report, n, json_mode)
         if not loop or (max_rounds and n >= max_rounds):
@@ -1102,6 +1225,7 @@ def _print_round(report: RoundReport, n: int, json_mode: bool) -> None:
                         'host': _host_field(r.box.host, r.box.port),
                         'status': {'before': r.status_before, 'after': (r.after or r.box).status},
                         'transport_error': r.transport_error,
+                        'busy': r.busy,
                         'cards': {'proved': [g.uuid for g in r.proved], 'skipped': r.skipped},
                         'timings_ms': phase_timings(r.runner.log) if r.runner else {},
                         'check_ms': check_timings(r.runner.log) if r.runner else {},
@@ -1121,16 +1245,22 @@ def _print_round(report: RoundReport, n: int, json_mode: bool) -> None:
     for r in report.boxes:
         proof_ms = [c.get('elapsed_ms') for c in r.cards if c.get('elapsed_ms') is not None]
         if r.verdict is None:
-            reason = r.transport_error or ('identity ok; every card busy' if r.scrape is not None else '')
+            reason = r.transport_error or r.busy or ('identity ok; every card busy' if r.scrape is not None else '')
         else:
             reason = '; '.join(
                 f'{c.name}: {check_detail(c)}' for c in r.verdict.checks if not c.passed and not c.skipped
             )
+        if r.busy:
+            verdict_cell = '[dim]busy[/dim]'
+        elif r.verdict is not None or r.scrape is None:
+            verdict_cell = _verdict_markup(r.verdict)
+        else:
+            verdict_cell = '[dim]no proof[/dim]'
         table.add_row(
             escape(r.box.box_id),
             escape(_host_field(r.box.host, r.box.port)),
             f'{r.status_before} → {(r.after or r.box).status}',
-            _verdict_markup(r.verdict) if r.verdict is not None or r.scrape is None else '[dim]no proof[/dim]',
+            verdict_cell,
             escape(_cards_text(r)),
             f'{max(proof_ms):.0f}' if proof_ms else '',
             escape(reason),
@@ -1418,17 +1548,12 @@ def reconcile_command(
     ca_key = Path(ca_key).expanduser() if ca_key else state.ca_key
     _require_ca_key(ca_key, json_mode)
     registry = _open_registry(state, release_pubkey, allow_dev_keys, json_mode)
-    token = None
-    if pull_token_file:
-        try:
-            token = PullToken.parse(pull_token_file.read_text())
-        except (OSError, ValueError) as e:
-            _fail(str(e), json_mode, EXIT_NO_VERDICT)
+    token = _read_pull_token(pull_token_file, json_mode)
     n = 0
     while True:
         started = time.monotonic()
         n += 1
-        with state.lock():
+        with _one_shot_lock(state, json_mode):
             reconciler = Reconciler(
                 boxes=state.store(),
                 instances=InstanceStore(state.instances),
@@ -1523,6 +1648,296 @@ def instances_command(state_dir, json_mode):
             escape(f'{r["host"]}:{r["port"]}' if r['port'] else r['host']),
             '[green]yes[/green]' if r['healthy'] else '[red]no[/red]',
             'yes' if r['draining'] else 'no',
+        )
+    console.print(table)
+
+
+# ---------------------------------------------------------------- run: the controller as one process ----------------
+
+
+def _age(ts: float | None, now: float) -> str:
+    if ts is None:
+        return '—'
+    s = max(0.0, now - ts)
+    return f'{s:.0f}s' if s < 120 else (f'{s / 60:.0f}m' if s < 7200 else f'{s / 3600:.1f}h')
+
+
+class _DaemonPrinter:
+    """`run`'s log: one timestamped (UTC) line per event on stderr, or one JSON object per event on stdout (--json)."""
+
+    def __init__(self, json_mode: bool):
+        self.json_mode = json_mode
+        self._lock = threading.Lock()
+        self._last_errors: list[str] = []
+
+    def _emit(self, event: str, payload: dict, line: str) -> None:
+        with self._lock:
+            if self.json_mode:
+                print(json.dumps({'event': event, 'at': time.time(), **payload}, default=str), flush=True)
+            else:
+                err_console.print(f'[dim]{time.strftime("%H:%M:%S", time.gmtime())}[/dim] {line}')
+
+    def round(self, report: RoundReport, n: int) -> None:
+        parts, rows = [], []
+        for r in report.boxes:
+            after = (r.after or r.box).status
+            why = r.busy or r.transport_error
+            if r.verdict is not None and not r.verdict.admitted:
+                why = '; '.join(
+                    f'{c.name}: {check_detail(c)}' for c in r.verdict.checks if not c.passed and not c.skipped
+                )
+            mark = _verdict_markup(r.verdict) if r.verdict is not None else ('[dim]busy[/dim]' if r.busy else '')
+            parts.append(
+                f'{escape(r.box.box_id[:16])} {r.status_before}→{after} {mark} {escape(_cards_text(r))}'
+                + (f' ({escape(why[:200])})' if why else '')
+            )
+            rows.append(
+                {
+                    'hotkey': r.box.box_id,
+                    'before': r.status_before,
+                    'after': after,
+                    'verdict': r.verdict.verdict if r.verdict else None,
+                    'busy': r.busy,
+                    'transport_error': r.transport_error,
+                    'failed': r.verdict.failed if r.verdict else [],
+                }
+            )
+        payload = {'round': n, 'provider': report.provider, 'exit_code': report.exit_code, 'boxes': rows}
+        payload['timings_ms'] = report.timings_ms
+        self._emit(
+            'round', payload, f'[cyan]round {n}[/cyan] {escape(report.provider)}: ' + (' · '.join(parts) or 'no boxes')
+        )
+
+    def _actions(self, event: str, actions: Sequence) -> None:
+        for a in actions:
+            mark = '[green]✓[/green]' if a.ok else '[red]✗[/red]'
+            states = ' → '.join(a.states)
+            line = f'{mark} {event} {a.kind} {escape(a.box[:16])} {escape(a.instance)} {states} {escape(a.detail)}'
+            self._emit(event, asdict(a), line)
+
+    def _problems(self, event: str, errors: Sequence[str], unreachable: dict[str, str]) -> None:
+        for line in errors:
+            self._emit(f'{event}_error', {'error': line}, f'[yellow]{event}: {escape(line)}[/yellow]')
+        for box_id, why in unreachable.items():
+            self._emit(f'{event}_unreachable', {'hotkey': box_id, 'why': why}, f'[red]unreachable[/red] {escape(box_id[:16])}: {escape(why)}')  # fmt: skip
+
+    def reconcile(self, report: ReconcileReport, n: int) -> None:
+        self._actions('reconcile', report.actions)
+        errors = [] if report.errors == self._last_errors else report.errors  # "N short" every 30 s is noise
+        self._last_errors = list(report.errors)
+        self._problems('reconcile', errors, report.unreachable)
+        if report.launched:
+            boxes = ', '.join(b[:16] for b in report.launched)
+            self._emit('reconcile_launched', {'pass': n, 'boxes': report.launched}, f'[dim]reconcile {n}: working on {escape(boxes)}[/dim]')  # fmt: skip
+
+    def background(self, report: ReconcileReport) -> None:
+        self._actions('reconcile', report.actions)
+        self._problems('reconcile', report.errors, report.unreachable)
+
+    def watch(self, report: WatchReport) -> None:
+        self._actions('watch', report.actions)
+        self._problems('watch', [], report.unreachable)
+
+    def note(self, loop: str, message: str) -> None:
+        self._emit('note', {'loop': loop, 'message': message}, f'[yellow]{loop}:[/yellow] {escape(message)}')
+
+
+@controller_group.command('run')
+@click.option(
+    '--round-interval',
+    type=float,
+    default=cfg.FULL_CHECK_INTERVAL_S,
+    show_default=True,
+    help='Seconds between proof round starts.',
+)
+@click.option(
+    '--build-cmd', default=None, help='Shell command run after every round (a fresh proof build); re-read next round.'
+)
+@click.option(
+    '--reconcile-interval',
+    type=float,
+    default=cfg.RECONCILE_INTERVAL_S,
+    show_default=True,
+    help='Seconds between reconcile passes.',
+)
+@click.option(
+    '--heartbeat-interval',
+    type=float,
+    default=cfg.HEARTBEAT_INTERVAL_S,
+    show_default=True,
+    help='Seconds between heartbeats of a box with a LEASED card.',
+)
+@click.option(
+    '--pull-token-file',
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help='Read-only registry token, one line "username:token"; installed for each pull and removed after.',
+)
+@click.option('--max-seconds', type=float, default=0, hidden=True)
+@_registry_options
+@_check_options
+@_state_options
+def run_command(
+    round_interval,
+    build_cmd,
+    reconcile_interval,
+    heartbeat_interval,
+    pull_token_file,
+    max_seconds,
+    release_pubkey,
+    allow_dev_keys,
+    state_dir,
+    json_mode,
+    **opts,
+):
+    """The controller as one process: the proof round (every --round-interval, --build-cmd between rounds), the
+    reconciler (every --reconcile-interval) and the in-lease watch (heartbeat every --heartbeat-interval, manifest
+    health probe every health.interval_s), each on its own thread over one state.
+
+    \b
+    It holds the state directory for its whole life: `check`, `round` and `reconcile` refuse beside it (use
+    `status`); `admit` and `deploy` keep working. SIGTERM finishes the visits in flight, writes state and exits 0.
+    Takes every `round` flag (--proof, --proof-args, --agent-image-digest, ...) and every `reconcile` flag.
+    """
+    setup = _setup(state_dir, **opts)
+    setup.state.ensure()
+    _require_ca_key(setup.ca_key, json_mode)
+    registry = _open_registry(setup.state, release_pubkey, allow_dev_keys, json_mode)
+    token = _read_pull_token(pull_token_file, json_mode)
+    try:
+        setup.proof()  # a provider that cannot load fails now, not 20 minutes in; every round re-loads it
+    except ProofLoadError as e:
+        _fail(str(e), json_mode, EXIT_NO_VERDICT)
+    printer = _DaemonPrinter(json_mode)
+    try:
+        with setup.state.run_lock():
+            controller = Controller(
+                setup.state,
+                registry,
+                make_runner=lambda box, purpose: _make_runner(setup.state, box, setup.ca_key, purpose),
+                run_round=lambda proof, **shared: run_round(setup, proof, **shared),
+                load_proof=setup.proof,
+                build=_run_build,
+                build_cmd=build_cmd,
+                pull_token=token,
+                intervals=Intervals(round_interval, reconcile_interval, heartbeat_interval),
+                reporter=printer,
+                sleep=_sleep,
+            )
+            printer.note(
+                'controller',
+                f'running on {setup.state.root} (pid {os.getpid()}): round every {round_interval:.0f} s, reconcile '
+                f'every {reconcile_interval:.0f} s, heartbeat every {heartbeat_interval:.0f} s',
+            )
+            clean = controller.serve(max_seconds=max_seconds or None)
+    except ControllerRunning as e:
+        _fail(str(e), json_mode, EXIT_NO_VERDICT)
+    sys.exit(EXIT_ADMIT if clean else EXIT_NO_VERDICT)
+
+
+def _heartbeat_cell(row: dict, now: float) -> str:
+    if row.get('heartbeat_ok') is None:
+        misses = row.get('heartbeat_misses') or 0
+        return '[dim]—[/dim]' + (f' [yellow]{misses} missed[/yellow]' if misses else '')
+    mark = '[green]ok[/green]' if row['heartbeat_ok'] else '[red]FAIL[/red]'
+    return f'{mark} {_age(row.get("last_heartbeat_at"), now)}'
+
+
+@controller_group.command('status')
+@_state_options
+def status_command(state_dir, json_mode):
+    """The controller as its state files show it: running or not, the last round / reconcile / watch, every box with
+    its cards (state and age), every instance with its heartbeat and health. Read-only; safe beside `run`."""
+    state = StateDir(Path(state_dir).expanduser())
+    now = time.time()
+    running = state.root.is_dir() and state.daemon_running()
+    status_path = state.root / STATUS_FILE
+    try:
+        info = json.loads(status_path.read_text()) if status_path.exists() else {}
+    except (OSError, ValueError):
+        info = {}
+    store = state.store()
+    boxes = []
+    for box in sorted(store.boxes.values(), key=lambda b: b.box_id):
+        cards = [
+            {'uuid': u, 'state': c.state, 'since': c.since, 'instance': c.instance_id}
+            for u, c in sorted(box.cards.items())
+        ]
+        boxes.append(
+            {
+                'hotkey': box.box_id,
+                'host': _host_field(box.host, box.port),
+                'status': box.status,
+                'cards': cards,
+                'last_check_at': box.last_check_at,
+                'last_failed': box.last_failed,
+                'bench_until': box.bench_until,
+                'withheld_from': box.withheld_from,
+                'standing_events': box.standing_events[-5:],
+            }
+        )
+    instances = _instance_rows(InstanceStore(state.instances), store)
+    if json_mode:
+        emit_json({'success': True, 'running': running, 'controller': info, 'boxes': boxes, 'instances': instances})
+        return
+    last_round, last_reconcile, last_watch = (
+        info.get('round') or {},
+        info.get('reconcile') or {},
+        info.get('watch') or {},
+    )
+    head = '[green]running[/green]' if running else '[yellow]not running[/yellow]'
+    if info.get('pid'):
+        head += f' · pid {info["pid"]} · started {_when(info.get("started_at"))}'
+    console.print(head)
+    console.print(
+        f'last round {last_round.get("n", "—")} ({_age(last_round.get("finished_at"), now)} ago, exit '
+        f'{last_round.get("exit_code", "—")}) · last reconcile {last_reconcile.get("n", "—")} '
+        f'({_age(last_reconcile.get("at"), now)} ago) · last watch visit {_age(last_watch.get("at"), now)} ago'
+    )
+    table = Table(title='boxes', show_header=True)
+    for column in ('Hotkey', 'Host', 'Status', 'Cards', 'Last check', 'Bench / withheld', 'Last event'):
+        table.add_column(column, no_wrap=column not in ('Cards', 'Last event'))
+    for b in boxes:
+        cards = '\n'.join(
+            f'{c["uuid"][:12]}… {c["state"]} {_age(c["since"], now)}' + (f' {c["instance"]}' if c['instance'] else '')
+            for c in b['cards']
+        )
+        bench = f'until {_when(b["bench_until"])}' if b['status'] == BENCHED else ''
+        if b['withheld_from']:
+            bench += f'{" · " if bench else ""}pay withheld from {_when(b["withheld_from"])}'
+        event = b['standing_events'][-1] if b['standing_events'] else None
+        table.add_row(
+            escape(b['hotkey'][:16]),
+            escape(b['host']),
+            b['status'] + (f' ({", ".join(b["last_failed"])})' if b['status'] == BENCHED and b['last_failed'] else ''),
+            escape(cards) or '[dim]—[/dim]',
+            f'{_age(b["last_check_at"], now)} ago' if b['last_check_at'] else '—',
+            escape(bench),
+            escape(f'{event["kind"]} {_age(event["at"], now)} ago') if event else '',
+        )
+    console.print(table)
+    if not instances:
+        err_console.print('[dim]no instances[/dim]')
+        return
+    table = Table(title='instances', show_header=True)
+    for column in ('Instance', 'Entry', 'Box', 'Card', 'State', 'Container', 'Healthy', 'Heartbeat', 'Health'):
+        table.add_column(column, no_wrap=True)
+    for r in instances:
+        health = (
+            '[green]ok[/green]' if r.get('health_ok') else ('[red]fail[/red]' if r.get('health_ok') is False else '—')
+        )
+        if r.get('health_failures'):
+            health += f' {r["health_failures"]}×'
+        table.add_row(
+            escape(r['id']),
+            escape(r['entry']),
+            escape(r['box'][:16]),
+            escape(f'{r["uuid"][:12]}…'),
+            r['card_state'] + (' (draining)' if r['draining'] else ''),
+            escape(r['container_id'][:12]),
+            '[green]yes[/green]' if r['healthy'] else '[red]no[/red]',
+            _heartbeat_cell(r, now),
+            health + f' {_age(r.get("last_health_at"), now)}',
         )
     console.print(table)
 

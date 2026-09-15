@@ -1,0 +1,77 @@
+name: bless image
+
+# Signs a workload image digest + its manifest (+ our qualification measurements) into the public registry
+# (docker/controller/registry/) with the release key, and commits the entry to the branch the run was started from.
+# Manual only. This is the "bless" step of vault 25: curation, after the image was qualified on our own 5090.
+#
+# Inputs: the manifest path in the repo, the image as repo[:tag]@sha256:<digest> (the workflow refuses a tag
+# without a digest), and optionally a qualification JSON committed alongside. Refuses dev keys and an entry that
+# already exists under the same name@version with different content (bump the manifest version).
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: "Path to the manifest in the repo, e.g. docker/controller/manifests/qwen3.8-27b-nvfp4.yaml"
+        required: true
+      image:
+        description: "Image to pin: repo[:tag]@sha256:<64 hex>"
+        required: true
+      qualified:
+        description: "Optional path to the qualification JSON ({at, box, driver, load_s, health_ok, canary_ok, vram_gb, ...})"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  bless:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Refuse anything but a digest-pinned image
+        run: |
+          case "${{ inputs.image }}" in
+            *@sha256:????????????????????????????????????????????????????????????????) ;;
+            *) echo "image must be repo[:tag]@sha256:<64 hex>: ${{ inputs.image }}"; exit 1 ;;
+          esac
+          test -f "${{ inputs.manifest }}" || { echo "no such manifest: ${{ inputs.manifest }}"; exit 1; }
+
+      - name: Install uv + the package
+        uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dev
+
+      - name: Bless with the release key
+        env:
+          GT_RELEASE_KEY: ${{ secrets.GT_RELEASE_KEY }}
+        run: |
+          test -n "$GT_RELEASE_KEY" || { echo "GT_RELEASE_KEY repo secret is not set (vault 27)"; exit 1; }
+          umask 077
+          KEY="$(mktemp)"; printf '%s\n' "$GT_RELEASE_KEY" > "$KEY"
+          STATE="$(mktemp -d)"
+          # Seed the temp state with the committed registry so a same-name@version conflict is caught.
+          mkdir -p "$STATE/registry"
+          cp docker/controller/registry/*.json docker/controller/registry/*.sig "$STATE/registry/" 2>/dev/null || true
+          Q=""
+          if [ -n "${{ inputs.qualified }}" ]; then Q="--qualified ${{ inputs.qualified }}"; fi
+          uv run gitt controller bless "${{ inputs.manifest }}" --image "${{ inputs.image }}" \
+            --sign-key "$KEY" $Q --state-dir "$STATE" --json | tee bless.json
+          shred -u "$KEY"
+          ENTRY="$(python3 -c "import json;print(json.load(open('bless.json'))['entry_id'])")"
+          cp "$STATE/registry/$ENTRY.json" "$STATE/registry/$ENTRY.json.sig" docker/controller/registry/
+          echo "entry=$ENTRY" >> "$GITHUB_ENV"
+          # verify the way the controller will: against the compiled release public key
+          uv run gitt controller registry show --state-dir "$STATE" --json | python3 -c "
+          import json,sys; doc=json.load(sys.stdin); e=[x for x in doc['entries'] if x['entry_id']=='$ENTRY']
+          assert e and e[0]['verified'], doc; print('verified', e[0]['entry_id'], e[0]['image'])"
+
+      - name: Commit the entry
+        run: |
+          git config user.name "gittensor-release"
+          git config user.email "release@gittensor.io"
+          git add docker/controller/registry/
+          git commit -m "registry: bless ${{ env.entry }} (${{ inputs.image }})"
+          git push origin HEAD:${{ github.ref_name }}

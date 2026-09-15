@@ -602,8 +602,8 @@ def test_zero_to_two_replicas_starts_two_instances_on_two_idle_cards(world):
     assert {r.container_id for r in records.values()} == set(box.containers)
     assert all((r.host, r.healthy, r.draining) == ('10.0.0.1', True, False) for r in records.values())
     # two instances of one image on one box: two host ports from the workload range, each mapped to the manifest's 8080
-    assert sorted((r.host_port, r.port) for r in records.values()) == [(20000, 20000), (20001, 20001)]
-    assert sorted(re.search(r' -p (\d+:\d+) ', r).group(1) for r in runs) == ['20000:8080', '20001:8080']
+    assert sorted((r.host_port or 0, r.port or 0) for r in records.values()) == [(20000, 20000), (20001, 20001)]
+    assert sorted(re.findall(r' -p (\d+:\d+) ', r)[0] for r in runs) == ['20000:8080', '20001:8080']
     assert {c['port'] for c in box.containers.values()} == {'20000', '20001'}  # the port label is the host port
     cards = StateStore(root / 'boxes.json').get('hk1').cards
     assert {c.state for c in cards.values()} == {LEASED} and {c.instance_id for c in cards.values()} == set(records)
@@ -868,7 +868,7 @@ def test_a_freed_host_port_is_given_out_again_and_an_exhausted_range_skips_the_b
     box = FakeDocker()
     assert reconciler(root, registry, {'hk1': box}).run_pass().ok
     records = InstanceStore(root / 'instances.json').instances
-    assert sorted(r.host_port for r in records.values()) == [20000, 20001]
+    assert sorted(r.host_port or 0 for r in records.values()) == [20000, 20001]
 
     # a third replica: an IDLE card is left, a port is not; the box is skipped and the reason named
     DeploymentStore(root / 'deployments.json').set(ENTRY, True, 3)

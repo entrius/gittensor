@@ -535,8 +535,10 @@ class _HostPortClient:
     def __init__(self, inner: HttpClient, ports: dict[int, int]):
         self.inner, self.ports = inner, ports
 
-    def request(self, method, port, path, body=None, timeout=cfg.HTTP_PROBE_TIMEOUT_S) -> HttpResponse:
-        return self.inner.request(method, self.ports.get(int(port), port), path, body, timeout)
+    def request(
+        self, method: str, port: int, path: str, body: bytes | None = None, timeout: float = cfg.HTTP_PROBE_TIMEOUT_S
+    ) -> HttpResponse:
+        return self.inner.request(method, self.ports.get(int(port), int(port)), path, body, timeout)
 
 
 def host_port_client(client: HttpClient, manifest: Manifest, host_port: int | None) -> HttpClient:

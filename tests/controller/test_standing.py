@@ -102,7 +102,7 @@ def test_standing_sets_lease_priority_and_a_jittered_lease_cap():
 
 def test_the_state_functions_record_their_standing_events():
     failed = CheckVerdict(
-        verdict='BENCH', checks=[CheckResult('gpu_proof', False, 'too slow')], gpu_uuids=[], card_name=''
+        verdict='BENCH', checks=[CheckResult('gpu_proof', False, {'reason': 'too slow'})], gpu_uuids=[], card_name=''
     )
     benched = apply_verdict(BoxState('hk', status=IDLE), failed, 10.0)
     assert benched.status == BENCHED and benched.standing_events[-1]['kind'] == CHECK_FAILED

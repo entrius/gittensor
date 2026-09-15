@@ -411,6 +411,29 @@ def run_heartbeat(
     return HeartbeatResult(now, same_card, containers, alone, recorded, devices)
 
 
+def observe_pay(record: InstanceRecord, now: float) -> None:
+    """Fold one check's outcome into the record's pay span (``23`` §7). The four conditions hold when the last heartbeat
+    passed (it answers "we started it" and "the blessed digest") and the last health probe passed. While they hold the
+    span runs through the older of the two checks; any failure or miss closes it, so pay stops at the last passing
+    check; the next check that finds all four holding opens a new span at that instant."""
+    pay = (record.heartbeat or {}).get('pay') or {}
+    holds = (
+        record.heartbeat_ok is True
+        and record.health_ok is True
+        and bool(pay.get('we_started'))
+        and bool(pay.get('blessed_digest'))
+    )
+    if not holds:
+        record.pay_open = False
+        return
+    if not record.pay_open or record.pay_from is None:
+        record.pay_from = record.pay_through = now
+        record.pay_open = True
+        return
+    confirmed = min(record.last_heartbeat_at or 0.0, record.last_health_at or 0.0)
+    record.pay_through = max(record.pay_through or record.pay_from, confirmed)
+
+
 # ---------------------------------------------------------------- the watch -------------------------------------------
 
 
@@ -557,6 +580,7 @@ class Watch:
                     current.docker_started_at, current.image_id = result.recorded[record.id]
                 current.last_heartbeat_at, current.heartbeat_ok, current.heartbeat_misses = now, result.ok, 0
                 current.heartbeat = result.evidence_for(current)
+                observe_pay(current, now)
                 self.instances.put(current)
                 report.actions.append(
                     WatchAction(
@@ -578,7 +602,7 @@ class Watch:
                 current = self.instances.instances.get(record.id)
                 if current is not None and not current.draining:
                     current.heartbeat_misses += 1
-                    current.heartbeat_ok = None
+                    current.heartbeat_ok, current.pay_open = None, False  # no answer, no pay
                     current.heartbeat = {'at': now, 'ok': None, 'error': why}
                     self.instances.put(current)
             before = self.boxes.boxes.get(box_id)
@@ -591,7 +615,7 @@ class Watch:
             report.actions.append(
                 WatchAction('miss', box_id, ok=False, detail=f'no answer, no verdict ({in_a_row}): {why}')
             )
-            victims = self._mark_for_kill(box_id) if benched else []
+            victims = self._mark_for_kill(box_id, now) if benched else []
         if benched:
             hours = cfg.UNREACHABLE_BENCH_S / 3600
             detail = f'{in_a_row} without an answer: BENCHED for {hours:.0f} h (off the ladder)'
@@ -609,11 +633,14 @@ class Watch:
         action = WatchAction('bench', box_id, ok=False, detail='; '.join(result.reasons())[:500], states=[BENCHED])
         self._kill(runner, victims, action, report)
 
-    def _mark_for_kill(self, box_id: str) -> list[InstanceRecord]:
-        """Under ``self.lock``: every instance on the box draining with a kill, so the gateway stops routing at once."""
+    def _mark_for_kill(self, box_id: str, now: float | None = None) -> list[InstanceRecord]:
+        """Under ``self.lock``: every instance on the box draining with a kill, so the gateway stops routing at once
+        and pay closes at this moment (``pay_open`` off, ``stopped_at`` set for the ledger)."""
+        now = time.time() if now is None else now
         victims = self.instances.on_box(box_id)
         for record in victims:
-            record.draining, record.healthy = True, False
+            record.draining, record.healthy, record.pay_open = True, False, False
+            record.stopped_at = record.stopped_at or now
             record.drain_type, record.drain_max_s = 'kill', 0
             self.instances.put(record)
         return victims
@@ -650,6 +677,7 @@ class Watch:
             current.last_health_at, current.health_ok, current.health_detail = now, outcome.ok, outcome.detail
             current.health_failures = 0 if outcome.ok else current.health_failures + 1
             current.healthy = outcome.ok
+            observe_pay(current, now)
             self.instances.put(current)
             failures = current.health_failures
             report.actions.append(
@@ -681,7 +709,8 @@ class Watch:
         now = self.wall()
         action = WatchAction('replace', box_id, record.id, record.uuid, False, states=[LEASED])
         with self.lock:
-            record.draining, record.healthy = True, False
+            record.draining, record.healthy, record.pay_open = True, False, False
+            record.stopped_at = record.stopped_at or now
             self.instances.put(record)
             self.boxes.put(
                 add_event(

@@ -430,7 +430,11 @@ def test_entry_canary_rules_and_fail_closed_types():
     assert not bad.ok and 'does not contain' in bad.detail
 
     doc = yaml.safe_load(FIXTURE_27B.read_text())
-    tool_call = '{"choices":[{"message":{"tool_calls":[{"function":{"name":"multiply","arguments":"{\\"a\\":17,\\"b\\":23}"}}]}}]}'
+    # sparkinfer's real body (9/15): "arguments" before "name", so a canary regex must not assume key order
+    tool_call = (
+        '{"choices":[{"finish_reason":"tool_calls","index":0,"message":{"content":null,"role":"assistant",'
+        '"tool_calls":[{"function":{"arguments":"{\\"a\\":17,\\"b\\":23}","name":"multiply"},"type":"function"}]}}]}'
+    )
     client = Responses(parse_curl_response(CommandResult(0, tool_call + '\n200')))
     assert run_entry_canary(client, parse_manifest(doc), pick=0).ok and client.calls[0][0] == 'POST'
     assert json.loads(client.calls[0][3])['tools'][0]['function']['name'] == 'multiply'

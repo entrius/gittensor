@@ -296,11 +296,13 @@ def prestage(
     manifest: Manifest,
     pull_token: PullToken | None = None,
     clock: Callable[[], float] = time.monotonic,
+    report: PrestageReport | None = None,
 ) -> PrestageReport:
     """Everything a start needs on the box before ``docker run``: the no-egress network, the image (pulled only when
     absent, with the token for this pull only), and every artifact fetched if needed and **verified on disk**. Raises
-    ``PlacementError`` / ``ArtifactError``; a mismatch never starts the instance."""
-    report = PrestageReport()
+    ``PlacementError`` / ``ArtifactError``; a mismatch never starts the instance. Pass ``report`` to keep the timings
+    of the steps that did run when one raises."""
+    report = report if report is not None else PrestageReport()
 
     def timed(name: str, fn: Callable[[], Any]) -> Any:
         started = clock()
@@ -627,6 +629,8 @@ def run_entry_canary(
     def one(_: int) -> dict:
         response = client.request(http['method'], http['port'], http['path'], payload)
         ok, why = canary_passes(canary.pass_rule, response)
+        if not ok:
+            why += f' (body: {" ".join(response.body.split())[:240]!r})'  # the only trace of what the workload said
         return {
             'ok': ok,
             'status': response.status,

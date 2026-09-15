@@ -30,28 +30,33 @@ entry_canary:                # one picked at random each start; sent at front_do
   # Every canary here is a tool call: one call proves the weights decode AND that `tools` reach the chat template
   # on this box, so no random pick skips tool calling. The failure it catches is silent otherwise: tools dropped
   # before the template, the model never calls one, and the request still looks like a clean 200.
+  # A pass regex must not assume JSON key order: runtimes serialise tool_calls differently (sparkinfer puts
+  # "arguments" before "name"), so each fact is its own lookahead. Thinking is off: a reasoning model (Qwen3.8 thinks by
+  # default) would spend max_tokens before it calls.
   - type: http
     http: {method: POST, path: /v1/chat/completions, port: 8080}
     body:
       messages: [{role: user, content: "What is 17 × 23? Use the multiply tool."}]
       max_tokens: 64
+      enable_thinking: false
       tools:
         - type: function
           function:
             name: multiply
             parameters: {type: object, properties: {a: {type: number}, b: {type: number}}, required: [a, b]}
-    pass: {status: 200, regex: 'multiply[\s\S]*17[\s\S]*23'}
+    pass: {status: 200, regex: '(?=[\s\S]*"finish_reason":\s*"tool_calls")(?=[\s\S]*"name":\s*"multiply")(?=[\s\S]*\\"[ab]\\":\s*17\b)(?=[\s\S]*\\"[ab]\\":\s*23\b)'}
   - type: http
     http: {method: POST, path: /v1/chat/completions, port: 8080}
     body:
       messages: [{role: user, content: "What's the weather in Paris right now? Use the tool."}]
       max_tokens: 64
+      enable_thinking: false
       tools:
         - type: function
           function:
             name: get_weather
             parameters: {type: object, properties: {city: {type: string}}, required: [city]}
-    pass: {status: 200, regex: 'get_weather[\s\S]*Paris'}
+    pass: {status: 200, regex: '(?=[\s\S]*"finish_reason":\s*"tool_calls")(?=[\s\S]*"name":\s*"get_weather")(?=[\s\S]*\\"city\\":\s*\\"Paris)'}
 profile:                     # health and standing only, never pay; 2026-09-08 measurement shown
   decode_tps_single: 99
   decode_tps_aggregate: 338

@@ -12,7 +12,7 @@
 # The volume stays read-only: `read_only: false` would still fail on the tokenizer marker, and it would let the
 # workload rewrite the weights it is verified against.
 name: qwen3.8-27b-nvfp4
-version: 1
+version: 2
 description: Qwen3.8-27B (NVFP4) chat on sparkinfer 19ef39ec2, one RTX 5090 per instance
 runtime: sparkinfer
 image: entrius/sparkinfer:19ef39ec2@sha256:d35719b03f320f7c30abcb7f6b495e64fb7edbe4187c8744775277dc661a23bb
@@ -64,7 +64,8 @@ entry_canary:                # one picked at random each start; sent at front_do
           function:
             name: multiply
             parameters: {type: object, properties: {a: {type: number}, b: {type: number}}, required: [a, b]}
-    pass: {status: 200, regex: 'multiply[\s\S]*17[\s\S]*23'}
+    # Order-free lookaheads: sparkinfer serialises "arguments" before "name", so 'multiply[\s\S]*17' never matches.
+    pass: {status: 200, regex: '(?=[\s\S]*"finish_reason":\s*"tool_calls")(?=[\s\S]*"name":\s*"multiply")(?=[\s\S]*\\"[ab]\\":\s*17\b)(?=[\s\S]*\\"[ab]\\":\s*23\b)'}
   - type: http
     http: {method: POST, path: /v1/chat/completions, port: 8080}
     body:
@@ -76,7 +77,7 @@ entry_canary:                # one picked at random each start; sent at front_do
           function:
             name: get_weather
             parameters: {type: object, properties: {city: {type: string}}, required: [city]}
-    pass: {status: 200, regex: 'get_weather[\s\S]*Paris'}
+    pass: {status: 200, regex: '(?=[\s\S]*"finish_reason":\s*"tool_calls")(?=[\s\S]*"name":\s*"get_weather")(?=[\s\S]*\\"city\\":\s*\\"Paris)'}
 profile:                     # health and standing only, never pay; 2026-09-08 measurement
   decode_tps_single: 99
   decode_tps_aggregate: 338

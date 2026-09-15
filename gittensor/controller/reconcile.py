@@ -58,6 +58,7 @@ from gittensor.controller.runspec import (
     BoxHttp,
     HttpClient,
     PlacementError,
+    PrestageReport,
     PullToken,
     build_run_spec,
     deploy,
@@ -498,9 +499,10 @@ class Reconciler:
         )
         self._put_record(record)
         client = self.http_for(runner, box)
+        staged = PrestageReport()
         try:
             spec = build_run_spec(verified.entry_id, manifest, uuid, instance_id)
-            staged = prestage(runner, spec, manifest, self.pull_token, self.clock)
+            prestage(runner, spec, manifest, self.pull_token, self.clock, report=staged)
             marks.append(('prestage', self.clock()))
             record.container_id = deploy(runner, spec)
             record.started_at = self.wall()
@@ -527,9 +529,12 @@ class Reconciler:
             action.timings_ms = _durations(marks)
             return action
         except PlacementError as e:
-            action.detail = f'failed start: {e}'[:400]
+            action.detail = f'failed start: {e}'[:700]
             self._fail_start(box_id, runner, record, action, manifest)
-            action.timings_ms = _durations(marks + [('undeploy', self.clock())])
+            action.timings_ms = {
+                **_durations(marks + [('undeploy', self.clock())]),
+                **{f'prestage.{k}': v for k, v in staged.timings_ms.items()},  # a failed start still measured these
+            }
             return action
         record.healthy, record.leased_at = True, self.wall()
         self._put_record(record)

@@ -733,7 +733,9 @@ def reprove_box(
     try:
         with write_lock:
             current = store.boxes.get(box_id)
-            fleet = {b.box_id: list(b.pinned_uuids) for b in store.boxes.values() if b.box_id != box_id}
+            fleet: dict[str, Iterable[str]] = {
+                b.box_id: list(b.pinned_uuids) for b in store.boxes.values() if b.box_id != box_id
+            }
         if current is None or current.status != IDLE or not current.host:
             row.busy = f'{current.status if current else "removed"} meanwhile: not re-proved'
             return report()

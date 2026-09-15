@@ -313,7 +313,7 @@ class FakeDocker:
         )
 
     def _device_scan(self):
-        held = {
+        held: dict[int, tuple[str | None, str, tuple[str, ...]]] = {
             pid: (
                 cid,
                 'python3',

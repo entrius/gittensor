@@ -281,10 +281,11 @@ class Controller:
         return due
 
     def _reprove_box(self, proof: Any, box_id: str) -> None:
+        reprove = self._reprove
+        if reprove is None:
+            return
         try:
-            report = self._reprove(
-                proof, box_id, store=self.boxes, write_lock=self.write_lock, box_locks=self.box_locks
-            )
+            report = reprove(proof, box_id, store=self.boxes, write_lock=self.write_lock, box_locks=self.box_locks)
         except Exception as e:  # never kill the thread silently; the next tick after the retry delay tries again
             with self.write_lock:
                 self._reprove_retry_at[box_id] = time.time() + cfg.REPROVE_RETRY_S

@@ -469,10 +469,11 @@ class Watch:
     def _heartbeat_due(self, records: list[InstanceRecord], now: float) -> bool:
         """Due ``heartbeat_interval_s`` after the last visit that asked, answered or missed (``heartbeat['at']``)."""
 
-        def last(r: InstanceRecord) -> float | None:
-            return (r.heartbeat or {}).get('at', r.last_heartbeat_at)
+        def due(r: InstanceRecord) -> bool:
+            last = (r.heartbeat or {}).get('at', r.last_heartbeat_at)
+            return last is None or now - last >= self.heartbeat_interval_s
 
-        return any(last(r) is None or now - last(r) >= self.heartbeat_interval_s for r in records)
+        return any(due(r) for r in records)
 
     @staticmethod
     def _health_due(record: InstanceRecord, manifest: Manifest | None, now: float) -> bool:

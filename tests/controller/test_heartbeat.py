@@ -186,7 +186,8 @@ def test_three_missed_heartbeats_in_a_row_bench_the_box_for_12_h_off_the_ladder(
     assert 'BENCHED for 12 h' in report.actions[1].detail and record.id in report.actions[1].detail
     after = StateStore(rec.boxes.path).get('hk1')
     assert after.status == BENCHED and after.last_failed == ['ssh_unreachable'] and after.bench_count == 0
-    assert after.bench_until - after.benched_at == 12 * 3600 and after.withheld_from is None and after.cards == {}
+    assert (after.bench_until or 0) - (after.benched_at or 0) == 12 * 3600
+    assert after.withheld_from is None and after.cards == {}
     assert InstanceStore(rec.instances.path).instances == {} and box.containers == {}  # undeployed with a kill
     assert not box.commands('docker stop')
 

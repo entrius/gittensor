@@ -7,6 +7,7 @@ non-canonical entry is refused on read; deployment settings are separate and rou
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -133,7 +134,7 @@ def test_the_qualified_block_is_signed_beside_the_manifest_and_entries_without_i
 def test_a_malformed_qualified_block_is_refused():
     document = yaml.safe_load(FIXTURE.read_text())
     without_driver = {k: v for k, v in QUALIFIED.items() if k != 'driver'}
-    for block, why in (
+    cases: tuple[tuple[Any, str], ...] = (
         ({**QUALIFIED, 'load_s': '16.5'}, 'load_s must be a number'),
         (without_driver, 'driver missing'),
         ({**QUALIFIED, 'health_ok': 1}, 'health_ok must be a boolean'),
@@ -141,9 +142,10 @@ def test_a_malformed_qualified_block_is_refused():
         ({**QUALIFIED, 'tokens': 3}, r'unknown field\(s\): tokens'),
         ({**QUALIFIED, 'box': ' '}, 'hotkey or "local"'),
         ([], 'expected an object'),
-    ):
+    )
+    for block, why in cases:
         with pytest.raises(RegistryError, match=why):
-            make_entry(document, IMAGE, qualified=block)
+            make_entry(document, IMAGE, qualified=block)  # pyright: ignore[reportArgumentType]  (wrong types on purpose)
 
 
 def test_bless_qualified_and_registry_show_print_it(tmp_path, release, monkeypatch):

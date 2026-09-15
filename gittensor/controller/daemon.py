@@ -10,10 +10,13 @@ changes under one short lock and saves at once:
 * **the reconciler** every ``RECONCILE_INTERVAL_S`` (30 s); its starts and drains run on their own threads holding
   their box's lock, so a pass never waits for a model load;
 * **the watch** every ``WATCH_TICK_S``: the generic heartbeat (``HEARTBEAT_INTERVAL_S``) and the manifest health probe
-  wherever one is due; and on the same tick, **the re-prove**: an IDLE box with a card in CHECKING (a drain done, a
+  wherever one is due; on the same tick, **the re-prove**: an IDLE box with a card in CHECKING (a drain done, a
   failed start, a health replacement) gets the proof on that box only, for its CHECKING cards, on a thread of its own,
   so a replacement can start within a minute instead of waiting up to 20 (Kimbo 9/15). The fleet-wide round is
-  unchanged. A benched box has no cards, so nothing benched is re-proved: it waits out the bench.
+  unchanged. A benched box has no cards, so nothing benched is re-proved: it waits out the bench. Then the pay
+  ledger's settlement tick (``pay/ledger.py``) whenever one is due;
+* **the scorecard** every ``SCORECARD_INTERVAL_S``: the trailing window settled at the oracle's price and written as
+  ``scorecard/latest.json`` + ``latest.sha256`` for the validator (``pay/scorecard.py``).
 
 No lock is held across a model load: a start holds only its own box, the proof round skips a box whose lock stays held
 (its cards are STARTING anyway) and proves it next round, and the watch takes no box lock at all (``locks.py``). On
@@ -38,6 +41,10 @@ from gittensor.controller.checks.runner import HostRunner
 from gittensor.controller.checks.state import CHECKING, IDLE, BoxState, StateStore
 from gittensor.controller.heartbeat import Watch, WatchReport
 from gittensor.controller.locks import BoxLocks
+from gittensor.controller.pay.ledger import Ledger, settle_window
+from gittensor.controller.pay.oracle import FailSafeOracle, StaticOracle
+from gittensor.controller.pay.rates import GpuRate, load_rates
+from gittensor.controller.pay.scorecard import build_scorecard, write_scorecard
 from gittensor.controller.reconcile import InstanceStore, Reconciler, ReconcileReport
 from gittensor.controller.registry import DeploymentStore, Registry
 from gittensor.controller.runspec import BoxHttp, HttpClient, PullToken
@@ -80,6 +87,7 @@ class Intervals:
     reconcile_s: float = cfg.RECONCILE_INTERVAL_S
     heartbeat_s: float = cfg.HEARTBEAT_INTERVAL_S
     watch_tick_s: float = cfg.WATCH_TICK_S
+    scorecard_s: float = cfg.SCORECARD_INTERVAL_S
 
 
 class Controller:
@@ -103,8 +111,13 @@ class Controller:
         http_for: Callable[[HostRunner, BoxState], HttpClient] | None = None,
         sleep: Callable[[float], None] = time.sleep,
         reprove: Callable[..., Any] | None = None,
+        oracle: FailSafeOracle | None = None,
+        rates: dict[str, GpuRate] | None = None,
     ):
         self.state = state
+        self.oracle = oracle or FailSafeOracle(StaticOracle())
+        self.rates = rates if rates is not None else load_rates()
+        self.ledger = Ledger(state.root / 'ledger')
         self.intervals = intervals or Intervals()
         self.reporter = reporter or SilentReporter()
         self.write_lock = threading.RLock()
@@ -127,6 +140,7 @@ class Controller:
             'round': {},
             'reconcile': {},
             'watch': {},
+            'pay': {},
         }
         http_for = http_for or (lambda runner, box: BoxHttp(runner))
         self.reconciler = Reconciler(
@@ -229,8 +243,51 @@ class Controller:
         self.reporter.reconcile(report, n)
         return report
 
+    def settle_once(self, now: float | None = None) -> int | None:
+        """The ledger's settlement tick, when one is due: the rows written, or None."""
+        now = time.time() if now is None else now
+        if not self.ledger.due(now):
+            return None
+        with self.write_lock:
+            return len(self.ledger.settle(list(self.boxes.boxes.values()), self.instances.instances, now))
+
+    def scorecard_once(self, now: float | None = None) -> dict:
+        """Settle the trailing window at the oracle's price and write the scorecard. Returns the document."""
+        now = time.time() if now is None else now
+        quote = self.oracle.quote()  # may read the network: outside the state lock
+        with self.write_lock:
+            boxes = dict(self.boxes.boxes)
+        start = now - cfg.SETTLEMENT_WINDOW_S
+        settlement = settle_window(self.ledger.rows(start, now), boxes, self.rates, quote, start, now)
+        doc = build_scorecard(settlement, boxes, self.rates, now, self.intervals.scorecard_s)
+        path, sha = write_scorecard(self.state.root / 'scorecard', doc)
+        implied = doc['pool']['implied_usd_per_card_hour']
+        self._set_status(
+            'pay',
+            {
+                'at': now,
+                'sha256': sha,
+                'path': str(path),
+                'valid_until': doc['valid_until'],
+                'recycle_share': doc['recycle_share'],
+                'paid_usd': doc['pool']['paid_usd'],
+                'pool_usd': doc['pool']['usd'],
+                'implied_usd_per_card_hour': implied,
+                'oracle': doc['oracle'],
+            },
+        )
+        rates = ', '.join(f'{g} ${v["idle"]:.3f}/${v["leased"]:.3f}' for g, v in implied.items()) or 'no cards'
+        paying = sum(1 for h in doc['hotkeys'] if h['weight'] > 0)
+        self.reporter.note(
+            'pay',
+            f'scorecard {sha[:12]}: {paying} hotkey(s) paid, recycle {doc["recycle_share"] * 100:.1f}%, '
+            f'idle/leased per card-hour {rates}' + (' (oracle held)' if quote.held else ''),
+        )
+        return doc
+
     def watch_once(self) -> WatchReport:
         report = self.watch.run_pass()
+        self.settle_once()
         if report.visited:
             self._set_status(
                 'watch',
@@ -357,6 +414,7 @@ class Controller:
             ('round', self.round_once, self.intervals.round_s, self.build_once),
             ('reconcile', self.reconcile_once, self.intervals.reconcile_s, None),
             ('watch', self.watch_once, self.intervals.watch_tick_s, None),
+            ('scorecard', self.scorecard_once, self.intervals.scorecard_s, None),
         )
         for name, once, interval_s, after in loops:
             thread = threading.Thread(

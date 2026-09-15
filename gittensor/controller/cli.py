@@ -18,6 +18,7 @@ full check and box state (``controller.checks``), the GPU-proof slot (``controll
     gitt controller instances                                  what runs where (what the gateway will read)
     gitt controller run                                        the controller as one process: round + reconcile + watch
     gitt controller status                                     boxes, cards, instances, last round / reconcile (read-only)
+    gitt controller scorecard                                  the last signed scorecard, checked as the validator does
 
 State lives in one directory (``--state-dir``, default ``~/.gittensor/controller``): ``boxes.json`` (the
 ``StateStore``, cards included), ``known_hosts`` (host keys pinned at admit), ``nvml_allowlist.json``,
@@ -103,6 +104,9 @@ from gittensor.controller.daemon import STATUS_FILE, Controller, Intervals
 from gittensor.controller.heartbeat import WatchReport
 from gittensor.controller.locks import BoxLocks
 from gittensor.controller.manifest import ManifestError
+from gittensor.controller.pay.oracle import FailSafeOracle, MetagraphedOracle, StaticOracle
+from gittensor.controller.pay.rates import RatesError, load_rates
+from gittensor.controller.pay.scorecard import LATEST, ScorecardError, read_scorecard
 from gittensor.controller.proof.slot import (
     GpuProof,
     ProbeResult,
@@ -125,6 +129,7 @@ from gittensor.controller.registry import (
 from gittensor.controller.runspec import PullToken
 from gittensor.controller.ssh import CertificateAuthority, SshRunner, SshTransportError, known_hosts_line, scan_host_key
 from gittensor.controller.ssh.certs import CertificateError
+from gittensor.controller.standing import standing
 
 DEFAULT_STATE_DIR = Path.home() / '.gittensor' / 'controller'
 EXIT_ADMIT, EXIT_BENCH, EXIT_NO_VERDICT = 0, 1, 2  # 2: transport failure or nothing to check; no state changed
@@ -1966,6 +1971,25 @@ class _DaemonPrinter:
     default=None,
     help='Read-only registry token, one line "username:token"; installed for each pull and removed after.',
 )
+@click.option(
+    '--scorecard-interval',
+    type=float,
+    default=cfg.SCORECARD_INTERVAL_S,
+    show_default=True,
+    help='Seconds between signed-scorecard writes; the scorecard is valid for two intervals.',
+)
+@click.option(
+    '--metagraphed-url',
+    default=cfg.METAGRAPHED_URL,
+    envvar='GT_METAGRAPHED_URL',
+    help="metagraphed's REST base URL for TAO/USD and the alpha price. Unset: the static prices only.",
+)
+@click.option(
+    '--static-tao-usd', type=float, default=cfg.STATIC_TAO_USD, show_default=True, help='Fallback USD per TAO.'
+)
+@click.option(
+    '--static-alpha-tao', type=float, default=cfg.STATIC_ALPHA_TAO, show_default=True, help='Fallback TAO per alpha.'
+)
 @click.option('--max-seconds', type=float, default=0, hidden=True)
 @_registry_options
 @_check_options
@@ -1976,6 +2000,10 @@ def run_command(
     reconcile_interval,
     heartbeat_interval,
     pull_token_file,
+    scorecard_interval,
+    metagraphed_url,
+    static_tao_usd,
+    static_alpha_tao,
     max_seconds,
     release_pubkey,
     allow_dev_keys,
@@ -1984,9 +2012,10 @@ def run_command(
     **opts,
 ):
     """The controller as one process: the proof round (every --round-interval, --build-cmd between rounds), the
-    reconciler (every --reconcile-interval) and the in-lease watch (heartbeat every --heartbeat-interval, manifest
-    health probe every health.interval_s), each on its own thread over one state. A card that reaches CHECKING is
-    re-proved on its own box at the next watch tick, not at the next round.
+    reconciler (every --reconcile-interval), the in-lease watch (heartbeat every --heartbeat-interval, manifest
+    health probe every health.interval_s) with the pay ledger's settlement tick, and the signed scorecard (every
+    --scorecard-interval), each on its own thread over one state. A card that reaches CHECKING is re-proved on its
+    own box at the next watch tick, not at the next round.
 
     \b
     It holds the state directory for its whole life: `check`, `round` and `reconcile` refuse beside it (use
@@ -2002,6 +2031,12 @@ def run_command(
         setup.proof()  # a provider that cannot load fails now, not 20 minutes in; every round re-loads it
     except ProofLoadError as e:
         _fail(str(e), json_mode, EXIT_NO_VERDICT)
+    try:
+        rates = load_rates()
+    except RatesError as e:
+        _fail(f'pay rates: {e}', json_mode, EXIT_NO_VERDICT)
+    static = StaticOracle(static_tao_usd, static_alpha_tao)
+    oracle = FailSafeOracle(MetagraphedOracle(metagraphed_url) if metagraphed_url else static, static)
     printer = _DaemonPrinter(json_mode)
     try:
         with setup.state.run_lock():
@@ -2015,14 +2050,19 @@ def run_command(
                 build=_run_build,
                 build_cmd=build_cmd,
                 pull_token=token,
-                intervals=Intervals(round_interval, reconcile_interval, heartbeat_interval),
+                intervals=Intervals(
+                    round_interval, reconcile_interval, heartbeat_interval, scorecard_s=scorecard_interval
+                ),
                 reporter=printer,
                 sleep=_sleep,
+                oracle=oracle,
+                rates=rates,
             )
             printer.note(
                 'controller',
                 f'running on {setup.state.root} (pid {os.getpid()}): round every {round_interval:.0f} s, reconcile '
-                f'every {reconcile_interval:.0f} s, heartbeat every {heartbeat_interval:.0f} s',
+                f'every {reconcile_interval:.0f} s, heartbeat every {heartbeat_interval:.0f} s, scorecard every '
+                f'{scorecard_interval:.0f} s (prices: {"metagraphed" if metagraphed_url else "static"})',
             )
             clean = controller.serve(max_seconds=max_seconds or None)
     except ControllerRunning as e:
@@ -2038,11 +2078,48 @@ def _heartbeat_cell(row: dict, now: float) -> str:
     return f'{mark} {_age(row.get("last_heartbeat_at"), now)}'
 
 
+def _scorecard_view(state: StateDir, now: float) -> dict:
+    """The last scorecard, checked the way the validator checks it: ``{}`` when none was written yet."""
+    path = state.root / 'scorecard' / LATEST
+    if not path.exists():
+        return {}
+    try:
+        doc, sha = read_scorecard(path, now)
+        view = {'valid': True, 'error': '', 'sha256': sha}
+    except ScorecardError as e:
+        try:
+            doc = json.loads(path.read_text())
+        except (OSError, ValueError):
+            return {'valid': False, 'error': str(e), 'path': str(path)}
+        view = {'valid': False, 'error': str(e), 'sha256': None}
+    return {**view, 'path': str(path), 'scorecard': doc}
+
+
+def _pay_line(view: dict, now: float) -> str:
+    if not view:
+        return '[dim]pay: no scorecard yet[/dim]'
+    doc = view.get('scorecard') or {}
+    mark = '[green]valid[/green]' if view['valid'] else f'[red]refused[/red] ({escape(view["error"][:120])})'
+    implied = (doc.get('pool') or {}).get('implied_usd_per_card_hour') or {}
+    rates = ' · '.join(
+        f'{escape(g)} ${v["idle"]:.3f} idle / ${v["leased"]:.3f} leased per card-hour ({v["cards"]:.1f} cards)'
+        for g, v in implied.items()
+    )
+    oracle = doc.get('oracle') or {}
+    return (
+        f'pay: scorecard {(view.get("sha256") or "?")[:12]} {mark}, issued {_age(doc.get("issued_at"), now)} ago'
+        f' · {rates or "no accruing cards"} · recycle {float(doc.get("recycle_share", 1.0)) * 100:.1f}%'
+        f' · TAO ${float(oracle.get("tao_usd", 0)):.2f}, alpha {float(oracle.get("alpha_tao", 0)):.6f} TAO'
+        + (' [yellow](price held)[/yellow]' if oracle.get('held') else '')
+    )
+
+
 @controller_group.command('status')
 @_state_options
 def status_command(state_dir, json_mode):
     """The controller as its state files show it: running or not, the last round / reconcile / watch, every box with
-    its cards (state and age), every instance with its heartbeat and health. Read-only; safe beside `run`."""
+    its cards (state and age) and standing, what the last scorecard pays it, every instance with its heartbeat and
+    health. Read-only; safe beside `run`."""
     state = StateDir(Path(state_dir).expanduser())
     now = time.time()
     running = state.root.is_dir() and state.daemon_running()
@@ -2051,6 +2128,8 @@ def status_command(state_dir, json_mode):
         info = json.loads(status_path.read_text()) if status_path.exists() else {}
     except (OSError, ValueError):
         info = {}
+    pay_view = _scorecard_view(state, now)
+    paid = {h['hotkey']: h for h in (pay_view.get('scorecard') or {}).get('hotkeys', [])}
     store = state.store()
     boxes = []
     for box in sorted(store.boxes.values(), key=lambda b: b.box_id):
@@ -2058,11 +2137,13 @@ def status_command(state_dir, json_mode):
             {'uuid': u, 'state': c.state, 'since': c.since, 'instance': c.instance_id}
             for u, c in sorted(box.cards.items())
         ]
+        entry = paid.get(box.box_id) or {}
         boxes.append(
             {
                 'hotkey': box.box_id,
                 'host': _host_field(box.host, box.port),
                 'status': box.status,
+                'standing': standing(box.standing_events, now),
                 'cards': cards,
                 'last_check_at': box.last_check_at,
                 'last_failed': box.last_failed,
@@ -2070,11 +2151,28 @@ def status_command(state_dir, json_mode):
                 'withheld_from': box.withheld_from,
                 'release_requested': release_requested(box),
                 'standing_events': box.standing_events[-5:],
+                'pay': {k: entry.get(k) for k in ('weight', 'usd', 'idle_s', 'leased_s', 'withheld_s')}
+                if entry
+                else {},
             }
         )
     instances = _instance_rows(InstanceStore(state.instances), store)
     if json_mode:
-        emit_json({'success': True, 'running': running, 'controller': info, 'boxes': boxes, 'instances': instances})
+        pay = {k: v for k, v in pay_view.items() if k != 'scorecard'}
+        if pay_view.get('scorecard'):
+            doc = pay_view['scorecard']
+            pay.update({k: doc.get(k) for k in ('issued_at', 'valid_until', 'window', 'oracle', 'recycle_share')})
+            pay['implied_usd_per_card_hour'] = (doc.get('pool') or {}).get('implied_usd_per_card_hour')
+        emit_json(
+            {
+                'success': True,
+                'running': running,
+                'controller': info,
+                'pay': pay,
+                'boxes': boxes,
+                'instances': instances,
+            }
+        )
         return
     last_round, last_reconcile, last_watch = (
         info.get('round') or {},
@@ -2090,8 +2188,9 @@ def status_command(state_dir, json_mode):
         f'{last_round.get("exit_code", "—")}) · last reconcile {last_reconcile.get("n", "—")} '
         f'({_age(last_reconcile.get("at"), now)} ago) · last watch visit {_age(last_watch.get("at"), now)} ago'
     )
+    console.print(_pay_line(pay_view, now))
     table = Table(title='boxes', show_header=True)
-    for column in ('Hotkey', 'Host', 'Status', 'Cards', 'Last check', 'Bench / withheld', 'Last event'):
+    for column in ('Hotkey', 'Host', 'Status', 'Standing', 'Cards', 'Pay (window)', 'Last check', 'Bench / withheld', 'Last event'):  # fmt: skip
         table.add_column(column, no_wrap=column not in ('Cards', 'Last event'))
     for b in boxes:
         cards = '\n'.join(
@@ -2104,11 +2203,20 @@ def status_command(state_dir, json_mode):
         if b['withheld_from']:
             bench += f'{" · " if bench else ""}pay withheld from {_when(b["withheld_from"])}'
         event = b['standing_events'][-1] if b['standing_events'] else None
+        pay = b['pay']
+        pay_cell = (
+            f'${pay["usd"]:.3f} · idle {pay["idle_s"] / 3600:.2f} h · leased {pay["leased_s"] / 3600:.2f} h'
+            + (f' · [red]withheld {pay["withheld_s"] / 3600:.2f} h[/red]' if pay.get('withheld_s') else '')
+            if pay
+            else '[dim]—[/dim]'
+        )
         table.add_row(
             escape(b['hotkey'][:16]),
             escape(b['host']),
             b['status'] + (f' ({", ".join(b["last_failed"])})' if b['status'] == BENCHED and b['last_failed'] else ''),
+            b['standing'],
             escape(cards) or '[dim]—[/dim]',
+            pay_cell,
             f'{_age(b["last_check_at"], now)} ago' if b['last_check_at'] else '—',
             escape(bench),
             escape(f'{event["kind"]} {_age(event["at"], now)} ago') if event else '',
@@ -2138,6 +2246,52 @@ def status_command(state_dir, json_mode):
             health + f' {_age(r.get("last_health_at"), now)}',
         )
     console.print(table)
+
+
+@controller_group.command('scorecard')
+@_state_options
+def scorecard_command(state_dir, json_mode):
+    """The last signed scorecard the controller wrote (``scorecard/latest.json``), checked the way the validator checks
+    it: the sha256 beside it, the schema, valid_until, and weights + recycle_share summing to one pool. Exit 0 when a
+    validator would use it, 1 when it would refuse it (the compute share recycles), 2 when there is none."""
+    state = StateDir(Path(state_dir).expanduser())
+    now = time.time()
+    view = _scorecard_view(state, now)
+    if not view:
+        _fail(
+            f'no scorecard in {state.root / "scorecard"} yet: `gitt controller run` writes one',
+            json_mode,
+            EXIT_NO_VERDICT,
+        )
+    code = EXIT_ADMIT if view['valid'] else EXIT_BENCH
+    if json_mode:
+        emit_json({'success': view['valid'], **view})
+        sys.exit(code)
+    console.print(_pay_line(view, now))
+    doc = view.get('scorecard') or {}
+    window = doc.get('window') or {}
+    console.print(
+        f'window {_when(window.get("start"))} → {_when(window.get("end"))} · valid until {_when(doc.get("valid_until"))}'
+        f' · pool {float((doc.get("pool") or {}).get("alpha", 0)):.2f} alpha = ${float((doc.get("pool") or {}).get("usd", 0)):.2f}'
+        f', paid ${float((doc.get("pool") or {}).get("paid_usd", 0)):.2f} · {escape(view["path"])}'
+    )
+    table = Table(title='hotkeys', show_header=True)
+    for column in ('Hotkey', 'Status', 'Standing', 'Weight', 'USD', 'Idle h', 'Leased h', 'Withheld h', 'Cards'):
+        table.add_column(column, no_wrap=column != 'Cards')
+    for h in doc.get('hotkeys', []):
+        table.add_row(
+            escape(h['hotkey'][:16]),
+            h.get('status', ''),
+            h.get('standing', ''),
+            f'{h["weight"] * 100:.4f}%',
+            f'${h.get("usd", 0):.3f}',
+            f'{h["idle_s"] / 3600:.2f}',
+            f'{h["leased_s"] / 3600:.2f}',
+            f'[red]{h["withheld_s"] / 3600:.2f}[/red]' if h.get('withheld') else '0',
+            escape(' '.join(f'{c["uuid_hash"][:10]}…:{c["state"]}' for c in h.get('cards', []))) or '[dim]—[/dim]',
+        )
+    console.print(table)
+    sys.exit(code)
 
 
 def register_controller_commands(cli):

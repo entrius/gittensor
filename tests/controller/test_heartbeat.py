@@ -23,7 +23,14 @@ from gittensor.controller.checks.state import (
     StateStore,
     transition_card,
 )
-from gittensor.controller.heartbeat import Watch, parse_cgroups, parse_compute_apps
+from gittensor.controller.heartbeat import (
+    DEVICE_HOLDERS_COMMAND,
+    Watch,
+    parse_cgroups,
+    parse_compute_apps,
+    parse_device_holders,
+)
+from gittensor.controller.locks import BoxLocks
 from gittensor.controller.reconcile import InstanceStore
 from gittensor.controller.ssh import SshTransportError
 from tests.controller.conftest import NVML_MD5, UUID_5090, UUID_5090_B
@@ -239,6 +246,62 @@ def test_health_failures_below_the_threshold_do_nothing_and_at_it_replace_the_re
     report = rec.run_pass()
     (start,) = [a for a in report.actions if a.kind == 'start']
     assert start.ok and start.uuid == UUID_5090_B  # the replacement, elsewhere
+
+
+def test_a_sleeping_foreign_container_holding_the_device_nodes_benches_the_box(world):
+    rec, watch, box, clock, record = leased(world)
+    box.hold_devices('c' * 64, comm='sleep')  # `docker run --gpus all ... sleep infinity`: no CUDA context, no NVML pid
+    clock.t += 1
+    report = watch.run_pass()
+    beat = next(a for a in report.actions if a.kind == 'heartbeat')
+    assert not beat.ok and 'foreign device holder' in beat.detail and '(sleep) in cccccccccccc' in beat.detail
+    assert 'pid 4001' not in beat.detail  # our workload's own handles are not the complaint
+    after = StateStore(rec.boxes.path).get('hk1')
+    assert after.status == BENCHED and after.last_failed == ['heartbeat:card_ours_alone'] and after.withheld_from
+    assert box.containers == {} and 'c' * 64 not in box.runner.calls[-1]  # benched and undeployed; the holder untouched
+    assert len(box.commands(DEVICE_HOLDERS_COMMAND)) == 1  # one command in the heartbeat's visit
+
+
+def test_our_own_device_handles_and_the_hosts_persistence_daemon_pass(world):
+    rec, watch, box, clock, record = leased(world)
+    box.hold_devices(record.container_id, comm='sleep')  # a second process of our own container
+    box.hold_devices(None, comm='nvidia-persiste')  # nvidia-persistenced on the host
+    report = watch.run_pass()
+    assert report.ok, report.actions
+    handles = rec.instances.instances[record.id].heartbeat['card_ours_alone']['device_handles']
+    assert handles['ok'] and handles['holders'] == [4001, 4002, 4003]
+
+    box.hold_devices('d' * 64, comm='nvidia-persiste')  # the name alone does not pass inside a container
+    clock.t += 60
+    assert not watch.run_pass().ok and rec.boxes.boxes['hk1'].status == BENCHED
+
+
+def test_the_device_scan_waits_while_a_start_drain_or_proof_holds_the_box(world):
+    rec, watch, box, clock, record = leased(world)
+    watch.box_locks = BoxLocks()
+    box.hold_devices('e' * 64, comm='gt_proof')  # a proof container on the other card, mid-round: not recorded
+    watch.box_locks.acquire('hk1')
+    report = watch.run_pass()
+    assert report.ok and not box.commands(DEVICE_HOLDERS_COMMAND)
+    beat = rec.instances.instances[record.id].heartbeat
+    assert beat['card_ours_alone']['device_handles']['ok'] is None and beat['pay']['heartbeat'] is True
+    watch.box_locks.release('hk1')
+    clock.t += 60
+    assert not watch.run_pass().ok  # still there once the box is free: foreign
+
+
+def test_device_holder_parsing():
+    ours = 'a' * 64
+    holders = parse_device_holders(
+        '/proc/1/root/proc/10/fd /dev/nvidia0\n/proc/1/root/proc/10/fd /dev/nvidiactl\n'
+        '/proc/1/root/proc/10/fd /dev/nvidiactl\n/proc/1/root/proc/11/fd /dev/nvidia-modeset\n'
+        '/proc/1/root/proc/12/fd /dev/nvidia-uvm\n/proc/1/root/proc/13/fd /dev/nvidia1\n'
+        f'== 10 python3\n0::/system.slice/docker-{ours}.scope\n== 12 sleep\nMISSING\n'
+    )
+    assert sorted(holders) == [10, 12, 13]  # nvidia-modeset is not a node a GPU job holds
+    assert holders[10].devices == ['/dev/nvidia0', '/dev/nvidiactl'] and holders[10].containers == {ours}
+    assert holders[10].comm == 'python3' and holders[12].read and holders[12].containers is None
+    assert not holders[13].read  # no block came back for it: fails closed in the judge
 
 
 def test_the_watch_leaves_cards_that_are_not_leased_alone(world):

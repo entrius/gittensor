@@ -14,7 +14,13 @@ about the workload and asks three questions:
   even on the right image; a vanished one (gone, or exited without our stop) fails too (Kimbo 9/15).
 * **Card ours alone?** Every GPU process on a leased card belongs to that card's instance: ``nvidia-smi
   --query-compute-apps`` PIDs, each mapped through the host's ``/proc/<pid>/cgroup`` to a container ID. Positive and
-  per card: a PID we cannot attribute to our container fails.
+  per card: a PID we cannot attribute to our container fails. NVML only lists processes with a CUDA context, so a
+  container started with ``--gpus`` that merely sleeps is invisible to it; one more command in the same visit
+  (``DEVICE_HOLDERS_COMMAND``) lists every host process with ``/dev/nvidia<N>``, ``/dev/nvidiactl`` or
+  ``/dev/nvidia-uvm`` open and maps each to containers the same way. Any holder outside our instances' containers
+  fails, bar the driver's own ``nvidia-persistenced`` running on the host (Kimbo 9/15). Never killed: benched. The scan
+  is skipped (and a scan the box's lock was taken during is discarded) while a start, drain or proof holds the box:
+  their containers are ours but not yet, or no longer, recorded.
 
 Any failure benches the box on the fraud ladder, withholds its pay from that instant (``BoxState.withheld_from``, which
 WS-F consumes) and undeploys every instance on it with a kill. A visit that gets no answer (SSH down, docker erroring)
@@ -64,6 +70,7 @@ from gittensor.controller.checks.state import (
     mark_reachable,
     transition_card,
 )
+from gittensor.controller.locks import BoxLocks
 from gittensor.controller.manifest import Drain, Manifest
 from gittensor.controller.reconcile import InstanceRecord, InstanceStore
 from gittensor.controller.registry import Registry, RegistryError
@@ -83,6 +90,18 @@ _TRANSPORT = (SshTransportError, CertificateError)
 _CONTAINER_ID = re.compile(r'[0-9a-f]{64}')
 COMPUTE_APPS_COMMAND = 'nvidia-smi --query-compute-apps=pid,gpu_uuid --format=csv,noheader'
 _APP_LINE = re.compile(r'^\s*(\d+)\s*,\s*(GPU-[0-9A-Za-z-]+)\s*$')
+# Every host process with an NVIDIA device node open (one `find` over the host's /proc/*/fd), then each holder's comm
+# and cgroup. Exit 3 when the host procfs is not where we look; a holder that exits mid-scan prints MISSING.
+DEVICE_HOLDERS_COMMAND = (
+    rf'H={cfg.HOST_ROOT}/proc; [ -r "$H/1/cgroup" ] || {{ echo "no host procfs at $H" >&2; exit 3; }}; '
+    r"""L=$(find "$H"/[0-9]*/fd -maxdepth 1 -lname '/dev/nvidia*' -printf '%h %l\n' 2>/dev/null); printf '%s\n' "$L"; """
+    r"""for p in $(printf '%s\n' "$L" | sed -n 's#^.*/proc/\([0-9]*\)/fd .*#\1#p' | sort -un); do """
+    r"""printf '== %s %s\n' "$p" "$(cat "$H/$p/comm" 2>/dev/null)"; cat "$H/$p/cgroup" 2>/dev/null || echo MISSING; """
+    r'done; exit 0'
+)
+_HOLDER_FD = re.compile(r'/proc/(\d+)/fd (/dev/\S+)$')
+_GPU_DEVICE = re.compile(r'^/dev/nvidia(\d+|ctl|-uvm)$')  # the nodes a CUDA or `--gpus` process holds
+PERSISTENCED_COMM = 'nvidia-persiste'  # /proc/<pid>/comm stops at 15 bytes: nvidia-persistenced
 
 
 def cgroup_command(pids: list[int]) -> str:
@@ -128,6 +147,42 @@ def parse_cgroups(stdout: str) -> dict[int, set[str] | None]:
     return out
 
 
+@dataclass
+class DeviceHolder:
+    pid: int
+    devices: list[str] = field(default_factory=list)
+    comm: str = ''
+    read: bool = False  # its comm + cgroup block came back
+    containers: set[str] | None = field(default_factory=set)  # IDs in its cgroup paths; None: exited mid-scan
+
+
+def parse_device_holders(stdout: str) -> dict[int, DeviceHolder]:
+    """``DEVICE_HOLDERS_COMMAND``'s output: the fd lines (only the GPU nodes we judge), then a block per holder."""
+    holders: dict[int, DeviceHolder] = {}
+    current: DeviceHolder | None = None
+    in_blocks = False
+    for raw in stdout.splitlines():
+        line = raw.strip()
+        if line.startswith('== '):
+            in_blocks = True
+            pid_text, _, comm = line[3:].partition(' ')
+            current = holders.get(int(pid_text)) if pid_text.isdigit() else None
+            if current is not None:
+                current.comm, current.read, current.containers = comm.strip(), True, set()
+        elif not in_blocks:
+            m = _HOLDER_FD.search(line)
+            if m and _GPU_DEVICE.match(m.group(2)):
+                holder = holders.setdefault(int(m.group(1)), DeviceHolder(int(m.group(1))))
+                if m.group(2) not in holder.devices:
+                    holder.devices.append(m.group(2))
+        elif current is not None:
+            if line == 'MISSING':
+                current.containers = None
+            elif current.containers is not None:
+                current.containers.update(_CONTAINER_ID.findall(line))
+    return holders
+
+
 # ---------------------------------------------------------------- one heartbeat ---------------------------------------
 
 
@@ -150,8 +205,9 @@ class HeartbeatResult:
     at: float
     same_card: Answer
     containers: dict[str, Answer]  # instance id -> our container running?
-    alone: dict[str, Answer]  # uuid -> card ours alone?
+    alone: dict[str, Answer]  # uuid -> card ours alone? (NVML processes)
     recorded: dict[str, tuple[str, str]] = field(default_factory=dict)  # instance -> (StartedAt, image id) filled now
+    devices: Answer | None = None  # card ours alone? (open device handles, box-wide); None: not scanned this visit
 
     @property
     def failed(self) -> list[str]:
@@ -160,7 +216,7 @@ class HeartbeatResult:
             names.append(SAME_CARD)
         if any(not a.ok for a in self.containers.values()):
             names.append(OUR_CONTAINER)
-        if any(not a.ok for a in self.alone.values()):
+        if any(not a.ok for a in self.alone.values()) or (self.devices is not None and not self.devices.ok):
             names.append(CARD_OURS_ALONE)
         return names
 
@@ -172,17 +228,26 @@ class HeartbeatResult:
         out = [] if self.same_card.ok else [f'{SAME_CARD}: {self.same_card.detail}']
         out += [f'{OUR_CONTAINER} {i}: {a.detail}' for i, a in self.containers.items() if not a.ok]
         out += [f'{CARD_OURS_ALONE} {u[:12]}…: {a.detail}' for u, a in self.alone.items() if not a.ok]
+        if self.devices is not None and not self.devices.ok:
+            out.append(f'{CARD_OURS_ALONE} (device handles): {self.devices.detail}')
         return out
 
     def evidence_for(self, record: InstanceRecord) -> dict:
         container = self.containers.get(record.id, Answer(False, 'not asked'))
         alone = self.alone.get(record.uuid, Answer(False, 'not asked'))
+        devices = (
+            self.devices.as_dict() if self.devices is not None else {'ok': None, 'detail': 'not scanned: box busy'}
+        )
         return {
             'at': self.at,
             'ok': self.ok,
             SAME_CARD: self.same_card.as_dict(),
             OUR_CONTAINER: container.as_dict(),
-            CARD_OURS_ALONE: alone.as_dict(),
+            CARD_OURS_ALONE: {
+                **alone.as_dict(),
+                'ok': alone.ok and devices['ok'] is not False,
+                'device_handles': devices,
+            },
             # The four pay conditions (23 §7) as this visit saw them; WS-F pays a block only when all four hold.
             'pay': {
                 'we_started': bool(container.evidence.get('we_started')),
@@ -298,10 +363,42 @@ def _alone(runner: HostRunner, records: list[InstanceRecord]) -> dict[str, Answe
     return out
 
 
+def _device_holders(runner: HostRunner, ours: set[str]) -> Answer:
+    """Every open NVIDIA device handle on the host must sit in one of ``ours`` (our instances' container IDs on this
+    box), or be the host's own persistence daemon."""
+    result = runner.run(DEVICE_HOLDERS_COMMAND, timeout=cfg.SSH_COMMAND_TIMEOUT_S)
+    if not result.ok:
+        why = (result.stderr or result.stdout).strip()[:200]
+        return Answer(False, f'cannot scan device handles: exit {result.exit_code}: {why}')
+    holders = parse_device_holders(result.stdout)
+    foreign, exited = [], []
+    for holder in sorted(holders.values(), key=lambda h: h.pid):
+        devices = ', '.join(holder.devices)
+        if not holder.read:
+            foreign.append(f'pid {holder.pid} holds {devices}: its cgroup was not read')
+        elif holder.containers is None:
+            exited.append(holder.pid)  # gone between the fd scan and its cgroup read: it holds nothing now
+        elif holder.containers & ours or (not holder.containers and holder.comm == PERSISTENCED_COMM):
+            continue
+        else:
+            where = ', '.join(sorted(i[:12] for i in holder.containers)) or 'no container'
+            foreign.append(f'pid {holder.pid} ({holder.comm or "?"}) in {where} holds {devices}')
+    evidence = {'holders': sorted(holders), 'exited_mid_scan': exited}
+    if foreign:
+        return Answer(False, 'foreign device holder(s): ' + '; '.join(foreign)[:400], evidence)
+    return Answer(True, f'{len(holders)} device holder(s), none foreign', evidence)
+
+
 def run_heartbeat(
-    runner: HostRunner, box: BoxState, records: list[InstanceRecord], manifests: dict[str, Manifest | None], now: float
+    runner: HostRunner,
+    box: BoxState,
+    records: list[InstanceRecord],
+    manifests: dict[str, Manifest | None],
+    now: float,
+    ours: set[str] | None = None,
 ) -> HeartbeatResult:
-    """One heartbeat over one box's leased instances. Raises a transport error or ``NoAnswer`` when it gets none."""
+    """One heartbeat over one box's leased instances. With ``ours`` (every container ID of our instances on the box)
+    the open device handles are scanned too. Raises a transport error or ``NoAnswer`` when it gets no answer."""
     same_card = _same_card(runner, box)
     containers, recorded = {}, {}
     for record in records:
@@ -309,7 +406,9 @@ def run_heartbeat(
         containers[record.id] = answer
         if filled:
             recorded[record.id] = filled
-    return HeartbeatResult(now, same_card, containers, _alone(runner, records), recorded)
+    alone = _alone(runner, records)
+    devices = _device_holders(runner, ours) if ours is not None else None
+    return HeartbeatResult(now, same_card, containers, alone, recorded, devices)
 
 
 # ---------------------------------------------------------------- the watch -------------------------------------------
@@ -349,6 +448,10 @@ class Watch:
     clock: Callable[[], float] = time.monotonic
     wall: Callable[[], float] = time.time
     lock: threading.RLock = field(default_factory=threading.RLock, repr=False)  # the shared state-write lock
+    box_locks: BoxLocks | None = None  # `run`'s per-box locks: never taken here, only looked at (the device scan)
+
+    def _box_busy(self, box_id: str) -> bool:
+        return self.box_locks is not None and self.box_locks.held(box_id)
 
     def leased(self) -> dict[str, list[InstanceRecord]]:
         """Instances on LEASED cards, by box: the ones the watch looks after."""
@@ -429,11 +532,16 @@ class Watch:
     def _heartbeat(self, box_id, box, runner, records, manifests, report) -> bool:
         """True when the visit may go on to health probes."""
         started, now = self.clock(), self.wall()
+        scan = not self._box_busy(box_id)
+        with self.lock:
+            ours = {r.container_id for r in self.instances.on_box(box_id) if r.container_id} if scan else None
         try:
-            result = run_heartbeat(runner, box, records, manifests, now)
+            result = run_heartbeat(runner, box, records, manifests, now, ours)
         except (*_TRANSPORT, NoAnswer) as e:
             self._miss(box_id, runner, records, f'{type(e).__name__}: {e}'[:300], now, report)
             return False
+        if scan and self._box_busy(box_id):
+            result.devices = None  # a start, drain or proof took the box mid-scan: its containers are no verdict
         took = {'heartbeat': round((self.clock() - started) * 1000.0, 1)}
         with self.lock:
             if box_id in self.boxes.boxes:

@@ -42,6 +42,7 @@ from gittensor.controller.checks.state import (
     transition_card,
 )
 from gittensor.controller.checks.verdict import CheckResult, CheckVerdict
+from gittensor.controller.heartbeat import DEVICE_HOLDERS_COMMAND
 from gittensor.controller.manifest import load_manifest, parse_manifest
 from gittensor.controller.reconcile import InstanceStore, Reconciler
 from gittensor.controller.registry import DeploymentStore, Registry, make_entry, sign_bytes
@@ -279,6 +280,9 @@ class FakeDocker:
         self.gpus, self.power_w, self.nvml_md5 = list(gpus), 575.0, NVML_MD5
         self.processes: dict[int, tuple[str, str | None]] = {}
         self.hidden: set[int] = set()
+        # Processes with NVIDIA device nodes open but no CUDA context (invisible to NVML): pid -> (container, comm,
+        # devices). Every GPU process above holds its card's node, nvidiactl and nvidia-uvm as well.
+        self.holders: dict[int, tuple[str | None, str, tuple[str, ...]]] = {}
         self.hold = hold  # a threading.Event: `docker run` blocks until it is set (a slow model load)
         self._pid, self._starts = 4000, 0
         self.runner = FakeRunner().on(regex(r'.'), self.respond)
@@ -290,6 +294,43 @@ class FakeDocker:
         self._pid += 1
         self.processes[self._pid] = (uuid, container_id)
         return self._pid
+
+    def hold_devices(
+        self, container_id=None, comm='sleep', devices=('/dev/nvidia0', '/dev/nvidiactl', '/dev/nvidia-uvm')
+    ):
+        """A process with the device nodes open and no CUDA context: a `--gpus` container that sleeps, or the host's
+        persistence daemon."""
+        self._pid += 1
+        self.holders[self._pid] = (container_id, comm, tuple(devices))
+        return self._pid
+
+    @staticmethod
+    def _cgroup(container_id):
+        return (
+            f'0::/system.slice/docker-{container_id}.scope'
+            if container_id
+            else '0::/user.slice/user-0.slice/session-1.scope'
+        )
+
+    def _device_scan(self):
+        held = {
+            pid: (
+                cid,
+                'python3',
+                (
+                    f'/dev/nvidia{self.gpus.index(uuid) if uuid in self.gpus else 0}',
+                    '/dev/nvidiactl',
+                    '/dev/nvidia-uvm',
+                ),
+            )
+            for pid, (uuid, cid) in self.processes.items()
+            if pid not in self.hidden
+        }
+        held.update(self.holders)
+        lines = [f'/proc/1/root/proc/{pid}/fd {dev}' for pid, (_, _, devs) in sorted(held.items()) for dev in devs]
+        for pid, (cid, comm, _) in sorted(held.items()):
+            lines += [f'== {pid} {comm}', self._cgroup(cid)]
+        return '\n'.join(lines) + '\n'
 
     def restart(self, cid):
         """`docker restart` by the miner: the same ID, a new StartedAt."""
@@ -326,6 +367,8 @@ class FakeDocker:
             return f'{self.nvml_md5}  {NVML_PATH}\n'
         if command.startswith('nvidia-smi --query-compute-apps'):
             return ''.join(f'{pid}, {uuid}\n' for pid, (uuid, _) in sorted(self.processes.items()))
+        if command == DEVICE_HOLDERS_COMMAND:
+            return self._device_scan()
         if command.startswith('for p in '):
             out = []
             for pid in map(int, re.search(r'for p in ([\d ]+);', command).group(1).split()):
@@ -333,10 +376,7 @@ class FakeDocker:
                 if pid in self.hidden or pid not in self.processes:
                     out.append('MISSING')
                     continue
-                cid = self.processes[pid][1]
-                out.append(
-                    f'0::/system.slice/docker-{cid}.scope' if cid else '0::/user.slice/user-0.slice/session-1.scope'
-                )
+                out.append(self._cgroup(self.processes[pid][1]))
             return '\n'.join(out) + '\n'
         return None
 

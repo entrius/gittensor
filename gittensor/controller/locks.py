@@ -7,7 +7,8 @@ What must never overlap on one box is a GPU proof and a lease start or drain: th
 or a start on a card mid-proof. The reconciler holds a box's lock for the whole of its starts and drains there (a model
 load is minutes); the proof round waits a little for it and otherwise skips that box until the next round. The watch
 (heartbeat + health) takes no box lock: it only reads, and the undeploys it issues are idempotent, so it never waits
-behind a model load. State writes are serialised separately by one short lock around the state files.
+behind a model load. It only looks: while a box's lock is held it skips the device-handle scan, whose verdict a proof
+or start container (ours, not yet recorded) would spoil. State writes are serialised separately by one short lock around the state files.
 """
 
 from __future__ import annotations

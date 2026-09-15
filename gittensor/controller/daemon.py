@@ -139,6 +139,7 @@ class Controller:
             http_for,
             self.intervals.heartbeat_s,
             lock=self.write_lock,
+            box_locks=self.box_locks,
         )
         self._threads: list[threading.Thread] = []
 

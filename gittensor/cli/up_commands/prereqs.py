@@ -348,6 +348,31 @@ def run_prereqs(
     return report
 
 
+def run_publish_prereqs(
+    probe: HostProbe,
+    *,
+    wallet: str,
+    hotkey: str,
+    netuid: int,
+    endpoint: str,
+    public_ip: str | None,
+    ssh_port: int,
+    skip_chain: bool = False,
+    skip_reachability: bool = False,
+) -> PrereqReport:
+    """``gitt up --publish-only``: the wallet is here and the box is elsewhere, so only the rows the chain step needs.
+    No driver, docker or port rows (they describe the box, not this machine); the reachability row dials the box from
+    here, which is the controller's view of it."""
+    report = PrereqReport()
+    ip_result, report.public_ip = check_public_ip(probe, public_ip)
+    report.results.append(ip_result)
+    report.results.append(check_reachable(probe, report.public_ip, ssh_port, skip_reachability))
+    hotkey_result, report.hotkey_ss58 = check_hotkey(probe, wallet, hotkey)
+    report.results.append(hotkey_result)
+    report.results.append(check_registered(probe, report.hotkey_ss58, netuid, endpoint, skip_chain))
+    return report
+
+
 _STATUS_MARKUP = {
     'pass': '[green]✓ pass[/green]',
     'fail': '[red]✗ fail[/red]',

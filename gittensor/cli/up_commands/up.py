@@ -25,7 +25,7 @@ from gittensor.cli.json_output import emit_json
 from gittensor.cli.miner_commands.helpers import NETUID_DEFAULT, _error, _load_config_value, _resolve_endpoint
 
 from . import docker_exec
-from .prereqs import CheckResult, HostProbe, PrereqReport, render_table, run_prereqs
+from .prereqs import CheckResult, HostProbe, PrereqReport, render_table, run_prereqs, run_publish_prereqs
 
 ENDPOINT_CHECK = 'Endpoint published'
 
@@ -125,6 +125,12 @@ def publish_endpoint(
     help='Dev boxes only (with --no-update): no registration lookup, nothing published on chain, no hotkey needed.',
 )
 @click.option(
+    '--publish-only',
+    is_flag=True,
+    default=False,
+    help='Only the chain step, from a machine holding the wallet: publish --ip and --ssh-port for a box elsewhere.',
+)
+@click.option(
     '--dry-run', is_flag=True, default=False, help='Print what would be published and run, without doing either.'
 )
 @click.option('--json', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
@@ -142,6 +148,7 @@ def up_command(
     no_update,
     allow_dev_keys,
     no_chain,
+    publish_only,
     dry_run,
     json_mode,
 ):
@@ -175,6 +182,17 @@ def up_command(
     if no_chain and not no_update:
         _error('--no-chain only applies to --no-update (a dev box running a local build).', json_mode)
         sys.exit(2)
+    if publish_only:
+        if no_update or no_chain:
+            _error('--publish-only only publishes: drop --no-update / --no-chain / --allow-dev-keys.', json_mode)
+            sys.exit(2)
+        if not public_ip:
+            _error("--publish-only needs --ip: the box's public address (this machine is not the box).", json_mode)
+            sys.exit(2)
+        _publish_only(
+            wallet_name, wallet_hotkey, netuid, endpoint, public_ip, ssh_port, skip_reachability, dry_run, json_mode
+        )
+        return
 
     if not json_mode:
         err_console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {endpoint} | Netuid: {netuid}[/dim]')
@@ -317,6 +335,64 @@ def up_command(
 up_command.help = (up_command.help or '').format(
     ssh=AGENT_SSH_PORT, low=WORKLOAD_PORT_RANGE[0], high=WORKLOAD_PORT_RANGE[1]
 )
+
+
+def _publish_only(wallet, hotkey, netuid, endpoint, ip, ssh_port, skip_reachability, dry_run, json_mode):
+    """`gitt up --publish-only`: the chain step alone, from the machine holding the wallet, for a box elsewhere. Same
+    marker and same re-serve-only-on-change rule as a full `gitt up`; nothing is checked or started on this machine."""
+    probe = _make_probe()
+    report = run_publish_prereqs(
+        probe,
+        wallet=wallet,
+        hotkey=hotkey,
+        netuid=netuid,
+        endpoint=endpoint,
+        public_ip=ip,
+        ssh_port=ssh_port,
+        skip_chain=dry_run,
+        skip_reachability=skip_reachability,
+    )
+    published = 'skipped'
+    if dry_run:
+        detail = f'would publish {report.public_ip}:{ssh_port} on netuid {netuid}' if report.public_ip else 'no IP'
+        report.results.append(CheckResult(ENDPOINT_CHECK, None, detail))
+    elif report.ok:
+        row, published = publish_endpoint(
+            probe,
+            wallet=wallet,
+            hotkey=hotkey,
+            ss58=report.hotkey_ss58 or '',
+            netuid=netuid,
+            endpoint=endpoint,
+            ip=report.public_ip or '',
+            port=ssh_port,
+        )
+        report.results.append(row)
+
+    if json_mode:
+        emit_json(
+            {
+                'success': report.ok or dry_run,
+                'dry_run': dry_run,
+                'publish_only': True,
+                'hotkey_ss58': report.hotkey_ss58,
+                'endpoint': {
+                    'ip': report.public_ip,
+                    'port': ssh_port,
+                    'netuid': netuid,
+                    'workload_ports': list(WORKLOAD_PORT_RANGE),
+                    'published': published,
+                },
+                'checks': [r.as_dict() for r in report.results],
+                'commands': [],
+                'agent_command': '',
+            }
+        )
+    else:
+        console.print(render_table(report.results))
+    if not report.ok and not dry_run:
+        _error('Publishing failed; fix the rows marked fail and run `gitt up --publish-only` again.', json_mode)
+        sys.exit(1)
 
 
 def release_channel_result(channel, error, url):

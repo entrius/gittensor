@@ -466,3 +466,61 @@ class TestPublish:
             s.bind(('127.0.0.1', 0))
             port = s.getsockname()[1]
         assert real.reachable('127.0.0.1', port) is True  # nothing listened: the probe's own listener answered
+
+
+BOX = ['--ip', '88.22.127.152', '--ssh-port', '20234']
+
+
+class TestPublishOnly:
+    """The wallet here, the box elsewhere (a rented pod, or a miner who keeps keys off the GPU box)."""
+
+    def test_serves_from_here_with_no_host_checks_and_no_docker(self, runner, docker_calls, probe):
+        probe.smi = subprocess.CompletedProcess([], 127, '', 'nvidia-smi: command not found')  # no GPU on this machine
+        probe.docker_info = subprocess.CompletedProcess([], 1, '', 'no daemon')
+        with patch('gittensor.cli.up_commands.up._load_channel', side_effect=AssertionError('must not be called')):
+            result = runner.invoke(cli, [*UP, '--publish-only', *BOX, '--json'])
+        assert result.exit_code == 0, result.output
+        assert probe.served == [('alice', 'default', 74, '88.22.127.152', 20234)] and docker_calls == []
+        payload = json.loads(result.stdout)
+        assert payload['publish_only'] and payload['commands'] == [] and payload['agent_command'] == ''
+        assert payload['endpoint']['published'] == 'served' and payload['endpoint']['port'] == 20234
+        assert list(_json_checks(result)) == [
+            'Public IP',
+            'SSH port reachable',
+            'Wallet hotkey',
+            'Registered on netuid 74',
+            'Endpoint published',
+        ]
+
+    def test_an_unchanged_endpoint_is_not_served_again(self, runner, docker_calls, probe):
+        probe.on_chain = ('88.22.127.152', 20234, True)
+        result = runner.invoke(cli, [*UP, '--publish-only', *BOX, '--json'])
+        assert result.exit_code == 0 and probe.served == []
+        assert json.loads(result.stdout)['endpoint']['published'] == 'unchanged'
+        probe.on_chain = ('88.22.127.152', 20234, False)  # a plain axon at the same address: re-served with the marker
+        assert runner.invoke(cli, [*UP, '--publish-only', *BOX]).exit_code == 0 and len(probe.served) == 1
+
+    def test_dry_run_prints_and_touches_no_chain(self, runner, docker_calls, probe):
+        result = runner.invoke(cli, [*UP, '--publish-only', *BOX, '--dry-run'])
+        assert result.exit_code == 0, result.output
+        assert 'would publish 88.22.127.152:20234 on netuid 74' in result.output and 'Would run' not in result.output
+        assert probe.chain_calls == 0 and probe.served == [] and docker_calls == []
+
+    def test_needs_ip_and_refuses_box_flags(self, runner, docker_calls, probe):
+        result = runner.invoke(cli, [*UP, '--publish-only'])
+        assert result.exit_code == 2 and 'needs --ip' in result.output
+        for flag in (['--no-chain', '--no-update'], ['--no-update'], ['--no-update', '--allow-dev-keys']):
+            result = runner.invoke(cli, [*UP, '--publish-only', *BOX, *flag])
+            assert result.exit_code == 2 and '--publish-only' in result.output, flag
+        assert probe.chain_calls == 0 and docker_calls == []
+
+    def test_unregistered_or_failed_serve_exits_1(self, runner, docker_calls, probe):
+        probe.registered = False
+        result = runner.invoke(cli, [*UP, '--publish-only', *BOX])
+        assert result.exit_code == 1 and probe.served == [] and 'not registered' in result.output
+        probe.registered, probe.serve_error = True, 'ServingRateLimitExceeded'
+        result = runner.invoke(cli, [*UP, '--publish-only', *BOX, '--json'])
+        assert (
+            result.exit_code == 1 and 'ServingRateLimitExceeded' in _json_checks(result)['Endpoint published']['detail']
+        )
+        assert docker_calls == []

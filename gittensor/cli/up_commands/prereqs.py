@@ -1,28 +1,43 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-"""Prerequisite checks for `gitt up`: driver, docker, NVIDIA toolkit, a free SSH port, hotkey on disk, hotkey on chain.
+"""Prerequisite checks for `gitt up`: driver, docker, NVIDIA toolkit, a free SSH port and workload port range, the
+public IP and whether the SSH port answers on it, hotkey on disk, hotkey on chain.
 
 Every probe of the host goes through :class:`HostProbe` so the checks are unit-testable with a fake; nothing in
-this module imports ``bittensor`` at module load (the chain lookup imports it lazily inside the probe).
+this module imports ``bittensor`` at module load (the chain lookups and the serve import it lazily inside the probe).
 """
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import shutil
 import socket
 import subprocess
+import urllib.request
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from rich.table import Table
 
-from gittensor.agent.config import AGENT_CONTAINER_NAME, RUNNER_CONTAINER_NAME
+from gittensor.agent.config import (
+    AGENT_CONTAINER_NAME,
+    COMPUTE_AXON_MARKER,
+    COMPUTE_AXON_PROTOCOL,
+    COMPUTE_AXON_SCHEMA,
+    RUNNER_CONTAINER_NAME,
+    WORKLOAD_PORT_RANGE,
+    is_compute_axon,
+)
 
 BLESSED_GPU_MARKER = '5090'  # the only card the pool blesses today (vault 24 §5: multi-type is later)
 DEFAULT_WALLET_PATH = Path.home() / '.bittensor' / 'wallets'
+PUBLIC_IP_SERVICES = ('https://checkip.amazonaws.com', 'https://api.ipify.org')  # each answers the caller's IP, plain
+PUBLIC_IP_TIMEOUT_S = 5.0
+REACHABILITY_TIMEOUT_S = 3.0
+WORKLOAD_PORTS = range(WORKLOAD_PORT_RANGE[0], WORKLOAD_PORT_RANGE[1] + 1)
 
 
 @dataclass(frozen=True)
@@ -48,6 +63,7 @@ class CheckResult:
 class PrereqReport:
     results: list[CheckResult] = field(default_factory=list)
     hotkey_ss58: str | None = None
+    public_ip: str | None = None  # what `gitt up` publishes on chain; None when it has none
     agent_state: str | None = None  # docker container status, None when no such container
     runner_state: str | None = None
 
@@ -95,6 +111,61 @@ class HostProbe:
         import bittensor as bt
 
         return bool(bt.Subtensor(network=endpoint).is_hotkey_registered(hotkey_ss58=ss58, netuid=netuid))
+
+    def public_ip(self) -> str | None:
+        """This box's address as the internet sees it, from the first echo service that answers."""
+        for url in PUBLIC_IP_SERVICES:
+            try:
+                with urllib.request.urlopen(url, timeout=PUBLIC_IP_TIMEOUT_S) as response:
+                    text = response.read(64).decode().strip()
+                return str(ipaddress.ip_address(text))
+            except (OSError, ValueError):
+                continue
+        return None
+
+    def reachable(self, ip: str, port: int, timeout: float = REACHABILITY_TIMEOUT_S) -> bool:
+        """Best effort, from the box itself: connect to ``ip:port``, with a listener of our own on the port while
+        nothing else holds it. A NAT without hairpin fails this and is still reachable from outside."""
+        family = socket.AF_INET6 if ':' in ip else socket.AF_INET
+        listener = None
+        try:
+            if self.port_free(port):
+                listener = socket.create_server(('', port), family=family)
+            with socket.create_connection((ip, port), timeout=timeout):
+                return True
+        except OSError:
+            return False
+        finally:
+            if listener is not None:
+                listener.close()
+
+    def chain_endpoint(self, ss58: str, netuid: int, endpoint: str) -> tuple[str, int, bool] | None:
+        """What the chain holds for the hotkey now: ``(ip, port, carries the compute marker)``, None when not serving."""
+        import bittensor as bt
+
+        neuron = bt.Subtensor(network=endpoint).get_neuron_for_pubkey_and_subnet(ss58, netuid=netuid)
+        axon = None if neuron is None or neuron.is_null else neuron.axon_info
+        if axon is None or not axon.is_serving:
+            return None
+        return str(axon.ip), int(axon.port), is_compute_axon(axon.protocol, axon.placeholder1, axon.placeholder2)
+
+    def serve(self, wallet: str, hotkey: str, netuid: int, endpoint: str, ip: str, port: int) -> str:
+        """Serve ``ip:port`` with the compute marker, signed by the miner's hotkey. Returns '' or the failure."""
+        import bittensor as bt
+        from bittensor.core.extrinsics.serving import serve_extrinsic
+
+        response = serve_extrinsic(
+            subtensor=bt.Subtensor(network=endpoint),
+            wallet=bt.Wallet(name=wallet, hotkey=hotkey),
+            ip=ip,
+            port=port,
+            protocol=COMPUTE_AXON_PROTOCOL,
+            netuid=netuid,
+            placeholder1=COMPUTE_AXON_MARKER,
+            placeholder2=COMPUTE_AXON_SCHEMA,
+            mev_protection=False,  # nothing to front-run in an axon
+        )
+        return '' if response.success else str(response.message or 'serve_axon failed')
 
     def container_state(self, name: str) -> str | None:
         proc = self.run(['docker', 'inspect', '--format', '{{.State.Status}}', name])
@@ -156,6 +227,53 @@ def check_ports(probe: HostProbe, ports: Sequence[int], report: PrereqReport) ->
     return CheckResult('Ports free', True, ', '.join(map(str, ports)))
 
 
+def check_workload_ports(probe: HostProbe, ports: range, report: PrereqReport) -> CheckResult:
+    name = 'Workload ports'
+    span = f'{ports[0]}-{ports[-1]}'
+    busy = [p for p in ports if not probe.port_free(p)]
+    if busy and report.already_up:
+        return CheckResult(name, True, f'{span}: {len(busy)} in use (instances already placed here)')
+    if busy:
+        return CheckResult(
+            name, False, f'{span} in use: {", ".join(map(str, busy))} (the controller places instances on these)'
+        )
+    return CheckResult(name, True, f'{span} free (open them to the internet, like the sshd port)')
+
+
+def check_public_ip(probe: HostProbe, given: str | None) -> tuple[CheckResult, str | None]:
+    name = 'Public IP'
+    if given:
+        try:
+            ip, source = str(ipaddress.ip_address(given.strip())), '--ip'
+        except ValueError:
+            return CheckResult(name, False, f'--ip {given!r} is not an IP address'), None
+    else:
+        ip, source = probe.public_ip(), 'detected'
+        if not ip:
+            return CheckResult(name, False, "could not detect this box's public IP (pass --ip)"), None
+    if not ipaddress.ip_address(ip).is_global:
+        return CheckResult(name, False, f'{ip} ({source}) is not public: the controller only dials public addresses'), None  # fmt: skip
+    return CheckResult(name, True, f'{ip} ({source})'), ip
+
+
+def check_reachable(probe: HostProbe, ip: str | None, port: int, skip: bool) -> CheckResult:
+    """Best effort and never blocking: from inside, a NAT that does not hairpin looks the same as a closed port."""
+    name = 'SSH port reachable'
+    if skip:
+        return CheckResult(name, None, 'skipped (--skip-reachability)', required=False)
+    if not ip:
+        return CheckResult(name, None, 'no public IP to try', required=False)
+    if probe.reachable(ip, port):
+        return CheckResult(name, True, f'{ip}:{port} answers', required=False)
+    return CheckResult(
+        name,
+        False,
+        f'{ip}:{port} did not answer from this box: open / forward it. Behind a NAT that does not hairpin this fails '
+        f'anyway; check from another machine (nc -vz {ip} {port})',
+        required=False,
+    )
+
+
 def check_hotkey(probe: HostProbe, wallet: str, hotkey: str) -> tuple[CheckResult, str | None]:
     ss58 = probe.hotkey_ss58(wallet, hotkey)
     if not ss58:
@@ -193,8 +311,12 @@ def run_prereqs(
     ssh_port: int,
     skip_chain: bool = False,
     no_chain: bool = False,
+    public_ip: str | None = None,
+    skip_reachability: bool = False,
+    workload_ports: range = WORKLOAD_PORTS,
 ) -> PrereqReport:
-    """``no_chain`` is for our own dev boxes only: no registration lookup, and no hotkey needed on disk."""
+    """``no_chain`` is for our own dev boxes only: no registration lookup, nothing published (so no public IP or
+    reachability rows), and no hotkey needed on disk. ``public_ip`` overrides detection."""
     report = PrereqReport()
     report.results.extend(check_driver(probe))
     docker = check_docker(probe)
@@ -204,6 +326,13 @@ def run_prereqs(
         report.agent_state = probe.container_state(AGENT_CONTAINER_NAME)
         report.runner_state = probe.container_state(RUNNER_CONTAINER_NAME)
     report.results.append(check_ports(probe, [ssh_port], report))
+    report.results.append(check_workload_ports(probe, workload_ports, report))
+    if no_chain:
+        report.results.append(CheckResult('Public IP', None, 'skipped (--no-chain: nothing published)'))
+    else:
+        ip_result, report.public_ip = check_public_ip(probe, public_ip)
+        report.results.append(ip_result)
+        report.results.append(check_reachable(probe, report.public_ip, ssh_port, skip_reachability))
     hotkey_result, report.hotkey_ss58 = check_hotkey(probe, wallet, hotkey)
     if no_chain and not hotkey_result.ok:
         hotkey_result = CheckResult(hotkey_result.name, None, 'none on disk (--no-chain dev box)')

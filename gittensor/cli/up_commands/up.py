@@ -1,7 +1,8 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-"""gitt up — check prerequisites, then start the compute agent. The miner does nothing after this."""
+"""gitt up — check prerequisites, publish the box on chain, then start the compute agent. The miner does nothing after
+this."""
 
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from gittensor.agent.config import (
     AGENT_IMAGE,
     AGENT_SSH_PORT,
     RUNNER_CONTAINER_NAME,
+    WORKLOAD_PORT_RANGE,
 )
 from gittensor.agent.launch import agent_run_command, render, runner_run_command
 from gittensor.cli.helpers import NETWORK_CHOICE, console, err_console
@@ -23,7 +25,9 @@ from gittensor.cli.json_output import emit_json
 from gittensor.cli.miner_commands.helpers import NETUID_DEFAULT, _error, _load_config_value, _resolve_endpoint
 
 from . import docker_exec
-from .prereqs import HostProbe, PrereqReport, render_table, run_prereqs
+from .prereqs import CheckResult, HostProbe, PrereqReport, render_table, run_prereqs
+
+ENDPOINT_CHECK = 'Endpoint published'
 
 
 def _make_probe() -> HostProbe:
@@ -68,6 +72,27 @@ def plan_commands(
     return plan
 
 
+def publish_endpoint(
+    probe: HostProbe, *, wallet: str, hotkey: str, ss58: str, netuid: int, endpoint: str, ip: str, port: int
+) -> tuple[CheckResult, str]:
+    """Serve ``ip:port`` as the hotkey's compute endpoint unless the chain already holds exactly that. Returns the table
+    row and ``served`` / ``unchanged`` / ``error``."""
+    try:
+        current = probe.chain_endpoint(ss58, netuid, endpoint)
+    except Exception as e:  # network / RPC trouble: report, do not crash the table
+        return CheckResult(ENDPOINT_CHECK, False, f'axon lookup failed against {endpoint}: {e}'[:160]), 'error'
+    if current == (ip, port, True):
+        return CheckResult(ENDPOINT_CHECK, True, f'{ip}:{port} on netuid {netuid}, unchanged on chain'), 'unchanged'
+    try:
+        error = probe.serve(wallet, hotkey, netuid, endpoint, ip, port)
+    except Exception as e:
+        error = f'{type(e).__name__}: {e}'
+    if error:
+        return CheckResult(ENDPOINT_CHECK, False, f'serve_axon {ip}:{port} failed: {error}'[:160]), 'error'
+    was = f' (was {current[0]}:{current[1]})' if current else ''
+    return CheckResult(ENDPOINT_CHECK, True, f'served {ip}:{port} on netuid {netuid}{was}'), 'served'
+
+
 @click.command('up')
 @click.option('--wallet', 'wallet_name', default=None, help='Bittensor wallet name.')
 @click.option('--hotkey', 'wallet_hotkey', default=None, help='Bittensor hotkey name.')
@@ -76,6 +101,13 @@ def plan_commands(
 @click.option('--rpc-url', default=None, help='Subtensor RPC endpoint URL (overrides --network).')
 @click.option(
     '--ssh-port', type=int, default=AGENT_SSH_PORT, show_default=True, help='sshd port the controller reaches.'
+)
+@click.option('--ip', 'public_ip', default=None, help="Public IP to publish on chain (default: this box's, detected).")
+@click.option(
+    '--skip-reachability',
+    is_flag=True,
+    default=False,
+    help='Skip the best-effort check that the sshd port answers on the public IP.',
 )
 @click.option('--channel-url', default=AGENT_CHANNEL_URL, show_default=True, help='Signed release channel to follow.')
 @click.option('--image', default=AGENT_IMAGE, show_default=True, help='Agent image for --no-update (a local build).')
@@ -90,9 +122,11 @@ def plan_commands(
     '--no-chain',
     is_flag=True,
     default=False,
-    help='Dev boxes only (with --no-update): skip the hotkey registration lookup; no hotkey needed on disk.',
+    help='Dev boxes only (with --no-update): no registration lookup, nothing published on chain, no hotkey needed.',
 )
-@click.option('--dry-run', is_flag=True, default=False, help='Print the docker command(s) without running them.')
+@click.option(
+    '--dry-run', is_flag=True, default=False, help='Print what would be published and run, without doing either.'
+)
 @click.option('--json', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
 def up_command(
     wallet_name,
@@ -101,6 +135,8 @@ def up_command(
     network,
     rpc_url,
     ssh_port,
+    public_ip,
+    skip_reachability,
     channel_url,
     image,
     no_update,
@@ -111,16 +147,24 @@ def up_command(
 ):
     """Start the compute agent: the one container that makes this box a Gittensor compute miner.
 
-    Checks the NVIDIA driver, Docker + the NVIDIA container toolkit, that the SSH port is free, and that your
-    hotkey exists and is registered. Then verifies the signed release channel and starts a self-updating runner
-    which pulls the agent image by digest and keeps it running. After this you do nothing: the controller logs in
-    over SSH with a short-lived certificate and drives the box.
+    Checks the NVIDIA driver, Docker + the NVIDIA container toolkit, that the SSH port and the workload port range
+    are free, your public IP, and that your hotkey exists and is registered. Then publishes this box on chain (your
+    public IP and the sshd port as your hotkey's axon, signed by your hotkey; re-run only when they change), verifies
+    the signed release channel and starts a self-updating runner which pulls the agent image by digest and keeps it
+    running. After this you do nothing: the controller finds the box on chain, logs in over SSH with a short-lived
+    certificate and drives it.
+
+    \b
+    Open on your firewall / router, TCP from the internet, and nothing else:
+        the sshd port (--ssh-port, default {ssh})
+        the workload ports {low}-{high} (the controller publishes each instance on one of them)
+    A home connection behind carrier-grade NAT cannot be reached and cannot join as-is.
 
     \b
     Examples:
         gitt up --wallet alice --hotkey default
         gitt up --dry-run
-        gitt up --no-update --allow-dev-keys --image entrius/gt-agent:dev   (a locally built image)
+        gitt up --no-update --allow-dev-keys --no-chain --image entrius/gt-agent:dev   (a locally built dev box)
     """
     wallet_name = wallet_name or _load_config_value('wallet') or 'default'
     wallet_hotkey = wallet_hotkey or _load_config_value('hotkey') or 'default'
@@ -136,12 +180,13 @@ def up_command(
         err_console.print(f'[dim]Wallet: {wallet_name}/{wallet_hotkey} | Network: {endpoint} | Netuid: {netuid}[/dim]')
         if no_chain:
             err_console.print(
-                '[bold red]WARNING: --no-chain — the hotkey registration lookup is SKIPPED. '
+                '[bold red]WARNING: --no-chain — the hotkey registration lookup is SKIPPED and nothing is published. '
                 'This is a dev box, not a miner: nothing it does earns or is scored.[/bold red]'
             )
 
+    probe = _make_probe()
     report = run_prereqs(
-        _make_probe(),
+        probe,
         wallet=wallet_name,
         hotkey=wallet_hotkey,
         netuid=netuid,
@@ -149,6 +194,8 @@ def up_command(
         ssh_port=ssh_port,
         skip_chain=dry_run,
         no_chain=no_chain,
+        public_ip=public_ip,
+        skip_reachability=skip_reachability,
     )
 
     channel = None
@@ -161,6 +208,26 @@ def up_command(
         report.results.append(
             release_channel_result(channel, channel_error, channel_url)  # a row in the table like any other check
         )
+
+    # Publish after every other check passed, before anything starts: a box the controller cannot find is no miner.
+    published = 'skipped'
+    if no_chain:
+        report.results.append(CheckResult(ENDPOINT_CHECK, None, 'skipped (--no-chain: nothing published)'))
+    elif dry_run:
+        detail = f'would publish {report.public_ip}:{ssh_port} on netuid {netuid}' if report.public_ip else 'no IP'
+        report.results.append(CheckResult(ENDPOINT_CHECK, None, detail))
+    elif report.ok:
+        row, published = publish_endpoint(
+            probe,
+            wallet=wallet_name,
+            hotkey=wallet_hotkey,
+            ss58=report.hotkey_ss58 or '',
+            netuid=netuid,
+            endpoint=endpoint,
+            ip=report.public_ip or '',
+            port=ssh_port,
+        )
+        report.results.append(row)
 
     if channel is None and not no_update:
         plan: list[list[str]] = []
@@ -192,6 +259,13 @@ def up_command(
                 'no_chain': no_chain,
                 'already_up': report.already_up,
                 'hotkey_ss58': report.hotkey_ss58,
+                'endpoint': {
+                    'ip': report.public_ip,
+                    'port': ssh_port,
+                    'netuid': netuid,
+                    'workload_ports': list(WORKLOAD_PORT_RANGE),
+                    'published': published,
+                },
                 'channel': None if channel is None else channel.__dict__,
                 'checks': [r.as_dict() for r in report.results],
                 'commands': [render(c) for c in plan],
@@ -233,15 +307,19 @@ def up_command(
 
     if not json_mode:
         started = AGENT_CONTAINER_NAME if no_update else RUNNER_CONTAINER_NAME
-        err_console.print(f'\n[green]Started {started}.[/green] sshd :{ssh_port}.')
+        low, high = WORKLOAD_PORT_RANGE
+        err_console.print(f'\n[green]Started {started}.[/green] sshd :{ssh_port}, workload ports {low}-{high}.')
         err_console.print(
             '[dim]Nothing else to do: the controller takes it from here. `gitt down` stops the agent.[/dim]'
         )
 
 
-def release_channel_result(channel, error, url):
-    from .prereqs import CheckResult
+up_command.help = (up_command.help or '').format(
+    ssh=AGENT_SSH_PORT, low=WORKLOAD_PORT_RANGE[0], high=WORKLOAD_PORT_RANGE[1]
+)
 
+
+def release_channel_result(channel, error, url):
     if channel is not None:
         return CheckResult('Release channel', True, f'{channel.version or "?"} → {channel.agent[-19:]} ({url})')
     return CheckResult('Release channel', False, error[:160])

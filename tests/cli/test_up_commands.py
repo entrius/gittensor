@@ -35,6 +35,29 @@ class FakeProbe:
         self.registered = True
         self.states: dict[str, str | None] = {'gt-agent': None, 'gt-agent-runner': None}
         self.chain_calls = 0
+        self.ip = '44.10.0.1'
+        self.answers = True  # the sshd port answers on the public IP
+        self.on_chain: tuple | None = None  # (ip, port, compute marker) the chain holds for the hotkey
+        self.served: list[tuple] = []
+        self.serve_error = ''
+
+    def public_ip(self):
+        return self.ip
+
+    def reachable(self, ip, port):
+        return self.answers
+
+    def chain_endpoint(self, ss58, netuid, endpoint):
+        self.chain_calls += 1
+        return self.on_chain
+
+    def serve(self, wallet, hotkey, netuid, endpoint, ip, port):
+        self.chain_calls += 1
+        if self.serve_error:
+            return self.serve_error
+        self.served.append((wallet, hotkey, netuid, ip, port))
+        self.on_chain = (ip, port, True)
+        return ''
 
     def run(self, cmd, timeout=20.0):
         if cmd[0] == 'nvidia-smi':
@@ -99,7 +122,9 @@ class TestPrereqs:
     def test_all_pass(self, probe):
         report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
         assert report.ok and report.hotkey_ss58 == probe.ss58 and not report.already_up
-        assert [r.status for r in report.results] == ['pass'] * 6
+        assert [r.status for r in report.results] == ['pass'] * 9
+        assert [r.name for r in report.results][4:7] == ['Workload ports', 'Public IP', 'SSH port reachable']
+        assert report.public_ip == probe.ip and probe.chain_calls == 1  # the registration lookup only
 
     def test_no_driver_fails(self, probe):
         probe.smi = subprocess.CompletedProcess([], 127, '', 'nvidia-smi: command not found')
@@ -339,3 +364,105 @@ def test_docker_assets_exist():
         'channel/README.md',
     ):
         assert (root / name).is_file(), name
+
+
+def _json_checks(result):
+    envelope, _ = json.JSONDecoder().raw_decode(result.stdout)  # a failure adds the error envelope after it
+    return {c['name']: c for c in envelope['checks']}
+
+
+class TestPublish:
+    def test_help_names_what_to_open(self, runner):
+        result = runner.invoke(cli, ['up', '--help'])
+        assert 'the sshd port (--ssh-port, default 2200)' in result.output and '20000-20015' in result.output
+
+    def test_happy_path_publishes_the_endpoint_then_starts(self, runner, docker_calls, probe):
+        result = runner.invoke(cli, [*UP, '--json'])
+        assert result.exit_code == 0, result.output
+        assert probe.served == [('alice', 'default', 74, '44.10.0.1', 2200)] and len(docker_calls) == 1
+        payload = json.loads(result.stdout)
+        assert payload['endpoint'] == {
+            'ip': '44.10.0.1',
+            'port': 2200,
+            'netuid': 74,
+            'workload_ports': [20000, 20015],
+            'published': 'served',
+        }
+        assert _json_checks(result)['Endpoint published']['detail'] == 'served 44.10.0.1:2200 on netuid 74'
+
+    def test_an_unchanged_endpoint_is_not_served_again(self, runner, docker_calls, probe):
+        probe.on_chain = ('44.10.0.1', 2200, True)
+        result = runner.invoke(cli, [*UP, '--json'])
+        assert result.exit_code == 0 and probe.served == []
+        assert json.loads(result.stdout)['endpoint']['published'] == 'unchanged'
+
+    def test_a_changed_ip_or_port_re_serves_even_when_already_up(self, runner, docker_calls, probe):
+        probe.states = {'gt-agent': 'running', 'gt-agent-runner': 'running'}
+        probe.busy_ports = {2200, 2201, *range(20000, 20004)}  # our sshd and our instances
+        probe.on_chain = ('44.10.0.9', 2200, True)
+        result = runner.invoke(cli, UP)
+        assert result.exit_code == 0, result.output
+        assert probe.served[-1][3:] == ('44.10.0.1', 2200) and 'was 44.10.0.9:2200' in result.output
+        assert 'Already up' in result.output and docker_calls == []
+        runner.invoke(cli, [*UP, '--ssh-port', '2201'])
+        assert probe.served[-1][3:] == ('44.10.0.1', 2201) and len(probe.served) == 2
+        probe.on_chain = ('44.10.0.1', 2201, False)  # the right address without the marker: a plain axon, re-served
+        runner.invoke(cli, [*UP, '--ssh-port', '2201'])
+        assert len(probe.served) == 3
+
+    def test_ip_override_and_a_private_ip(self, runner, docker_calls, probe):
+        result = runner.invoke(cli, [*UP, '--ip', '52.20.0.3'])
+        assert result.exit_code == 0, result.output
+        assert probe.served[0][3] == '52.20.0.3' and '52.20.0.3 (--ip)' in result.output
+        private = runner.invoke(cli, [*UP, '--ip', '192.168.1.5', '--json'])
+        assert private.exit_code == 1 and 'not public' in _json_checks(private)['Public IP']['detail']
+        assert len(probe.served) == 1 and len(docker_calls) == 1
+        probe.ip = None
+        undetected = runner.invoke(cli, [*UP, '--json'])
+        assert undetected.exit_code == 1 and 'pass --ip' in _json_checks(undetected)['Public IP']['detail']
+
+    def test_a_failed_serve_starts_nothing(self, runner, docker_calls, probe):
+        probe.serve_error = 'ServingRateLimitExceeded'
+        result = runner.invoke(cli, [*UP, '--json'])
+        assert result.exit_code == 1 and docker_calls == []
+        detail = _json_checks(result)['Endpoint published']
+        assert detail['status'] == 'fail' and 'ServingRateLimitExceeded' in detail['detail']
+
+    def test_failed_prereqs_publish_nothing(self, runner, docker_calls, probe):
+        probe.busy_ports = {20003}
+        result = runner.invoke(cli, [*UP, '--json'])
+        assert result.exit_code == 1 and probe.served == [] and docker_calls == []
+        assert '20003' in _json_checks(result)['Workload ports']['detail']
+
+    def test_dry_run_prints_what_it_would_publish_and_touches_no_chain(self, runner, docker_calls, probe):
+        result = runner.invoke(cli, [*UP, '--dry-run', '--json'])
+        assert result.exit_code == 0, result.output
+        row = _json_checks(result)['Endpoint published']
+        assert row['status'] == 'skip' and row['detail'] == 'would publish 44.10.0.1:2200 on netuid 74'
+        assert probe.chain_calls == 0 and probe.served == [] and docker_calls == []
+
+    def test_no_chain_publishes_nothing(self, runner, docker_calls, probe):
+        args = [*UP, '--no-update', '--allow-dev-keys', '--no-chain', '--image', 'entrius/gt-agent:dev', '--json']
+        result = runner.invoke(cli, args)
+        assert result.exit_code == 0, result.output
+        checks = _json_checks(result)
+        assert checks['Public IP']['status'] == 'skip' and checks['Endpoint published']['status'] == 'skip'
+        assert probe.chain_calls == 0 and probe.served == []
+
+    def test_an_unanswering_ssh_port_warns_and_can_be_skipped(self, runner, docker_calls, probe):
+        probe.answers = False
+        result = runner.invoke(cli, [*UP, '--json'])
+        assert result.exit_code == 0, result.output
+        row = _json_checks(result)['SSH port reachable']
+        assert row['status'] == 'warn' and 'nc -vz 44.10.0.1 2200' in row['detail'] and probe.served
+        skipped = runner.invoke(cli, [*UP, '--skip-reachability', '--json'])
+        assert _json_checks(skipped)['SSH port reachable']['status'] == 'skip'
+
+    def test_real_probe_reachable_listens_on_a_free_port(self):
+        import socket
+
+        real = prereqs.HostProbe()
+        with socket.socket() as s:
+            s.bind(('127.0.0.1', 0))
+            port = s.getsockname()[1]
+        assert real.reachable('127.0.0.1', port) is True  # nothing listened: the probe's own listener answered

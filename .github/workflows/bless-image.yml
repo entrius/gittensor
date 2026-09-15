@@ -60,13 +60,13 @@ jobs:
           uv run gitt controller bless "${{ inputs.manifest }}" --image "${{ inputs.image }}" \
             --sign-key "$KEY" $Q --state-dir "$STATE" --json | tee bless.json
           shred -u "$KEY"
-          ENTRY="$(python3 -c "import json;print(json.load(open('bless.json'))['entry_id'])")"
+          ENTRY="$(python3 -c "import json;print(json.load(open('bless.json'))['entry'])")"
           cp "$STATE/registry/$ENTRY.json" "$STATE/registry/$ENTRY.json.sig" docker/controller/registry/
           echo "entry=$ENTRY" >> "$GITHUB_ENV"
           # verify the way the controller will: against the compiled release public key
           uv run gitt controller registry show --state-dir "$STATE" --json | python3 -c "
-          import json,sys; doc=json.load(sys.stdin); e=[x for x in doc['entries'] if x['entry_id']=='$ENTRY']
-          assert e and e[0]['verified'], doc; print('verified', e[0]['entry_id'], e[0]['image'])"
+          import json,sys; doc=json.load(sys.stdin); e=[x for x in doc['entries'] if x['entry']=='$ENTRY']
+          assert e and e[0]['verified'], doc; print('verified', e[0]['entry'], e[0].get('image'))"
 
       - name: Commit the entry
         run: |

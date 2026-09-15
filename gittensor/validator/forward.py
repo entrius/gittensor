@@ -9,11 +9,13 @@ import bittensor as bt
 from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
 from gittensor.utils.uids import get_all_uids
+from gittensor.validator.compute_pool import compute_pool_for
 from gittensor.validator.emission_allocation import blend_emission_pools
 from gittensor.validator.issue_discovery.scan import run_issue_discovery
 from gittensor.validator.oss_contributions.reward import get_rewards
 from gittensor.validator.serving.pricing import serving_pricing
 from gittensor.validator.utils.config import (
+    COMPUTE_SCORECARD_PATH,
     SERVING_ENABLED,
     SERVING_PAY_CAP_WITHOUT_PRICING,
     VALIDATOR_STEPS_INTERVAL,
@@ -47,6 +49,8 @@ async def forward(self: 'Validator') -> None:
     - Maintainer cut:        per-repo carve-out routed to maintainer miner neurons
     - Issue treasury:       10%, flat to UID 111
     - Serving pool:          SERVING_GPU_HOUR_USD per settled card-equivalent, capped at SERVING_EMISSION_SHARE_CAP
+    - Compute pool:          COMPUTE_SCORECARD_PATH set only: replaces the serving pool; 1 - OSS_EMISSION_SHARE paid
+                             by the controller's signed scorecard, recycled when it is stale or invalid
     - Recycle:              registry slack and inactive repo slices to UID 0
     """
 
@@ -81,6 +85,8 @@ async def forward(self: 'Validator') -> None:
         serving_scores = self.serving_state.scores_for(self.metagraph.hotkeys) if SERVING_ENABLED else {}
         pricing = serving_pricing(self) if SERVING_ENABLED and serving_scores else None
         self.last_serving_pricing = pricing  # the serving audit thread stamps it on the rounds it persists
+        # COMPUTE_SCORECARD_PATH unset: the call below is exactly today's.
+        compute = {'compute_pool': compute_pool_for(self, COMPUTE_SCORECARD_PATH)} if COMPUTE_SCORECARD_PATH else {}
         rewards = blend_emission_pools(
             miner_evaluations,
             master_repositories,
@@ -89,6 +95,7 @@ async def forward(self: 'Validator') -> None:
             serving_scores,
             pricing,
             SERVING_PAY_CAP_WITHOUT_PRICING,
+            **compute,
         )
 
         self.update_scores(rewards, miner_uids, blacklisted_uids=sorted(penalized_uids))

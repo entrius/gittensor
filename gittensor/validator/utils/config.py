@@ -33,6 +33,10 @@ SERVING_BASELINE_API_KEYS = os.getenv('SERVING_BASELINE_API_KEYS', '')
 SERVING_BASELINE_PER_ROUND = int(os.getenv('SERVING_BASELINE_PER_ROUND', str(SERVING_BASELINE_PER_ROUND)))
 SERVING_API_HOST = os.getenv('SERVING_API_HOST', '127.0.0.1')
 SERVING_API_PORT = int(os.getenv('SERVING_API_PORT', str(SERVING_API_DEFAULT_PORT)))
+# Compute pool (vault 23 §8a, 26 §1): the controller's signed scorecard (`<controller state>/scorecard/latest.json`).
+# Unset: today's behaviour, untouched. Set: the validator signs and commits its sha256 and pays the compute share from
+# its weights; a stale or invalid scorecard recycles the compute share.
+COMPUTE_SCORECARD_PATH = os.getenv('COMPUTE_SCORECARD_PATH', '')
 
 # log values
 bt.logging.info(f'VALIDATOR_WAIT: {VALIDATOR_WAIT}')

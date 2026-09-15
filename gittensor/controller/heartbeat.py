@@ -18,8 +18,11 @@ about the workload and asks three questions:
 
 Any failure benches the box on the fraud ladder, withholds its pay from that instant (``BoxState.withheld_from``, which
 WS-F consumes) and undeploys every instance on it with a kill. A visit that gets no answer (SSH down, docker erroring)
-is not a verdict: the miss is counted on the instance and nothing is paid for it (the heartbeat is a pay condition),
-but nothing is benched either.
+is not a verdict: the miss is counted on the instance and nothing is paid for that interval (the heartbeat is a pay
+condition). It also counts on the box's ``unreachable_count``, the counter unreachable proof rounds use: the
+``UNREACHABLE_BENCH_AFTER``-th miss in a row benches the box for the flat ``UNREACHABLE_BENCH_S``, off the fraud ladder,
+and undeploys its instances (Kimbo 9/15). Any answered heartbeat or verdict resets it. A miss waits out the interval
+like an answer does, so three misses span three intervals, not three watch ticks.
 
 **Health while leased.** Per instance, every ``manifest.health.interval_s``, the manifest health probe.
 ``failure_threshold`` failures in a row replace the replica: undeploy with the manifest's drain, card to CHECKING, a
@@ -43,6 +46,7 @@ from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import HostRunner
 from gittensor.controller.checks.scrape import NVML_MD5_COMMAND, nvidia_smi_command, parse_md5, parse_nvidia_smi
 from gittensor.controller.checks.state import (
+    BENCHED,
     CARD_OURS_ALONE,
     CHECKING,
     DRAINING,
@@ -56,6 +60,8 @@ from gittensor.controller.checks.state import (
     StateStore,
     add_event,
     apply_heartbeat_failure,
+    apply_unreachable,
+    mark_reachable,
     transition_card,
 )
 from gittensor.controller.manifest import Drain, Manifest
@@ -358,9 +364,12 @@ class Watch:
         return out
 
     def _heartbeat_due(self, records: list[InstanceRecord], now: float) -> bool:
-        return any(
-            r.last_heartbeat_at is None or now - r.last_heartbeat_at >= self.heartbeat_interval_s for r in records
-        )
+        """Due ``heartbeat_interval_s`` after the last visit that asked, answered or missed (``heartbeat['at']``)."""
+
+        def last(r: InstanceRecord) -> float | None:
+            return (r.heartbeat or {}).get('at', r.last_heartbeat_at)
+
+        return any(last(r) is None or now - last(r) >= self.heartbeat_interval_s for r in records)
 
     @staticmethod
     def _health_due(record: InstanceRecord, manifest: Manifest | None, now: float) -> bool:
@@ -423,20 +432,14 @@ class Watch:
         try:
             result = run_heartbeat(runner, box, records, manifests, now)
         except (*_TRANSPORT, NoAnswer) as e:
-            why = f'{type(e).__name__}: {e}'[:300]
-            with self.lock:
-                report.unreachable[box_id] = why
-                for record in records:
-                    current = self.instances.instances.get(record.id)
-                    if current is not None and not current.draining:
-                        current.heartbeat_misses += 1
-                        current.heartbeat_ok = None
-                        current.heartbeat = {'at': now, 'ok': None, 'error': why}
-                        self.instances.put(current)
-                report.actions.append(WatchAction('miss', box_id, ok=False, detail=f'no answer, no verdict: {why}'))
+            self._miss(box_id, runner, records, f'{type(e).__name__}: {e}'[:300], now, report)
             return False
         took = {'heartbeat': round((self.clock() - started) * 1000.0, 1)}
         with self.lock:
+            if box_id in self.boxes.boxes:
+                reached = mark_reachable(self.boxes.boxes[box_id])
+                if reached is not self.boxes.boxes[box_id]:
+                    self.boxes.put(reached)
             for record in records:
                 current = self.instances.instances.get(record.id)
                 if current is None or current.draining:
@@ -457,6 +460,34 @@ class Watch:
         self._bench(box_id, runner, records, result, report)
         return False
 
+    def _miss(self, box_id, runner, records, why: str, now: float, report: WatchReport) -> None:
+        """No answer: a miss on every instance (no pay for the interval) and on the box's unreachable count; the
+        ``UNREACHABLE_BENCH_AFTER``-th in a row benches the box for a flat 12 h and undeploys its instances."""
+        with self.lock:
+            report.unreachable[box_id] = why
+            for record in records:
+                current = self.instances.instances.get(record.id)
+                if current is not None and not current.draining:
+                    current.heartbeat_misses += 1
+                    current.heartbeat_ok = None
+                    current.heartbeat = {'at': now, 'ok': None, 'error': why}
+                    self.instances.put(current)
+            before = self.boxes.boxes.get(box_id)
+            if before is None:
+                return
+            after = apply_unreachable(before, now)
+            self.boxes.put(after)
+            benched = after.status == BENCHED and before.status != BENCHED
+            in_a_row = f'{after.unreachable_count}/{cfg.UNREACHABLE_BENCH_AFTER} in a row'
+            report.actions.append(
+                WatchAction('miss', box_id, ok=False, detail=f'no answer, no verdict ({in_a_row}): {why}')
+            )
+            victims = self._mark_for_kill(box_id) if benched else []
+        if benched:
+            hours = cfg.UNREACHABLE_BENCH_S / 3600
+            detail = f'{in_a_row} without an answer: BENCHED for {hours:.0f} h (off the ladder)'
+            self._kill(runner, victims, WatchAction('bench', box_id, ok=False, detail=detail, states=[BENCHED]), report)
+
     def _bench(self, box_id, runner, records, result: HeartbeatResult, report: WatchReport) -> None:
         """BENCHED + pay withheld at once (one short state write), then every instance on the box undeployed with a
         kill. An undeploy that fails leaves its record draining; the reconciler finishes it."""
@@ -465,12 +496,20 @@ class Watch:
             self.boxes.put(
                 apply_heartbeat_failure(self.boxes.boxes[box_id], result.failed, now, reasons=result.reasons())
             )
-            victims = self.instances.on_box(box_id)
-            for record in victims:
-                record.draining, record.healthy = True, False
-                record.drain_type, record.drain_max_s = 'kill', 0
-                self.instances.put(record)
-        action = WatchAction('bench', box_id, ok=False, detail='; '.join(result.reasons())[:500], states=['BENCHED'])
+            victims = self._mark_for_kill(box_id)
+        action = WatchAction('bench', box_id, ok=False, detail='; '.join(result.reasons())[:500], states=[BENCHED])
+        self._kill(runner, victims, action, report)
+
+    def _mark_for_kill(self, box_id: str) -> list[InstanceRecord]:
+        """Under ``self.lock``: every instance on the box draining with a kill, so the gateway stops routing at once."""
+        victims = self.instances.on_box(box_id)
+        for record in victims:
+            record.draining, record.healthy = True, False
+            record.drain_type, record.drain_max_s = 'kill', 0
+            self.instances.put(record)
+        return victims
+
+    def _kill(self, runner, victims: list[InstanceRecord], action: WatchAction, report: WatchReport) -> None:
         undeployed = []
         for record in victims:
             try:

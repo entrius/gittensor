@@ -182,8 +182,9 @@ def apply_unreachable(
     bench_after: int = cfg.UNREACHABLE_BENCH_AFTER,
     bench_s: float = cfg.UNREACHABLE_BENCH_S,
 ) -> BoxState:
-    """The state after a round in which SSH could not reach the box: no verdict, the count goes up, and at
-    ``bench_after`` in a row the box is BENCHED for a flat ``bench_s`` without climbing the fraud ladder. Pure."""
+    """The state after a round in which SSH could not reach the box, or an in-lease heartbeat that got no answer (one
+    counter for both): no verdict, the count goes up, and at ``bench_after`` in a row the box is BENCHED for a flat
+    ``bench_s`` without climbing the fraud ladder. Pure."""
     new = BoxState.from_dict(state.as_dict())
     new.unreachable_count += 1
     if new.unreachable_count >= bench_after and new.status != BENCHED:
@@ -194,6 +195,16 @@ def apply_unreachable(
         new.pinned_uuids = []
         new.admitted_at = None
         new.cards = {}
+    return new
+
+
+def mark_reachable(state: BoxState) -> BoxState:
+    """A visit that got an answer (an in-lease heartbeat, pass or fail) resets the unreachable count, as a verdict does.
+    Pure; the same object when there is nothing to reset."""
+    if not state.unreachable_count:
+        return state
+    new = BoxState.from_dict(state.as_dict())
+    new.unreachable_count = 0
     return new
 
 
@@ -282,6 +293,7 @@ def apply_heartbeat_failure(state: BoxState, failed: Sequence[str], now: float, 
     ``heartbeat_failed`` standing event. Pure. A box already benched keeps its bench and only gains the event."""
     new = add_event(state, HEARTBEAT_FAILED, now, failed=list(failed), **detail)
     new.withheld_from = now
+    new.unreachable_count = 0  # the box answered
     if new.status == BENCHED:
         return new
     return _bench(new, now, [f'heartbeat:{name}' for name in failed])

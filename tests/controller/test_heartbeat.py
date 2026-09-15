@@ -160,6 +160,44 @@ def test_a_heartbeat_with_no_answer_counts_a_miss_and_benches_nothing(world):
     assert rec.boxes.boxes['hk1'].status == IDLE and box.containers
 
 
+def test_three_missed_heartbeats_in_a_row_bench_the_box_for_12_h_off_the_ladder(world):
+    rec, watch, box, clock, record = leased(world)
+    box.runner.on(regex(r'^nvidia-smi --query-gpu'), SshTransportError('10.0.0.1:2200: timed out'))
+    for n in (1, 2):
+        report = watch.run_pass()
+        assert [a.kind for a in report.actions] == ['miss'] and f'({n}/3 in a row)' in report.actions[0].detail
+        asked = len(box.commands('nvidia-smi --query-gpu'))
+        clock.t += 5
+        watch.run_pass()  # a miss waits out the interval like an answer: no heartbeat retried every tick
+        assert len(box.commands('nvidia-smi --query-gpu')) == asked and rec.boxes.boxes['hk1'].unreachable_count == n
+        clock.t += 55
+    two = rec.boxes.boxes['hk1']
+    assert two.status == IDLE and two.unreachable_count == 2 and box.containers  # two misses do nothing
+
+    report = watch.run_pass()
+    assert [a.kind for a in report.actions] == ['miss', 'bench']
+    assert 'BENCHED for 12 h' in report.actions[1].detail and record.id in report.actions[1].detail
+    after = StateStore(rec.boxes.path).get('hk1')
+    assert after.status == BENCHED and after.last_failed == ['ssh_unreachable'] and after.bench_count == 0
+    assert after.bench_until - after.benched_at == 12 * 3600 and after.withheld_from is None and after.cards == {}
+    assert InstanceStore(rec.instances.path).instances == {} and box.containers == {}  # undeployed with a kill
+    assert not box.commands('docker stop')
+
+
+def test_an_answered_heartbeat_resets_the_miss_count(world):
+    rec, watch, box, clock, record = leased(world)
+    box.runner.on(regex(r'^nvidia-smi --query-gpu'), SshTransportError('10.0.0.1:2200: timed out'))
+    for _ in (1, 2):
+        watch.run_pass()
+        clock.t += 60
+    assert rec.boxes.boxes['hk1'].unreachable_count == 2
+    box.runner.on(regex(r'^nvidia-smi --query-gpu'), box.respond)
+    assert watch.run_pass().ok and rec.boxes.boxes['hk1'].unreachable_count == 0
+    box.runner.on(regex(r'^nvidia-smi --query-gpu'), SshTransportError('10.0.0.1:2200: timed out'))
+    clock.t += 60
+    assert '(1/3 in a row)' in watch.run_pass().actions[0].detail and rec.boxes.boxes['hk1'].status == IDLE
+
+
 def test_a_record_from_before_ws_d_is_recorded_at_its_first_heartbeat(world):
     rec, watch, box, clock, record = leased(world)
     record.docker_started_at = record.image_id = ''

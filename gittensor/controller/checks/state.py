@@ -26,14 +26,12 @@ from gittensor.controller.checks.verdict import CheckVerdict
 ADMIT = 'ADMIT'
 IDLE = 'IDLE'
 BENCHED = 'BENCHED'
-STATUSES = (ADMIT, IDLE, BENCHED)
 
 # Card states. IDLE is shared with the box status of the same name.
 STARTING = 'STARTING'
 LEASED = 'LEASED'
 DRAINING = 'DRAINING'
 CHECKING = 'CHECKING'
-CARD_STATES = (IDLE, STARTING, LEASED, DRAINING, CHECKING)
 PROVABLE = (IDLE, CHECKING)  # cards the proof round stages and fires; the rest host (or are leaving) our workload
 BUSY = (STARTING, LEASED, DRAINING)
 

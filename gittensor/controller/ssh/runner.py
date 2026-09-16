@@ -229,10 +229,6 @@ class SshRunner:
             raise SshTransportError(f'{self.host}:{self.port}: {stderr.strip()[:300] or "ssh exit 255"}')
         return CommandResult(proc.returncode, stdout, stderr)
 
-    def docker_host(self) -> str:
-        """``DOCKER_HOST`` form for docker-py / the docker CLI's ssh transport, should a caller want it."""
-        return f'ssh://{self.user}@{self.host}:{self.port}'
-
     def __repr__(self) -> str:
         return f'SshRunner({shlex.quote(self.user + "@" + self.host)}:{self.port}, key_id={self.key_id!r})'
 

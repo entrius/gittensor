@@ -50,7 +50,6 @@ class StagedProof:
     version: str
     containers: Dict[str, str]  # gpu uuid -> container id (created, not started)
     challenges: Dict[str, str] = field(default_factory=dict)  # gpu uuid -> the provider's opaque challenge
-    staged_at: float = field(default_factory=time.time)
     extra: dict = field(default_factory=dict)
 
 

@@ -9,10 +9,6 @@ ports, the container and image names, the release channel. Stdlib only — impor
 
 from __future__ import annotations
 
-from gittensor import __version__
-
-AGENT_VERSION = __version__
-
 # --- Trust anchors ---------------------------------------------------------------------------------------------------
 # Two keys, both compiled into images, both rotated by shipping an agent release (vault 26 §5-6). Neither is ever an
 # environment variable: a host operator must not be able to repoint their agent at another controller at runtime.
@@ -40,7 +36,6 @@ ALLOWED_SIGNERS_PATH = '/etc/gt-agent/allowed_signers'  # inside the runner imag
 CERT_PRINCIPAL = 'root'  # sshd matches the certificate's principal list against the login name
 CERT_VALIDITY_S = 300  # ~5 minutes: enough to start a visit; open sessions outlive it (26 §5)
 CERT_BACKDATE_S = 60  # valid from now - this, so a slightly slow box clock does not reject a fresh certificate
-HUMAN_CERT_VALIDITY_S = 3600  # a person debugging a box gets a longer window; every login is logged by key ID
 
 # --- The container ---------------------------------------------------------------------------------------------------
 AGENT_SSH_PORT = 2200  # sshd, root by certificate only (Lium's default port too)
@@ -73,7 +68,6 @@ def is_compute_axon(protocol: int, placeholder1: int, placeholder2: int) -> bool
 # Docker Hub under `entrius` (vault 23 §8, 26 §7). Trust is the digest + the signature, never the registry or a tag:
 # the runner runs `entrius/gt-agent@sha256:...` from the signed channel file and never a mutable tag. A fleet
 # release is a new stable.json + signature (docker/agent/channel/sign.sh), not a push to a tag.
-IMAGE_REGISTRY = 'docker.io'
 AGENT_IMAGE_REPO = 'entrius/gt-agent'
 RUNNER_IMAGE_REPO = 'entrius/gt-agent-runner'
 PROOF_IMAGE_REPO = 'entrius/gt-proof'

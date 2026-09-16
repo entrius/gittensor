@@ -62,9 +62,6 @@ NETWORK_TARGETS = ('https://registry-1.docker.io/v2/', 'https://huggingface.co/a
 NETWORK_TIMEOUT_S = 10.0
 NVIDIA_SMI_TIMEOUT_S = 15.0
 SSH_COMMAND_TIMEOUT_S = 30.0
-# The served NVML allowlist: JSON {driver_version: [md5, ...]}; a file path or an http(s) URL. Empty = nothing is
-# allowlisted and every box fails the nvml_digest check (fail closed).
-NVML_ALLOWLIST_LOCATION = ''
 
 # State machine. Every idle card is probed at the same instant every 20 min (Kimbo 9/14), and the proof binary is
 # rebuilt every round, so a forger has to crack that round's build inside the 30 s answer window; worst case is

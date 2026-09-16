@@ -21,6 +21,7 @@ import pytest
 
 import gittensor.cli.main  # noqa: F401  (the CLI package must load before gittensor.controller.cli: circular import)
 from gittensor.controller import cli as ctl
+from gittensor.controller.checks.runner import regex
 from gittensor.controller.checks.state import (
     ADMIT,
     BENCHED,
@@ -33,6 +34,7 @@ from gittensor.controller.checks.state import (
 )
 from gittensor.controller.daemon import Controller, Intervals, SilentReporter
 from gittensor.controller.registry import DeploymentStore, Registry
+from gittensor.controller.ssh import SshTransportError
 from tests.controller.conftest import (
     AGENT_DIGEST,
     FIXTURES,
@@ -208,6 +210,56 @@ def test_the_one_box_probe_runs_the_newest_build(world):
     staged = [c for c in prover.calls if c.startswith('docker create')]
     assert len(staged) == 3  # two by the round, one by the re-prove
     assert any(f'--challenge {challenge_for(u, "fake-2")}' in staged[-1] for u in (UUID_5090, UUID_5090_B))
+
+
+def test_a_lease_ended_by_missed_heartbeats_is_re_proved_only_after_the_reconciler_undeployed_it(world):
+    root, registry = world
+    shutil.copy(FIXTURES / 'nvml_allowlist.json', root / 'nvml_allowlist.json')
+    seed(root, idle_box('hkA', uuids=(UUID_5090,)), replicas=1)  # one card
+    docker = FakeDocker(gpus=(UUID_5090,))
+    prover = box_runner()
+    setup = ctl._setup(
+        root, None, FAKE_PROOF, (), (AGENT_DIGEST,), (), 'entrius/gt-proof:test', None, NETWORK_TARGETS, 100
+    )
+    controller = Controller(
+        ctl.StateDir(root),
+        registry,
+        make_runner=lambda box, purpose: docker.runner,
+        run_round=lambda proof, **shared: ctl.run_round(setup, proof, **shared),
+        load_proof=FakeProof,
+        reprove=lambda proof, box_id, **shared: ctl.reprove_box(setup, proof, box_id, **shared),
+        intervals=Intervals(heartbeat_s=0),
+    )
+
+    def card():
+        return controller.boxes.boxes['hkA'].cards[UUID_5090].state
+
+    def proofs():
+        return [c for c in prover.calls if c.startswith('docker create')]
+
+    with patch.object(ctl, '_make_runner', side_effect=lambda st, box, ca, purpose: prover):
+        controller.reconcile_once()
+        assert controller.reconciler.join(5) and card() == LEASED
+        (record,) = controller.instances.instances.values()
+        docker.runner.on(regex(r'^nvidia-smi --query-gpu'), SshTransportError('10.0.0.1:2200: timed out'))
+        for n in (1, 2, 3):
+            report = controller.watch_once()
+            assert [a.kind for a in report.actions] == ['miss' if n < 3 else 'unreachable']
+        assert card() == CHECKING and record.id in controller.instances.instances  # the lease ended, record kept
+        assert controller.reprove_once() == [] and not proofs()  # our container may still sit on the card: no proof
+        docker.runner.on(regex(r'^nvidia-smi --query-gpu'), docker.respond)  # the box is back
+        report = controller.round_once()  # the fleet round skips the card too
+        assert report.boxes[0].verdict is None and not proofs()
+        assert report.boxes[0].skipped == {UUID_5090: 'CHECKING (instance pending)'} and card() == CHECKING
+        controller.reconcile_once()  # the reconciler undeploys it
+        assert controller.reconciler.join(5)
+        assert record.id not in controller.instances.instances and record.container_id not in docker.containers
+        controller.watch_once()  # then the one-box probe re-proves the card
+        _until(lambda: card() == IDLE)
+        assert len(proofs()) == 1
+        controller.reconcile_once()  # and it is placed again
+        assert controller.reconciler.join(5) and card() == LEASED
+        assert len(docker.commands('docker run -d')) == 2
 
 
 def test_a_discovered_box_is_proved_at_the_next_watch_tick_and_the_round_does_not_prove_it_twice(world):

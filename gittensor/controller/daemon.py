@@ -235,7 +235,13 @@ class Controller:
             self.reporter.note('round', f'round {n}: keeping the previous proof ({e})')
         started = time.time()
         try:
-            report = self._run_round(self.proof, store=self.boxes, write_lock=self.write_lock, box_locks=self.box_locks)
+            report = self._run_round(
+                self.proof,
+                store=self.boxes,
+                write_lock=self.write_lock,
+                box_locks=self.box_locks,
+                pending=self._pending_cards(),
+            )
         except Exception as e:  # before any box was visited (the allowlist fetch, our own link): nobody's fault
             self.reporter.error('round', f'round {n} failed before any box was visited: {type(e).__name__}: {e}')
             self._set_status('round', {'n': n, 'at': time.time(), 'error': f'{type(e).__name__}: {e}'[:300]})
@@ -382,6 +388,16 @@ class Controller:
         self.reprove_once()
         return report
 
+    def _pending_cards(self) -> dict[str, set[str]]:
+        """Per box, the cards an instance record still names: a CHECKING card among them is not proved yet (its lease
+        ended while the box was unreachable; the reconciler undeploys the container once the box answers, and only
+        then is the card free for the proof)."""
+        with self.write_lock:
+            out: dict[str, set[str]] = {}
+            for record in self.instances.instances.values():
+                out.setdefault(record.box, set()).add(record.uuid)
+            return out
+
     def reprove_once(self) -> list[str]:
         """Launch the one-box probe on every box that is due one and not already being probed (or waiting to retry
         one that got no verdict): an IDLE box with a CHECKING card, and a box at ADMIT (its first proof, at once).
@@ -390,6 +406,7 @@ class Controller:
         if self._reprove is None:
             return []
         now = time.time()
+        pending = self._pending_cards()
         with self.write_lock:
             running = {box_id for box_id, thread in self._reproving.items() if thread.is_alive()}
             due = sorted(
@@ -400,7 +417,13 @@ class Controller:
                 and now >= self._reprove_retry_at.get(box.box_id, 0.0)
                 and (
                     (box.status == ADMIT and not box.endpoint_changed)
-                    or (box.status == IDLE and any(card.state == CHECKING for card in box.cards.values()))
+                    or (
+                        box.status == IDLE
+                        and any(
+                            card.state == CHECKING and uuid not in pending.get(box.box_id, ())
+                            for uuid, card in box.cards.items()
+                        )
+                    )
                 )
             )
         if not due:
@@ -415,19 +438,24 @@ class Controller:
             self.reporter.note('reprove', f'keeping the previous proof ({e})')
         for box_id in due:
             thread = threading.Thread(
-                target=self._reprove_box, args=(proof, box_id), name=f'reprove-{box_id[:16]}', daemon=True
+                target=self._reprove_box,
+                args=(proof, box_id, pending.get(box_id, set())),
+                name=f'reprove-{box_id[:16]}',
+                daemon=True,
             )
             with self.write_lock:
                 self._reproving[box_id] = thread
             thread.start()
         return due
 
-    def _reprove_box(self, proof: Any, box_id: str) -> None:
+    def _reprove_box(self, proof: Any, box_id: str, exclude: set[str]) -> None:
         reprove = self._reprove
         if reprove is None:
             return
         try:
-            report = reprove(proof, box_id, store=self.boxes, write_lock=self.write_lock, box_locks=self.box_locks)
+            report = reprove(
+                proof, box_id, store=self.boxes, write_lock=self.write_lock, box_locks=self.box_locks, exclude=exclude
+            )
         except Exception as e:  # never kill the thread silently; the next tick after the retry delay tries again
             with self.write_lock:
                 self._reprove_retry_at[box_id] = time.time() + cfg.REPROVE_RETRY_S

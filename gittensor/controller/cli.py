@@ -48,7 +48,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
@@ -542,8 +542,11 @@ def run_round(
     write_lock: threading.RLock | None = None,
     box_locks: BoxLocks | None = None,
     lock_wait_s: float = cfg.ROUND_BOX_LOCK_WAIT_S,
+    pending: Mapping[str, Collection[str]] | None = None,
 ) -> RoundReport:
     """One probe cycle over every ADMIT / IDLE box (``23`` §3b). Benches that have expired are released first.
+    ``pending``: per box, cards an instance record still names (a lease ended while the box was unreachable, its
+    container not yet undeployed): skipped this round like a busy card.
 
     Phase 1: connect and scrape every box in parallel; judge identity with fleet-wide UUID uniqueness over every pin
     and every card reported this round; stage the proof on every box that passed, in parallel. Phase 2: one start
@@ -609,8 +612,10 @@ def run_round(
     def stage(r: BoxRound) -> None:
         if r.runner is None or r.scrape is None:
             return  # only rows that connected and scraped are staged
-        r.proved = _provable_gpus(r.box, r.scrape.gpus)
+        held = set((pending or {}).get(r.box.box_id, ()))
+        r.proved = [g for g in _provable_gpus(r.box, r.scrape.gpus) if g.uuid not in held]
         r.skipped = busy_cards(r.box, r.scrape.uuids)
+        r.skipped.update({u: f'{r.box.card(u).state} (instance pending)' for u in r.scrape.uuids if u in held})
         if not r.proved:
             return  # every card hosts our workload: nothing staged, nothing fired, no verdict
         try:
@@ -729,9 +734,11 @@ def reprove_box(
     write_lock: threading.RLock,
     box_locks: BoxLocks,
     lock_wait_s: float = cfg.ROUND_BOX_LOCK_WAIT_S,
+    exclude: Collection[str] = (),
 ) -> RoundReport:
     """One box proved at once, inside `gitt controller run`, instead of at the next 20-min round: an IDLE box's CHECKING
-    cards (Kimbo 9/15), or every card of a box at ADMIT, its first proof (Kimbo 9/16). Identity on the box and the same
+    cards (Kimbo 9/15; not ``exclude``, the cards an instance record still names), or every card of a box at ADMIT,
+    its first proof (Kimbo 9/16). Identity on the box and the same
     two-phase probe (``probe_box``: stage, fire, clean up) on those cards only, holding the box's lock, then
     ``apply_verdict`` (pinning an ADMIT box; returning only the proved cards to IDLE). A BENCH verdict benches the box
     as the round would. No verdict (the lock stayed held, no CHECKING card left, SSH down) changes nothing: the daemon
@@ -760,7 +767,9 @@ def reprove_box(
             return report()
         cards: list[str] | None = None  # ADMIT: every card the box reports, its first proof
         if current.status == IDLE:
-            cards = sorted(uuid for uuid, card in current.cards.items() if card.state == CHECKING)
+            cards = sorted(
+                uuid for uuid, card in current.cards.items() if card.state == CHECKING and uuid not in exclude
+            )
             if not cards:
                 row.busy = 'no CHECKING card left: nothing to re-prove'
                 return report()

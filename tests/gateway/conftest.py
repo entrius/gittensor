@@ -52,8 +52,8 @@ class FakeRuntime:
     ``hold`` parks each completion until set (a busy instance); ``after_first`` parks a stream after its first chunk;
     ``error`` answers every completion with ``(status, body)``."""
 
-    def __init__(self, model_id=RUNTIME_ID, usage=True):
-        self.model_id, self.usage = model_id, usage
+    def __init__(self, model_id=RUNTIME_ID, usage=True, max_output_tokens: int | None = 32768):
+        self.model_id, self.usage, self.max_output_tokens = model_id, usage, max_output_tokens
         self.received: list[dict] = []
         self.sent: list[bytes] = []
         self.hold: asyncio.Event | None = None
@@ -91,9 +91,10 @@ class FakeRuntime:
             'owned_by': 'fake',
             'created': 0,
             'context_length': 65536,
-            'max_output_tokens': 32768,
             'capabilities': {'tools': True, 'vision': {'image': True, 'video': False}},
         }
+        if self.max_output_tokens is not None:
+            model['max_output_tokens'] = self.max_output_tokens
         return web.json_response({'object': 'list', 'data': [model]})
 
     async def _completions(self, request):

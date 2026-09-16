@@ -6,6 +6,7 @@ and BENCH with reasons for a failing one, exiting 0 / 1 / 2; the proof is loaded
 box before firing any and benches a UUID two boxes claim; the state file round-trips."""
 
 import base64
+import importlib
 import json
 import shutil
 import subprocess
@@ -217,6 +218,7 @@ def test_transport_failure_exits_2_counts_and_benches_after_three(state):
     assert result.exit_code == 2 and 'BENCHED for 12 h' in result.output
     box = store(state).get(HK_A)
     assert box.status == BENCHED and box.last_failed == ['ssh_unreachable'] and box.bench_count == 0
+    assert box.bench_until is not None and box.benched_at is not None
     assert box.bench_until - box.benched_at == 12 * 3600
     # a verdict resets the count
     s = store(state)
@@ -309,7 +311,7 @@ def test_proof_is_loaded_by_import_path(state, tmp_path, monkeypatch):
     args = [f'secret_store={secrets}', f'version=@{tmp_path / "version"}', 'binary_path=/x/gt_proof']
 
     proof = ctl.load_proof('fake_provider_mod:Recording', args)
-    import fake_provider_mod
+    fake_provider_mod = importlib.import_module('fake_provider_mod')
 
     assert proof.version == 'v-1'
     assert fake_provider_mod.made == [
@@ -443,7 +445,7 @@ def test_round_loop_runs_the_build_between_rounds_and_reloads_the_proof(state, t
             'ci/gen_secret.sh && ci/build.sh',
         )
     assert result.exit_code == 0, result.output
-    import fake_loop_provider
+    fake_loop_provider = importlib.import_module('fake_loop_provider')
 
     assert builds == ['ci/gen_secret.sh && ci/build.sh'] and len(sleeps) == 1 and len(fake_loop_provider.made) == 2
     assert result.output.count('gitt controller round') == 2 and 'build exit 0' in result.output

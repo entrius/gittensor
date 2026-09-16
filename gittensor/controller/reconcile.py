@@ -39,10 +39,12 @@ import random
 import threading
 import time
 from collections.abc import Callable
+from collections.abc import Set as AbstractSet
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import HostRunner
@@ -150,6 +152,11 @@ class InstanceRecord:
     @property
     def drain(self) -> Drain:
         return Drain(self.drain_type, self.drain_max_s)
+
+
+# One box's planned work: a drain of a record, or a start as (entry id, gpu uuid, replaced instance id, host port).
+StartArgs = tuple[str, str, str, int | None]
+BoxOp = tuple[Literal['drain'], InstanceRecord] | tuple[Literal['start'], StartArgs]
 
 
 class InstanceStore:
@@ -314,7 +321,7 @@ class Reconciler:
         report.timings_ms['total'] = round((self.clock() - started) * 1000.0, 1)
         return report
 
-    def _launch(self, box_id: str, box_ops: list[tuple[str, object]], entries: dict[str, VerifiedEntry]) -> None:
+    def _launch(self, box_id: str, box_ops: list[BoxOp], entries: dict[str, VerifiedEntry]) -> None:
         """One box's starts and drains on their own thread, with their own SSH visit. Its actions reach
         ``on_background`` as a report when it is done."""
 
@@ -371,7 +378,7 @@ class Reconciler:
         report: ReconcileReport,
         entries: dict[str, VerifiedEntry],
         runners: dict[str, HostRunner],
-        busy: set[str] = frozenset(),
+        busy: AbstractSet[str] = frozenset(),
     ) -> dict[str, list[BoxContainer]]:
         """List our containers on every box that has (or may have) any, then settle records against them. A box still
         busy with an earlier pass's starts is not visited: its records are mid-flight, not lost."""
@@ -504,12 +511,12 @@ class Reconciler:
         report: ReconcileReport,
         entries: dict[str, VerifiedEntry],
         seen: dict[str, list[BoxContainer]],
-        busy: set[str] = frozenset(),
-    ) -> dict[str, list[tuple[str, object]]]:
-        ops: dict[str, list[tuple[str, object]]] = {}
+        busy: AbstractSet[str] = frozenset(),
+    ) -> dict[str, list[BoxOp]]:
+        ops: dict[str, list[BoxOp]] = {}
 
-        def add(box_id: str, op: str, arg: object) -> None:
-            ops.setdefault(box_id, []).append((op, arg))
+        def add(box_id: str, op: BoxOp) -> None:
+            ops.setdefault(box_id, []).append(op)
 
         now = self.wall()
         boxes = list(self.boxes.boxes.values())
@@ -542,7 +549,7 @@ class Reconciler:
                     by_entry.setdefault(record.entry, []).append(record)
                 continue
             if record.draining or box is None or box.status == BENCHED or report.desired.get(record.entry, 0) <= 0:
-                add(record.box, 'drain', record)
+                add(record.box, ('drain', record))
                 continue
             if record.rotating:
                 rotating.append(record)
@@ -553,12 +560,12 @@ class Reconciler:
             if excess > 0:
                 movable = [r for r in entry_records if r.box not in busy]
                 for record in sorted(movable, key=lambda r: (r.healthy, *release_order(r)))[:excess]:
-                    add(record.box, 'drain', record)
+                    add(record.box, ('drain', record))
         # A rotated lease is drained only once its replacement is LEASED and healthy: never below the replica count.
         for record in rotating:
             new = replacements.get(record.id)
             if new is not None and self._leased(new):
-                add(record.box, 'drain', record)
+                add(record.box, ('drain', record))
 
         # Starts: IDLE cards on reachable IDLE boxes, best standing first, then freshest last check, one instance per
         # card, each with the first host port of its box's workload range that no record or container there holds.
@@ -610,7 +617,7 @@ class Reconciler:
         for entry_id, verified in sorted(entries.items()):
             need = report.desired[entry_id] - len(by_entry.get(entry_id, []))
             while need > 0 and (pick := take(verified)) is not None:
-                add(pick[0].box_id, 'start', (entry_id, pick[1], '', pick[2]))
+                add(pick[0].box_id, ('start', (entry_id, pick[1], '', pick[2])))
                 need -= 1
             if need > 0:
                 why = ''.join(f'; {box_id}: {reason}' for box_id, reason in sorted(port_skips.items()))
@@ -637,7 +644,7 @@ class Reconciler:
             pick = take(verified) if verified is not None else None
             if pick is None:
                 continue
-            add(pick[0].box_id, 'start', (record.entry, pick[1], record.id, pick[2]))
+            add(pick[0].box_id, ('start', (record.entry, pick[1], record.id, pick[2])))
             record.rotating = pick[0].box_id
             self._put_record(record)
             report.rotations.append(record.id)
@@ -655,7 +662,7 @@ class Reconciler:
     def _execute(
         self,
         box_id: str,
-        box_ops: list[tuple[str, object]],
+        box_ops: list[BoxOp],
         entries: dict[str, VerifiedEntry],
         runners: dict[str, HostRunner],
         report: ReconcileReport,
@@ -665,11 +672,11 @@ class Reconciler:
         box = self._box(box_id)
         runner = self._runner(box, runners)
         with self.box_locks.hold(box_id) if self.box_locks is not None else nullcontext():
-            for op, arg in sorted(box_ops, key=lambda o: o[0] != 'drain'):
-                if op == 'drain':
-                    action = self._drain(box_id, runner, arg)
+            for op in sorted(box_ops, key=lambda o: o[0] != 'drain'):
+                if op[0] == 'drain':
+                    action = self._drain(box_id, runner, op[1])
                 else:
-                    entry_id, uuid, replaces, host_port = arg
+                    entry_id, uuid, replaces, host_port = op[1]
                     action = self._start(box_id, runner, entries[entry_id], uuid, replaces, host_port)
                 with self._lock:
                     report.actions.append(action)

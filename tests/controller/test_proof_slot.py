@@ -69,7 +69,7 @@ def test_unconfigured_proof_fails_closed_everywhere():
         p.stage(passing_runner(), slot.BoxIdentity(('GPU-1',), '5090'), 'img', 10.0)
     with pytest.raises(slot.ProofUnavailable):
         p.start_command(slot.StagedProof('x', {}), 'GPU-1')
-    assert not p.judge(None, 'GPU-1', '{}', 0.0, None).passed and p.cleanup_command(None) is None
+    assert not p.judge(None, 'GPU-1', '{}', 0.0, None).passed and p.cleanup_command(slot.StagedProof('x', {})) is None
     result = slot.probe_box(passing_runner(), [GPU_A], p)
     assert not result.passed and 'no GPU proof provider' in result.error and result.cards == []
 
@@ -80,6 +80,7 @@ def test_unconfigured_proof_fails_closed_everywhere():
 @pytest.fixture
 def job():
     spec = importlib.util.spec_from_file_location('proof_job', JOB)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

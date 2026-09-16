@@ -44,7 +44,8 @@ def test_the_27b_example_parses_into_a_typed_manifest():
     assert m.placement.gpu_types.admits('RTX5090') and not m.placement.gpu_types.admits('H100')
     assert (m.placement.cards_per_instance, m.placement.min_vram_gb, m.placement.max_load_s) == (1, 30.0, 600)
     assert m.run.volumes[0].mount == '/models' and m.run.volumes[0].read_only and m.network_egress == ()
-    assert m.artifacts[0].path == '/models/qwen3.8-27b-nvfp4' and m.health.http.port == 8080
+    assert m.artifacts[0].path == '/models/qwen3.8-27b-nvfp4'
+    assert m.health.http is not None and m.health.http.port == 8080
     assert [c.type for c in m.entry_canary] == ['http', 'http'] and m.entry_canary[0].pass_rule['status'] == 200
     assert m.front_door.type == 'gateway-openai' and m.front_door.concurrency == 4 and len(m.front_door.routes) == 2
     assert (m.drain.type, m.drain.max_s) == ('requests', 60) and m.profile['decode_tps_single'] == 99

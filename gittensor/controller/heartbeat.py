@@ -47,6 +47,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from typing import Any
 
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import HostRunner
@@ -143,8 +144,8 @@ def parse_cgroups(stdout: str) -> dict[int, set[str] | None]:
             continue
         if line.strip() == 'MISSING':
             out[pid] = None
-        elif out.get(pid) is not None:
-            out[pid].update(_CONTAINER_ID.findall(line))
+        elif (ids := out.get(pid)) is not None:
+            ids.update(_CONTAINER_ID.findall(line))
     return out
 
 
@@ -271,7 +272,8 @@ def _same_card(runner: HostRunner, box: BoxState) -> Answer:
     if missing:
         return Answer(False, 'pinned card(s) missing: ' + ', '.join(missing), {'observed': sorted(gpus)})
     problems, notes = [], []
-    baseline_power = dict(box.identity.get('power_limits') or {})
+    recorded_power = box.identity.get('power_limits')
+    baseline_power: dict[str, Any] = dict(recorded_power) if isinstance(recorded_power, dict) else {}
     power = {u: gpus[u].power_limit_w for u in box.pinned_uuids}
     for uuid, limit in power.items():
         was = baseline_power.get(uuid)
@@ -302,7 +304,7 @@ def _our_container(runner: HostRunner, record: InstanceRecord, manifest: Manifes
         raise NoAnswer(str(e)) from e
     if info is None:
         return Answer(False, f'container {record.container_id[:12]} vanished (not stopped by us)'), ()
-    evidence = {'status': info.status, 'started_at': info.started_at, 'image_id': info.image_id}
+    evidence: dict[str, Any] = {'status': info.status, 'started_at': info.started_at, 'image_id': info.image_id}
     if not info.up:
         return Answer(False, f'container {info.status} (not stopped by us)', evidence), ()
     recorded: tuple = ()
@@ -519,7 +521,7 @@ class Watch:
         """Visit every box with a heartbeat or health probe due, all boxes in parallel."""
         report = WatchReport()
         now = self.wall()
-        due = {}
+        due: dict[str, tuple[list[InstanceRecord], dict[str, Manifest | None]]] = {}
         for box_id, records in self.leased().items():
             manifests = self._manifests(records)
             if self._heartbeat_due(records, now) or any(self._health_due(r, manifests[r.entry], now) for r in records):
@@ -545,8 +547,9 @@ class Watch:
                 current = self.instances.instances.get(record.id)
                 if current is None or current.draining:
                     continue
-                if self._health_due(current, manifests.get(current.entry), self.wall()):
-                    if not self._health(box_id, box, runner, current, manifests[current.entry], report):
+                manifest = manifests.get(current.entry)
+                if manifest is not None and self._health_due(current, manifest, self.wall()):
+                    if not self._health(box_id, box, runner, current, manifest, report):
                         return
         except Exception as e:  # a bug must not kill the watch loop; the next tick retries
             with self.lock:

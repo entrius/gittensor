@@ -171,7 +171,7 @@ class CoinGeckoChainOracle:
             if self._subtensor is None:
                 self._subtensor = bt.Subtensor(network=self.endpoint)
             info = self._subtensor.subnet(self.netuid)
-            price = getattr(info, 'price', None)
+            price: Any = getattr(info, 'price', None)
             value = float(getattr(price, 'tao', price))
         except Exception as e:
             self._subtensor = None  # reconnect next time

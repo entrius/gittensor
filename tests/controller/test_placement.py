@@ -49,6 +49,7 @@ from gittensor.controller.registry import DeploymentStore, Registry, make_entry,
 from gittensor.controller.runspec import (
     ArtifactError,
     BoxHttp,
+    HttpResponse,
     PlacementError,
     PullToken,
     artifact_fetch_command,
@@ -371,7 +372,9 @@ class FakeDocker:
             return self._device_scan()
         if command.startswith('for p in '):
             out = []
-            for pid in map(int, re.search(r'for p in ([\d ]+);', command).group(1).split()):
+            pids = re.search(r'for p in ([\d ]+);', command)
+            assert pids is not None, command
+            for pid in map(int, pids.group(1).split()):
                 out.append(f'== {pid}')
                 if pid in self.hidden or pid not in self.processes:
                     out.append('MISSING')
@@ -547,10 +550,12 @@ def test_prestage_pulls_with_a_token_for_that_pull_only_and_verifies_artifacts()
 
 
 class Responses:
-    def __init__(self, *responses):
+    def __init__(self, *responses: HttpResponse):
         self.responses, self.calls = list(responses), []
 
-    def request(self, method, port, path, body=None, timeout=10):
+    def request(
+        self, method: str, port: int, path: str, body: bytes | None = None, timeout: float = 10
+    ) -> HttpResponse:
         self.calls.append((method, port, path, body))
         return self.responses[min(len(self.calls) - 1, len(self.responses) - 1)]
 
@@ -597,7 +602,7 @@ def test_zero_to_two_replicas_starts_two_instances_on_two_idle_cards(world):
     assert {a.uuid for a in starts} == {UUID_5090, UUID_5090_B}
     runs = box.commands('docker run -d')
     assert len(runs) == 2 and all('--network gt-noegress' in r for r in runs)
-    assert {re.search(r'device=([^"]+)', r).group(1) for r in runs} == {UUID_5090, UUID_5090_B}
+    assert {re.findall(r'device=([^"]+)', r)[0] for r in runs} == {UUID_5090, UUID_5090_B}
     records = InstanceStore(root / 'instances.json').instances
     assert {r.container_id for r in records.values()} == set(box.containers)
     assert all((r.host, r.healthy, r.draining) == ('10.0.0.1', True, False) for r in records.values())

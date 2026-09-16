@@ -45,7 +45,10 @@ class Channel:
 
     @property
     def agent_digest(self) -> str:
-        return DIGEST_REF.match(self.agent)['digest']
+        m = DIGEST_REF.match(self.agent)
+        if m is None:  # parse() refuses such a reference; only a hand-built Channel can get here
+            raise ChannelError(f'{self.agent!r} is not a digest-pinned reference')
+        return m['digest']
 
 
 def allowed_signers_line(pubkey: str = RELEASE_PUBKEY_OPENSSH, namespace: str = RELEASE_SIGN_NAMESPACE) -> str:

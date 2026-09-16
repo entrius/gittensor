@@ -261,11 +261,14 @@ def up_command(
             channel_url=channel_url,
         )
         # What the runner itself will issue: printed so the miner can see exactly what runs privileged on their box.
+        agent_image, agent_digest = (
+            (image, '') if no_update or channel is None else (channel.agent, channel.agent_digest)
+        )
         agent_line = agent_run_command(
-            image=image if no_update else channel.agent,
+            image=agent_image,
             ssh_port=ssh_port,
             miner_hotkey=report.hotkey_ss58 or '',
-            image_digest='' if no_update else channel.agent_digest,
+            image_digest=agent_digest,
             allow_dev_keys=allow_dev_keys,
         )
 

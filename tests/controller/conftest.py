@@ -163,20 +163,22 @@ def job_responder(
     filled_bytes: Optional[int] = None,
     challenge: Optional[str] = None,
     version: str = 'fake-1',
-) -> Callable[[str], str]:
+) -> Callable[[str], str | CommandResult]:
     """Answers the proof's docker lines the way an honest box would: `docker create` returns a container id and
     remembers the challenge it was given; `docker cp` says nothing; `docker start -a` prints the sealed result for
     that container's card, echoing its challenge. Any override makes it a lying (slow, wrong, relayed) card."""
     challenges: Dict[str, str] = {}
     cards: Dict[str, str] = {}
 
-    def respond(command: str) -> str:
+    def respond(command: str) -> str | CommandResult:
         m = _CREATE_DEVICE.match(command)
         if m:
             card = m.group(1)
             cid = container_for(card)
             cards[cid] = card
-            challenges[cid] = _CREATE_CHALLENGE.search(command).group(1)
+            challenge_match = _CREATE_CHALLENGE.search(command)
+            assert challenge_match is not None, command
+            challenges[cid] = challenge_match.group(1)
             return cid + '\n'
         if command.startswith('docker cp -') or command.startswith('docker rm -f'):
             return ''

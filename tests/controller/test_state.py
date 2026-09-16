@@ -47,6 +47,16 @@ def test_admit_pins_uuids_and_moves_to_idle():
     assert again.pinned_uuids == ['GPU-a', 'GPU-b'] and again.admitted_at == 100.0 and again.last_check_at == 1000.0
 
 
+def _until(box: BoxState) -> float:
+    assert box.bench_until is not None
+    return box.bench_until
+
+
+def _benched_at(box: BoxState) -> float:
+    assert box.benched_at is not None
+    return box.benched_at
+
+
 def test_bench_climbs_the_ladder_and_clears_the_pin():
     box = apply_verdict(BoxState('hk1'), admit_verdict(), now=0.0)
     b1 = apply_verdict(box, bench_verdict('power_limit'), now=10.0)
@@ -58,10 +68,10 @@ def test_bench_climbs_the_ladder_and_clears_the_pin():
     assert re.status == ADMIT and re.bench_until is None and re.bench_count == 1
     b2 = apply_verdict(re, bench_verdict('gpu_proof'), now=20.0 + H)
     assert b2.bench_count == 2 and b2.bench_until == 20.0 + H + 4 * H
-    b3 = apply_verdict(release_from_bench(b2, b2.bench_until), bench_verdict(), now=b2.bench_until)
-    b4 = apply_verdict(release_from_bench(b3, b3.bench_until), bench_verdict(), now=b3.bench_until)
-    b5 = apply_verdict(release_from_bench(b4, b4.bench_until), bench_verdict(), now=b4.bench_until)
-    assert [b.bench_until - b.benched_at for b in (b3, b4, b5)] == [16 * H, 64 * H, 64 * H]
+    b3 = apply_verdict(release_from_bench(b2, _until(b2)), bench_verdict(), now=_until(b2))
+    b4 = apply_verdict(release_from_bench(b3, _until(b3)), bench_verdict(), now=_until(b3))
+    b5 = apply_verdict(release_from_bench(b4, _until(b4)), bench_verdict(), now=_until(b4))
+    assert [_until(b) - _benched_at(b) for b in (b3, b4, b5)] == [16 * H, 64 * H, 64 * H]
 
 
 def test_ladder_resets_after_a_clean_stretch():
@@ -69,10 +79,10 @@ def test_ladder_resets_after_a_clean_stretch():
     b1 = apply_verdict(box, bench_verdict(), now=0.0)
     b2 = apply_verdict(release_from_bench(b1, H), bench_verdict(), now=H)
     assert b2.bench_count == 2
-    idle = apply_verdict(release_from_bench(b2, b2.bench_until), admit_verdict(), now=b2.bench_until)
-    late = apply_verdict(idle, bench_verdict(), now=b2.bench_until + 8 * 86_400)
-    assert late.bench_count == 1 and late.bench_until - late.benched_at == H
-    soon = apply_verdict(idle, bench_verdict(), now=b2.bench_until + 86_400)
+    idle = apply_verdict(release_from_bench(b2, _until(b2)), admit_verdict(), now=_until(b2))
+    late = apply_verdict(idle, bench_verdict(), now=_until(b2) + 8 * 86_400)
+    assert late.bench_count == 1 and _until(late) - _benched_at(late) == H
+    soon = apply_verdict(idle, bench_verdict(), now=_until(b2) + 86_400)
     assert soon.bench_count == 3
 
 

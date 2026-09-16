@@ -602,6 +602,8 @@ def run_round(
             r.scrape = scrape
 
     def stage(r: BoxRound) -> None:
+        if r.runner is None or r.scrape is None:
+            return  # only rows that connected and scraped are staged
         r.proved = _provable_gpus(r.box, r.scrape.gpus)
         r.skipped = busy_cards(r.box, r.scrape.uuids)
         if not r.proved:
@@ -614,6 +616,8 @@ def run_round(
             r.stage_error = f'staging failed: {type(e).__name__}: {e}'[:300]
 
     def cleanup(r: BoxRound) -> None:
+        if r.runner is None or r.staged is None:
+            return
         command = proof.cleanup_command(r.staged)
         if command:
             try:
@@ -643,10 +647,13 @@ def run_round(
                 gate = threading.Barrier(len(armed))
 
                 def fire(r: BoxRound) -> None:
+                    runner, staged = r.runner, r.staged
                     gate.wait()
                     r.fired_at = clock()
+                    if runner is None or staged is None:
+                        return  # ``armed`` holds only rows that staged, and staging needs the runner
                     try:
-                        r.cards = fire_box(r.runner, r.proved, proof, r.staged, config.proof_timeout_s, clock)
+                        r.cards = fire_box(runner, r.proved, proof, staged, config.proof_timeout_s, clock)
                     except Exception as e:
                         r.stage_error = f'fire failed: {type(e).__name__}: {e}'[:300]
 
@@ -1226,7 +1233,9 @@ def _check_one(setup: CheckSetup, hotkey: str, force: bool, json_mode: bool, bes
         proof = setup.proof()
     except ProofLoadError as e:
         _fail(str(e), json_mode, EXIT_NO_VERDICT)
-    fleet = {b.box_id: list(b.pinned_uuids) for b in store.boxes.values() if b.box_id != hotkey}
+    fleet: dict[str, Iterable[str]] = {
+        b.box_id: list(b.pinned_uuids) for b in store.boxes.values() if b.box_id != hotkey
+    }
     runner = TimedRunner(_make_runner(setup.state, released, setup.ca_key, 'check'))
     try:
         outcome = check_box(runner, released, fleet, proof, setup.allowlist(), setup.config, now)
@@ -1375,7 +1384,7 @@ def _print_round(report: RoundReport, n: int, json_mode: bool) -> None:
     for column in ('Hotkey', 'Host', 'State', 'Verdict', 'Cards', 'Proof ms', 'Failed / reason'):
         table.add_column(column, no_wrap=column != 'Failed / reason')
     for r in report.boxes:
-        proof_ms = [c.get('elapsed_ms') for c in r.cards if c.get('elapsed_ms') is not None]
+        proof_ms = [ms for c in r.cards if (ms := c.get('elapsed_ms')) is not None]
         if r.verdict is None:
             reason = r.transport_error or r.busy or ('identity ok; every card busy' if r.scrape is not None else '')
         else:

@@ -138,6 +138,7 @@ class TestSshRunner:
             r.run('true')
             r.run('nvidia-smi -L')
             control = r.control_path()
+            assert control is not None
             assert str(control).startswith('/tmp/gt-ssh-') and len(str(control)) < 60  # socket paths cap near 104
             for argv, _, _ in calls:
                 assert 'ControlMaster=auto' in argv and f'ControlPath={control}' in argv
@@ -180,7 +181,7 @@ class TestSshRunner:
         with self._runner(ca_key, tmp_path, calls, returncode=3, stdout=b'', stderr=b'boom') as r:
             assert r.run('exit 3') == CommandResult(3, '', 'boom')
 
-        def timeout_run(argv, input=None, capture_output=True, timeout=None):
+        def timeout_run(argv, input=None, capture_output=True, timeout: float = 0.0):
             raise subprocess.TimeoutExpired(argv, timeout)
 
         known = tmp_path / 'kh'

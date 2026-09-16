@@ -13,6 +13,9 @@
   check) and never runs past the controller's stop (``stopped_at``). A span can confirm seconds a little after they
   happened, so each instance keeps its own cursor and every second is paid once. A multi-card instance's cards share
   one span and are paid only while every one of them is LEASED (or DRAINING after our stop): all or nothing;
+* **draining** (Kimbo 9/16): a DRAINING card earns the **idle** rate for its DRAINING seconds while its box's proof is
+  fresh, never the leased rate (it takes no new work; leased pay ended at the controller's stop, ``stopped_at``), so
+  the drain window that finishes a customer's completion (up to ``drain.max_s``, 240 s for the 27B) is not unpaid;
 * nothing in STARTING, CHECKING, or on an ADMIT or BENCHED box;
 * **withheld**: leased seconds of a box whose ``withheld_from`` falls in [its UTC day − 1 day, its UTC day + 1 day)
   are recorded but never paid. The window is re-applied when a window is settled, so a hard failure also forfeits the
@@ -147,7 +150,7 @@ def accrue(
                 cursors.leased[instance_id] = end
         for uuid, card in sorted(box.cards.items()):
             idle_s = 0.0
-            if card.state == IDLE:
+            if card.state in (IDLE, DRAINING):  # DRAINING: the idle rate, from the moment the drain began
                 start = max(t0, card.since if card.since is not None else t0)
                 idle_s = max(0.0, min(now, proof_good_until) - start)
             leased_s = leased_by_instance.get(card.instance_id, 0.0) if card.instance_id else 0.0

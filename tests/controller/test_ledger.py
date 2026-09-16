@@ -3,7 +3,8 @@
 
 """The pay ledger from a scripted card-state timeline (pay starts at the first probe after the canary, is confirmed by
 the checks after it, stops at the last passing check on a failure and at the controller's stop; idle needs a fresh
-passing proof; STARTING / CHECKING are unpaid; multi-card instances are all or nothing; the withheld window), the rows
+passing proof; DRAINING earns the idle rate; STARTING / CHECKING are unpaid; multi-card instances are all or nothing;
+the withheld window, cleared by an operator's release), the rows
 on disk and the cursor across a restart, the pool math (below / at / above target_fleet, the pool bound, recycle,
 leased > idle), and the price oracle's fail-safe."""
 
@@ -98,6 +99,35 @@ def test_a_scripted_lease_is_paid_from_the_canary_through_the_last_passing_check
     assert tick(1_264.0)[B].leased_s == 15  # 1210 -> 1225
     assert paid == {'idle': 264.0, 'leased': 105.0}
     assert tick(1_276.0)[B].leased_s == 0  # each second once
+
+
+def test_a_draining_card_earns_the_idle_rate_until_checking_and_nothing_on_a_stale_proof():
+    record = leased_record()
+    record.pay_through = 1_200.0  # confirmed through 1200 by the checks
+    state = box(cards={B: CardState(LEASED, 'i1', 1_000.0)}, last_check_at=1_000.0)
+    instances = {'i1': record}
+    cursors = Cursors(settled_at=1_000.0)
+    rows = by_uuid(accrue([state], instances, cursors, 1_120.0))
+    assert (rows[B].leased_s, rows[B].idle_s) == (120.0, 0.0)  # LEASED: leased pay only
+
+    record.stopped_at, record.draining = 1_180.0, True  # our stop at 1180: the drain begins
+    state.cards[B] = CardState(DRAINING, 'i1', 1_180.0)
+    rows = by_uuid(accrue([state], instances, cursors, 1_240.0))
+    assert rows[B].state == DRAINING and rows[B].leased_s == 60.0  # 1120 -> 1180, leased to the stop and no further
+    assert rows[B].idle_s == 60.0  # 1180 -> 1240 draining: the idle rate
+    rows = by_uuid(accrue([state], instances, cursors, 1_300.0))
+    assert (rows[B].leased_s, rows[B].idle_s) == (0.0, 60.0)  # 120 s of drain in all, each second once
+
+    state.cards[B] = CardState(CHECKING, '', 1_300.0)  # drained: CHECKING pays nothing
+    rows = by_uuid(accrue([state], {}, cursors, 1_360.0))
+    assert (rows[B].leased_s, rows[B].idle_s) == (0.0, 0.0)
+    state.cards[B] = CardState(IDLE, '', 1_360.0)  # proved: idle again
+    assert by_uuid(accrue([state], {}, cursors, 1_420.0))[B].idle_s == 60.0
+
+    stale = box(cards={B: CardState(DRAINING, 'i9', 3_000.0)}, last_check_at=1_000.0)  # proof past 1.5 rounds
+    assert accrue([stale], {}, Cursors(settled_at=3_000.0), 3_060.0)[0].idle_s == 0.0
+    unreachable = box(cards={B: CardState(DRAINING, 'i9', 1_000.0)}, unreachable_count=1)
+    assert accrue([unreachable], {}, Cursors(settled_at=1_000.0), 1_060.0)[0].idle_s == 0.0
 
 
 def test_idle_needs_a_fresh_passing_proof_and_starting_checking_and_benched_are_unpaid():

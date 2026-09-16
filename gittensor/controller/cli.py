@@ -107,6 +107,7 @@ from gittensor.controller.discovery import ChainReader, DiscoverReport, Discover
 from gittensor.controller.heartbeat import WatchReport
 from gittensor.controller.locks import BoxLocks
 from gittensor.controller.manifest import ManifestError
+from gittensor.controller.pay.ledger import Ledger, is_withheld
 from gittensor.controller.pay.oracle import CoinGeckoChainOracle, FailSafeOracle, MetagraphedOracle, StaticOracle
 from gittensor.controller.pay.rates import RatesError, load_rates
 from gittensor.controller.pay.scorecard import LATEST, ScorecardError, read_scorecard
@@ -2256,12 +2257,63 @@ def _pay_line(view: dict, now: float) -> str:
     )
 
 
+def _live_pay(state: StateDir, boxes: dict[str, BoxState], view: dict, now: float) -> dict[str, dict]:
+    """Per hotkey, what the ledger has settled since the last scorecard (or over the trailing window when there is
+    none): idle / leased / withheld seconds and the USD they imply at the scorecard's implied per-card-hour rates
+    (the table's target rates for a GPU type the scorecard did not price). A card LEASED since the scorecard shows
+    its seconds here, not 0 (Kimbo 9/16)."""
+    doc = view.get('scorecard') or {}
+    since = float(doc['issued_at']) if doc.get('issued_at') is not None else now - cfg.SETTLEMENT_WINDOW_S
+    implied = (doc.get('pool') or {}).get('implied_usd_per_card_hour') or {}
+    try:
+        table = load_rates()
+    except RatesError:
+        table = {}
+
+    def rate(gpu: str) -> tuple[float, float]:
+        if gpu in implied:
+            return float(implied[gpu]['idle']), float(implied[gpu]['leased'])
+        row = table.get(gpu)
+        return (row.idle_usd_per_hr, row.leased_usd_per_hr) if row else (0.0, 0.0)
+
+    out: dict[str, dict] = {}
+    for row in Ledger(state.root / 'ledger').rows(since, now):
+        live = out.setdefault(
+            row.hotkey, {'since': since, 'idle_s': 0.0, 'leased_s': 0.0, 'withheld_s': 0.0, 'usd': 0.0}
+        )
+        withheld = row.withheld or (row.leased_s > 0 and is_withheld(boxes.get(row.hotkey), row.t1))
+        leased = 0.0 if withheld else row.leased_s
+        idle_rate, leased_rate = rate(row.gpu)
+        live['idle_s'] += row.idle_s
+        live['leased_s'] += leased
+        live['withheld_s'] += row.leased_s - leased
+        live['usd'] += (row.idle_s * idle_rate + leased * leased_rate) / 3600.0
+    for live in out.values():
+        for key in ('idle_s', 'leased_s', 'withheld_s'):
+            live[key] = round(live[key], 3)
+        live['usd'] = round(live['usd'], 6)
+    return out
+
+
+def _pay_entry(scored: dict, live: dict | None, age_s: float | None) -> dict:
+    """A box's pay as `status` shows it: the last scorecard's window, the ledger since it, and the two summed."""
+    entry = {k: scored.get(k) for k in ('weight', 'usd', 'idle_s', 'leased_s', 'withheld_s')}
+    entry['scorecard_age_s'] = age_s
+    entry['live'] = live or {}
+    entry['total'] = {
+        k: round(float(scored.get(k) or 0.0) + float((live or {}).get(k) or 0.0), 6 if k == 'usd' else 3)
+        for k in ('usd', 'idle_s', 'leased_s', 'withheld_s')
+    }
+    return entry
+
+
 @controller_group.command('status')
 @_state_options
 def status_command(state_dir, json_mode):
     """The controller as its state files show it: running or not, the last round / reconcile / watch, every box with
-    its cards (state and age) and standing, what the last scorecard pays it, every instance with its heartbeat and
-    health. Read-only; safe beside `run`."""
+    its cards (state and age) and standing, its pay (the last scorecard's window plus what the ledger has settled
+    since it, so a card leased after the scorecard shows its seconds and USD now, labelled with the scorecard's age),
+    every instance with its heartbeat and health. Read-only; safe beside `run`."""
     state = StateDir(Path(state_dir).expanduser())
     now = time.time()
     running = state.root.is_dir() and state.daemon_running()
@@ -2272,7 +2324,10 @@ def status_command(state_dir, json_mode):
         info = {}
     pay_view = _scorecard_view(state, now)
     paid = {h['hotkey']: h for h in (pay_view.get('scorecard') or {}).get('hotkeys', [])}
+    issued_at = (pay_view.get('scorecard') or {}).get('issued_at')
+    age_s = round(now - float(issued_at), 1) if issued_at is not None else None
     store = state.store()
+    live_pay = _live_pay(state, store.boxes, pay_view, now)
     boxes = []
     for box in sorted(store.boxes.values(), key=lambda b: b.box_id):
         cards = [
@@ -2280,6 +2335,7 @@ def status_command(state_dir, json_mode):
             for u, c in sorted(box.cards.items())
         ]
         entry = paid.get(box.box_id) or {}
+        live = live_pay.get(box.box_id)
         boxes.append(
             {
                 'hotkey': box.box_id,
@@ -2295,9 +2351,7 @@ def status_command(state_dir, json_mode):
                 'source': box.source,
                 'endpoint_changed': box.endpoint_changed,
                 'standing_events': box.standing_events[-5:],
-                'pay': {k: entry.get(k) for k in ('weight', 'usd', 'idle_s', 'leased_s', 'withheld_s')}
-                if entry
-                else {},
+                'pay': _pay_entry(entry, live, age_s) if entry or live else {},
             }
         )
     instances = _instance_rows(InstanceStore(state.instances), store)
@@ -2334,7 +2388,10 @@ def status_command(state_dir, json_mode):
     )
     console.print(_pay_line(pay_view, now))
     table = Table(title='boxes', show_header=True)
-    for column in ('Hotkey', 'Host', 'Status', 'Standing', 'Cards', 'Pay (window)', 'Last check', 'Bench / withheld', 'Last event'):  # fmt: skip
+    pay_head = (
+        f'Pay (scorecard {_age(issued_at, now)} ago + since)' if issued_at is not None else 'Pay (ledger, last hour)'
+    )
+    for column in ('Hotkey', 'Host', 'Status', 'Standing', 'Cards', pay_head, 'Last check', 'Bench / withheld', 'Last event'):  # fmt: skip
         table.add_column(column, no_wrap=column not in ('Cards', 'Last event'))
     for b in boxes:
         cards = '\n'.join(
@@ -2348,12 +2405,19 @@ def status_command(state_dir, json_mode):
             bench += f'{" · " if bench else ""}pay withheld from {_when(b["withheld_from"])}'
         event = b['standing_events'][-1] if b['standing_events'] else None
         pay = b['pay']
-        pay_cell = (
-            f'${pay["usd"]:.3f} · idle {pay["idle_s"] / 3600:.2f} h · leased {pay["leased_s"] / 3600:.2f} h'
-            + (f' · [red]withheld {pay["withheld_s"] / 3600:.2f} h[/red]' if pay.get('withheld_s') else '')
-            if pay
-            else '[dim]—[/dim]'
-        )
+        if pay:
+            total, live = pay['total'], pay['live']
+            pay_cell = (
+                f'${total["usd"]:.3f} · idle {total["idle_s"] / 3600:.2f} h · leased {total["leased_s"] / 3600:.2f} h'
+                + (f' · [red]withheld {total["withheld_s"] / 3600:.2f} h[/red]' if total['withheld_s'] else '')
+                + (
+                    f' [dim](since: leased {live["leased_s"]:.0f} s, idle {live["idle_s"]:.0f} s, ${live["usd"]:.3f})[/dim]'
+                    if live
+                    else ''
+                )
+            )
+        else:
+            pay_cell = '[dim]—[/dim]'
         table.add_row(
             escape(b['hotkey'][:16]),
             escape(b['host']),

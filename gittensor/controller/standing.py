@@ -12,6 +12,8 @@ number, the clean lease-seconds since the last reset, walked through the events 
 * A **soft** event drops one level: a health-probe replacement, a failed start (a missed ``max_load_s``, a missing
   pre-staged image), a failed drain, an unreachable bench. Trusted falls to the start of standard, standard to zero.
 * ``folded`` is what ``add_event`` leaves when it trims the oldest events: their fold, as a clean-seconds value.
+* Neutral, recorded but not folded: ``instance_stopped`` (our container gone after the agent was unreachable: a
+  clean leave or a reboot, Kimbo 9/16) and ``instance_unreachable`` (a lease ended by missed heartbeats).
 
 The level is ``trusted`` from ``STANDING_TRUSTED_AFTER_S``, ``standard`` from ``STANDING_STANDARD_AFTER_S``, probation
 below (and for a new box with no events). Standing sets lease priority (``rank``) and lease length (``lease_cap_s``).

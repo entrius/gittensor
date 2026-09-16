@@ -206,9 +206,9 @@ def apply_unreachable(
     bench_after: int = cfg.UNREACHABLE_BENCH_AFTER,
     bench_s: float = cfg.UNREACHABLE_BENCH_S,
 ) -> BoxState:
-    """The state after a round in which SSH could not reach the box, or an in-lease heartbeat that got no answer (one
-    counter for both): no verdict, the count goes up, and at ``bench_after`` in a row the box is BENCHED for a flat
-    ``bench_s`` without climbing the fraud ladder. Pure."""
+    """The state after a proof round in which SSH could not reach the box: no verdict, the count goes up, and at
+    ``bench_after`` in a row the box is BENCHED for a flat ``bench_s`` without climbing the fraud ladder. A missed
+    in-lease heartbeat is counted on the instance instead (``heartbeat.py``; Kimbo 9/16). Pure."""
     new = BoxState.from_dict(state.as_dict())
     new.unreachable_count += 1
     if new.unreachable_count >= bench_after and new.status != BENCHED:
@@ -251,7 +251,10 @@ def release_requested(state: BoxState) -> bool:
 
 def release_from_bench(state: BoxState, now: float) -> BoxState:
     """BENCHED -> ADMIT once the bench has expired, or at once when an operator released it (Kimbo 9/15: a ``released``
-    standing event with the reason; the ladder rung and any withheld pay stay). Otherwise unchanged."""
+    standing event with the reason; the ladder rung stays). An operator's release also clears ``withheld_from`` (Kimbo
+    9/16: the operator has judged the bench wrong or the test over, so the leased pay withheld over the box's UTC day
+    +-1 is given back; the ledger is append-only and ``settle_window`` recomputes from the current field); the event
+    records what was cleared. An expired bench keeps its withheld window. Otherwise unchanged."""
     early = release_requested(state)
     if state.status != BENCHED or (not early and (state.bench_until is None or now < state.bench_until)):
         return state
@@ -267,7 +270,9 @@ def release_from_bench(state: BoxState, now: float) -> BoxState:
             reason=request.get('reason', ''),
             requested_at=request['at'],
             bench_until=state.bench_until,
+            withheld_from=state.withheld_from,  # what the release gave back (None: nothing was withheld)
         )
+        new.withheld_from = None
     return new
 
 
@@ -360,6 +365,33 @@ def apply_heartbeat_failure(state: BoxState, failed: Sequence[str], now: float, 
     if new.status == BENCHED:
         return new
     return _bench(new, now, [f'heartbeat:{name}' for name in failed])
+
+
+INSTANCE_STOPPED = 'instance_stopped'
+INSTANCE_UNREACHABLE = 'instance_unreachable'
+
+
+def _end_lease(state: BoxState, kind: str, uuid: str, now: float, **detail) -> BoxState:
+    new = add_event(state, kind, now, uuid=uuid, **detail)
+    if new.status == IDLE and uuid in new.cards and new.cards[uuid].state in BUSY:
+        new = transition_card(new, uuid, CHECKING, now)
+    return new
+
+
+def apply_instance_stopped(state: BoxState, uuid: str, now: float, **detail) -> BoxState:
+    """A lease that ended because our container was gone once the agent answered again after being unreachable
+    (Kimbo 9/16: a clean leave, a reboot, not a cheat): an ``instance_stopped`` standing event (neutral: the fold
+    neither resets nor drops standing on it), the card to CHECKING for the one-box probe, nothing withheld, no bench.
+    A container that vanishes while the agent answered throughout stays ``apply_heartbeat_failure``. Pure."""
+    return _end_lease(state, INSTANCE_STOPPED, uuid, now, **detail)
+
+
+def apply_instance_unreachable(state: BoxState, uuid: str, now: float, **detail) -> BoxState:
+    """A lease that ended because the heartbeat could not reach the box ``HEARTBEAT_UNREACHABLE_AFTER`` times in a row
+    (Kimbo 9/16): an ``instance_unreachable`` standing event (neutral), the card to CHECKING (the reconciler undeploys
+    the instance when the box answers again, then the one-box probe re-proves the card), nothing withheld, no bench.
+    Pure."""
+    return _end_lease(state, INSTANCE_UNREACHABLE, uuid, now, **detail)
 
 
 def provable_uuids(state: BoxState, reported: Sequence[str]) -> List[str]:

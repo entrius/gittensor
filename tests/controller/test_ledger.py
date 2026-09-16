@@ -3,7 +3,8 @@
 
 """The pay ledger from a scripted card-state timeline (pay starts at the first probe after the canary, is confirmed by
 the checks after it, stops at the last passing check on a failure and at the controller's stop; idle needs a fresh
-passing proof; STARTING / CHECKING are unpaid; multi-card instances are all or nothing; the withheld window), the rows
+passing proof; DRAINING earns the idle rate; STARTING / CHECKING are unpaid; multi-card instances are all or nothing;
+the withheld window, cleared by an operator's release), the rows
 on disk and the cursor across a restart, the pool math (below / at / above target_fleet, the pool bound, recycle,
 leased > idle), and the price oracle's fail-safe."""
 
@@ -98,6 +99,35 @@ def test_a_scripted_lease_is_paid_from_the_canary_through_the_last_passing_check
     assert tick(1_264.0)[B].leased_s == 15  # 1210 -> 1225
     assert paid == {'idle': 264.0, 'leased': 105.0}
     assert tick(1_276.0)[B].leased_s == 0  # each second once
+
+
+def test_a_draining_card_earns_the_idle_rate_until_checking_and_nothing_on_a_stale_proof():
+    record = leased_record()
+    record.pay_through = 1_200.0  # confirmed through 1200 by the checks
+    state = box(cards={B: CardState(LEASED, 'i1', 1_000.0)}, last_check_at=1_000.0)
+    instances = {'i1': record}
+    cursors = Cursors(settled_at=1_000.0)
+    rows = by_uuid(accrue([state], instances, cursors, 1_120.0))
+    assert (rows[B].leased_s, rows[B].idle_s) == (120.0, 0.0)  # LEASED: leased pay only
+
+    record.stopped_at, record.draining = 1_180.0, True  # our stop at 1180: the drain begins
+    state.cards[B] = CardState(DRAINING, 'i1', 1_180.0)
+    rows = by_uuid(accrue([state], instances, cursors, 1_240.0))
+    assert rows[B].state == DRAINING and rows[B].leased_s == 60.0  # 1120 -> 1180, leased to the stop and no further
+    assert rows[B].idle_s == 60.0  # 1180 -> 1240 draining: the idle rate
+    rows = by_uuid(accrue([state], instances, cursors, 1_300.0))
+    assert (rows[B].leased_s, rows[B].idle_s) == (0.0, 60.0)  # 120 s of drain in all, each second once
+
+    state.cards[B] = CardState(CHECKING, '', 1_300.0)  # drained: CHECKING pays nothing
+    rows = by_uuid(accrue([state], {}, cursors, 1_360.0))
+    assert (rows[B].leased_s, rows[B].idle_s) == (0.0, 0.0)
+    state.cards[B] = CardState(IDLE, '', 1_360.0)  # proved: idle again
+    assert by_uuid(accrue([state], {}, cursors, 1_420.0))[B].idle_s == 60.0
+
+    stale = box(cards={B: CardState(DRAINING, 'i9', 3_000.0)}, last_check_at=1_000.0)  # proof past 1.5 rounds
+    assert accrue([stale], {}, Cursors(settled_at=3_000.0), 3_060.0)[0].idle_s == 0.0
+    unreachable = box(cards={B: CardState(DRAINING, 'i9', 1_000.0)}, unreachable_count=1)
+    assert accrue([unreachable], {}, Cursors(settled_at=1_000.0), 1_060.0)[0].idle_s == 0.0
 
 
 def test_idle_needs_a_fresh_passing_proof_and_starting_checking_and_benched_are_unpaid():
@@ -218,6 +248,33 @@ def test_the_withheld_window_is_the_failure_day_and_the_day_before_and_unrated_c
     pay = s.hotkeys['hkA']
     assert (pay.leased_s, pay.withheld_s, pay.idle_s) == (200.0, 200.0, 50.0)  # idle is never withheld
     assert s.unrated_s == 100.0 and s.hotkeys['hkB'].weight == 0.0
+
+
+def test_an_operators_release_clears_the_withheld_window_and_settlement_recomputes_the_rows_already_written():
+    from gittensor.controller.checks.state import BENCHED, apply_heartbeat_failure, release_from_bench, request_release
+
+    t0 = 20 * DAY_S + 10 * HOUR
+    lease = [
+        LedgerRow(t0 - 12, t0 - 500 + 12 * i, 'hkA', A, 'RTX5090', LEASED, 'i', 0.0, 12.0, False) for i in range(37)
+    ]
+    clean = box('hkA', cards={A: CardState(LEASED, 'i', t0 - 500)})
+    paid = settle_window(lease, {'hkA': clean}, RATES, RICH, t0 - HOUR, t0).hotkeys['hkA']
+    assert (paid.leased_s, paid.withheld_s) == (444.0, 0.0)  # the 9/15 lease: 444 s, clean
+
+    benched = apply_heartbeat_failure(clean, ['our_container'], t0)  # the bench at t: the day +-1 is withheld
+    assert benched.status == BENCHED and benched.withheld_from == t0
+    withheld = settle_window(lease, {'hkA': benched}, RATES, RICH, t0 - HOUR, t0 + 60).hotkeys['hkA']
+    assert (withheld.leased_s, withheld.withheld_s) == (0.0, 444.0)  # retroactive, as designed
+
+    released = release_from_bench(request_release(benched, t0 + 100, 'test over'), t0 + 120)
+    assert released.status == 'ADMIT' and released.withheld_from is None and released.bench_count == 1
+    assert released.standing_events[-1]['kind'] == 'released' and released.standing_events[-1]['withheld_from'] == t0
+    again = settle_window(lease, {'hkA': released}, RATES, RICH, t0 - HOUR, t0 + 200).hotkeys['hkA']
+    assert (again.leased_s, again.withheld_s) == (444.0, 0.0)  # the same rows, paid: the window is the current field
+    assert all(not r.withheld and r.leased_s == 12.0 for r in lease)  # nothing was rewritten
+
+    expired = BoxState.from_dict({**benched.as_dict(), 'bench_until': t0 + 1})
+    assert release_from_bench(expired, t0 + 2).withheld_from == t0  # a bench that ran its course keeps the window
 
 
 # ---------------------------------------------------------------- the oracle -----------------------------------------

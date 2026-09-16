@@ -63,7 +63,7 @@ miner, and the subnet's controller checks the cards, leases them out and pays pe
 # Needs Docker with the NVIDIA runtime and a registered hotkey
 gitt up --wallet <name> --hotkey <hotkey>
 
-# Stop the agent and its runner
+# Leave cleanly: drain and stop the workloads placed here, then the agent and its runner
 gitt down
 ```
 

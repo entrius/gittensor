@@ -44,6 +44,17 @@ SSH_HOSTKEY_VOLUME_MOUNT = '/var/lib/gt-agent'
 AGENT_CONTAINER_NAME = 'gt-agent'
 RUNNER_CONTAINER_NAME = 'gt-agent-runner'
 
+# --- Workload containers -----------------------------------------------------------------------------------------------
+# What the controller labels every placement instance it runs on the box (`gt-i-<id>`), and what `gitt down` reads to
+# drain and stop them before the agent goes (`gitt up --reclaim` removes one left behind). The drain label carries the
+# manifest's drain.max_s: SIGTERM, wait that long, then remove; 0 (a `kill` drain) removes at once.
+INSTANCE_LABEL = 'io.gittensor.instance'
+ENTRY_LABEL = 'io.gittensor.entry'
+UUID_LABEL = 'io.gittensor.uuid'
+PORT_LABEL = 'io.gittensor.port'
+DRAIN_LABEL = 'io.gittensor.drain_max_s'
+WORKLOAD_STOP_DEFAULT_S = 30  # the wait for a container whose label names no drain (started before the label existed)
+
 # --- Workload ports ----------------------------------------------------------------------------------------------------
 # What a box opens besides the sshd port. The controller gives each placement instance one host port from this range
 # (first free on the box) and publishes it as `-p <host port>:<manifest port>`, so two instances of one image on a

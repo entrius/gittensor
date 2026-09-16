@@ -3,9 +3,10 @@
 
 """The in-lease watch over the fake box: the heartbeat passes on an honest box; a swapped card, a changed power limit
 or NVML lib, a restarted or recreated container, a foreign GPU process, a vanished or exited container each bench the
-box, withhold its pay and undeploy its instances; a heartbeat with no answer benches nothing; health failures below
-the threshold do nothing and at it replace the replica with a standing event, and the reconciler starts the
-replacement; the state store keeps an operator's admit written beside the controller."""
+box, withhold its pay and undeploy its instances; a container gone after the agent was unreachable is a stop, not a
+cheat; a heartbeat with no answer benches nothing but makes the instance unroutable at once, and three in a row end
+the lease; health failures below the threshold do nothing and at it replace the replica with a standing event, and
+the reconciler starts the replacement; the state store keeps an operator's admit written beside the controller."""
 
 import pytest
 
@@ -33,6 +34,7 @@ from gittensor.controller.heartbeat import (
 from gittensor.controller.locks import BoxLocks
 from gittensor.controller.reconcile import InstanceStore
 from gittensor.controller.ssh import SshTransportError
+from gittensor.gateway.table import InstanceTable
 from tests.controller.conftest import NVML_MD5, UUID_5090, UUID_5090_B
 from tests.controller.test_placement import Clock, FakeDocker, idle_box, make_world, reconciler, seed
 
@@ -157,6 +159,50 @@ def test_a_heartbeat_failure_benches_the_box_withholds_pay_and_undeploys_its_ins
     assert box.containers == {} and not box.commands('docker stop')  # undeployed with a kill, no graceful drain
 
 
+@pytest.mark.parametrize('how', ['vanished', 'exited'])
+def test_a_container_gone_after_the_agent_was_unreachable_is_a_stop_not_a_cheat(world, how):
+    # 9/16: `gitt down` under a lease (agent gone, one missed heartbeat), `gitt up`, our container gone -> 4 h bench
+    rec, watch, box, clock, record = leased(world)
+    assert watch.run_pass().ok  # a good heartbeat at t
+    good_at = clock.t
+    clock.t += 60
+    box.runner.on(regex(r'^nvidia-smi --query-gpu'), SshTransportError('10.0.0.1:2200: Connection refused'))
+    assert [a.kind for a in watch.run_pass().actions] == ['miss']  # the agent is gone
+    box.runner.on(regex(r'^nvidia-smi --query-gpu'), box.respond)  # the agent is back, our container is not
+    if how == 'vanished':
+        box.containers.pop(record.container_id)
+    else:
+        box.containers[record.container_id]['state'] = 'exited'
+    box.processes = {}
+    clock.t += 60
+    report = watch.run_pass()
+    (stopped,) = report.actions
+    assert stopped.kind == 'stopped' and stopped.states == [LEASED, CHECKING] and not stopped.ok
+    assert 'gone after 1 missed heartbeat(s): instance stopped, not a cheat' in stopped.detail
+    after = StateStore(rec.boxes.path).get('hk1')
+    assert after.status == IDLE and after.bench_count == 0 and after.withheld_from is None  # no bench, no withhold
+    assert after.cards[UUID_5090].state == CHECKING and after.cards[UUID_5090_B].state == IDLE
+    event = after.standing_events[-1]
+    assert event['kind'] == 'instance_stopped' and event['instance'] == record.id and event['via'] == 'heartbeat'
+    assert event['missed_heartbeats'] == 1 and event['lease_ended_at'] == good_at
+    assert InstanceStore(rec.instances.path).instances == {} and box.containers == {}  # whatever was left is removed
+    assert not box.commands('docker stop')  # nothing to drain: a kill removal only
+
+    # the reconciler re-places on the other card meanwhile; the CHECKING card waits for the one-box probe
+    assert rec.run_pass().ok and rec.boxes.boxes['hk1'].cards[UUID_5090_B].state == LEASED
+    assert rec.boxes.boxes['hk1'].cards[UUID_5090].state == CHECKING
+
+
+def test_a_container_gone_under_an_agent_that_answered_throughout_stays_a_bench(world):
+    rec, watch, box, clock, record = leased(world)
+    assert watch.run_pass().ok
+    clock.t += 60
+    box.containers.pop(record.container_id)  # killed under a live agent: a cheat
+    report = watch.run_pass()
+    assert [a.kind for a in report.actions] == ['heartbeat', 'bench']
+    assert StateStore(rec.boxes.path).get('hk1').status == BENCHED
+
+
 def test_a_heartbeat_with_no_answer_counts_a_miss_and_benches_nothing(world):
     rec, watch, box, clock, record = leased(world)
     box.runner.on(regex(r'^nvidia-smi --query-gpu'), SshTransportError('10.0.0.1:2200: reset'))
@@ -164,32 +210,73 @@ def test_a_heartbeat_with_no_answer_counts_a_miss_and_benches_nothing(world):
     assert 'reset' in report.unreachable['hk1'] and [a.kind for a in report.actions] == ['miss']
     current = rec.instances.instances[record.id]
     assert current.heartbeat_misses == 1 and current.heartbeat_ok is None  # no heartbeat: no pay, no bench
+    assert current.healthy is False  # and no traffic
     assert rec.boxes.boxes['hk1'].status == IDLE and box.containers
 
 
-def test_three_missed_heartbeats_in_a_row_bench_the_box_for_12_h_off_the_ladder(world):
+def test_one_missed_heartbeat_makes_the_instance_unroutable_and_three_end_the_lease_without_a_bench(world):
+    # 9/16: with the agent gone under a lease the instance stayed healthy: true and the gateway kept routing to it
     rec, watch, box, clock, record = leased(world)
+    assert watch.run_pass().ok
+    good_at = clock.t
+    span = (record.pay_from, record.pay_through)
+
+    def routable():
+        table = InstanceTable(rec.instances.path.parent, rec.instances.__class__ and watch.registry)
+        table.apply(table.read(), clock.t)
+        return table.instances[record.id].routable
+
+    assert routable()
+    box.runner.on(regex(r'^nvidia-smi --query-gpu'), SshTransportError('10.0.0.1:2200: timed out'))
+    clock.t += 60
+    report = watch.run_pass()
+    assert [a.kind for a in report.actions] == ['miss'] and '(1/3 in a row)' in report.actions[0].detail
+    one = rec.instances.instances[record.id]
+    assert one.healthy is False and one.heartbeat_misses == 1 and not one.draining  # unroutable at once, still leased
+    assert (one.pay_from, one.pay_through) == span and one.pay_open is False and one.stopped_at is None
+    assert not routable() and rec.boxes.boxes['hk1'].cards[record.uuid].state == LEASED
+    assert rec.boxes.boxes['hk1'].unreachable_count == 0  # the round's count is the round's
+
+    box.runner.on(regex(r'^nvidia-smi --query-gpu'), box.respond)  # the box answers: routable again
+    clock.t += 60
+    assert watch.run_pass().ok
+    two = rec.instances.instances[record.id]
+    assert two.healthy is True and two.heartbeat_misses == 0 and routable() and two.pay_open
+    good_at = clock.t
+
     box.runner.on(regex(r'^nvidia-smi --query-gpu'), SshTransportError('10.0.0.1:2200: timed out'))
     for n in (1, 2):
+        clock.t += 60
         report = watch.run_pass()
         assert [a.kind for a in report.actions] == ['miss'] and f'({n}/3 in a row)' in report.actions[0].detail
         asked = len(box.commands('nvidia-smi --query-gpu'))
         clock.t += 5
         watch.run_pass()  # a miss waits out the interval like an answer: no heartbeat retried every tick
-        assert len(box.commands('nvidia-smi --query-gpu')) == asked and rec.boxes.boxes['hk1'].unreachable_count == n
-        clock.t += 55
-    two = rec.boxes.boxes['hk1']
-    assert two.status == IDLE and two.unreachable_count == 2 and box.containers  # two misses do nothing
-
-    report = watch.run_pass()
-    assert [a.kind for a in report.actions] == ['miss', 'bench']
-    assert 'BENCHED for 12 h' in report.actions[1].detail and record.id in report.actions[1].detail
+        assert len(box.commands('nvidia-smi --query-gpu')) == asked
+        assert rec.boxes.boxes['hk1'].cards[record.uuid].state == LEASED
+    clock.t += 55
+    report = watch.run_pass()  # the third in a row: the lease ends
+    assert [a.kind for a in report.actions] == ['unreachable']
+    assert report.actions[0].states == [LEASED, CHECKING] and 'lease ended at the last good heartbeat' in report.actions[0].detail  # fmt: skip
     after = StateStore(rec.boxes.path).get('hk1')
-    assert after.status == BENCHED and after.last_failed == ['ssh_unreachable'] and after.bench_count == 0
-    assert (after.bench_until or 0) - (after.benched_at or 0) == 12 * 3600
-    assert after.withheld_from is None and after.cards == {}
-    assert InstanceStore(rec.instances.path).instances == {} and box.containers == {}  # undeployed with a kill
-    assert not box.commands('docker stop')
+    assert after.status == IDLE and after.withheld_from is None and after.bench_count == 0  # not a cheat: no bench
+    assert after.cards[record.uuid].state == CHECKING and after.cards[UUID_5090_B].state == IDLE
+    event = after.standing_events[-1]
+    assert event['kind'] == 'instance_unreachable' and event['instance'] == record.id
+    assert event['failed_heartbeats'] == 3 and event['lease_ended_at'] == good_at and event['at'] == clock.t
+    ended = InstanceStore(rec.instances.path).instances[record.id]
+    assert ended.draining and ended.stopped_at == good_at and ended.healthy is False and not ended.pay_open
+    assert box.containers  # nothing could be undeployed: the box does not answer
+    assert watch.run_pass().visited == []  # a draining record is no longer watched
+
+    # the box comes back: the reconciler undeploys the instance (kill), the card is free for the one-box probe
+    box.runner.on(regex(r'^nvidia-smi --query-gpu'), box.respond)
+    report = rec.run_pass()
+    drained = next(a for a in report.actions if a.kind == 'drain')
+    assert drained.instance == record.id and drained.states == [CHECKING] and record.container_id not in box.containers
+    assert record.id not in rec.instances.instances and not box.commands('docker stop')
+    assert [e['kind'] for e in rec.boxes.boxes['hk1'].standing_events] == ['instance_unreachable']  # no clean_lease
+    assert rec.boxes.boxes['hk1'].cards[record.uuid].state == CHECKING  # the re-prove returns it to IDLE (daemon test)
 
 
 def test_an_answered_heartbeat_resets_the_miss_count(world):
@@ -198,12 +285,13 @@ def test_an_answered_heartbeat_resets_the_miss_count(world):
     for _ in (1, 2):
         watch.run_pass()
         clock.t += 60
-    assert rec.boxes.boxes['hk1'].unreachable_count == 2
+    assert rec.instances.instances[record.id].heartbeat_misses == 2
     box.runner.on(regex(r'^nvidia-smi --query-gpu'), box.respond)
-    assert watch.run_pass().ok and rec.boxes.boxes['hk1'].unreachable_count == 0
+    assert watch.run_pass().ok and rec.instances.instances[record.id].heartbeat_misses == 0
     box.runner.on(regex(r'^nvidia-smi --query-gpu'), SshTransportError('10.0.0.1:2200: timed out'))
     clock.t += 60
-    assert '(1/3 in a row)' in watch.run_pass().actions[0].detail and rec.boxes.boxes['hk1'].status == IDLE
+    assert '(1/3 in a row)' in watch.run_pass().actions[0].detail
+    assert rec.boxes.boxes['hk1'].cards[record.uuid].state == LEASED  # the count started over: still leased
 
 
 def test_a_record_from_before_ws_d_is_recorded_at_its_first_heartbeat(world):

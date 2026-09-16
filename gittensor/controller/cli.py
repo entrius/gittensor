@@ -11,7 +11,7 @@ full check and box state (``controller.checks``), the GPU-proof slot (``controll
     gitt controller allowlist add <hotkey> | show              curate the NVML allowlist from a known-good box
     gitt controller check <hotkey>                             one full check: verdict, new state, exit 0 / 1 / 2
     gitt controller round [--loop]                             the 20-min two-phase probe over every idle card
-    gitt controller release <hotkey> [--reason TEXT]           end a bench early: BENCHED -> ADMIT, re-pinned next round
+    gitt controller release <hotkey> [--reason TEXT]           end a bench early: BENCHED -> ADMIT, withheld pay given back
     gitt controller bless <manifest.yaml> --image <repo@sha256> --sign-key <key>   sign an entry into the registry
     gitt controller deploy <entry> --enabled/--disabled --replicas N               operator deployment settings
     gitt controller registry show                              entries (re-verified), deployments, running counts
@@ -48,7 +48,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
@@ -107,6 +107,7 @@ from gittensor.controller.discovery import ChainReader, DiscoverReport, Discover
 from gittensor.controller.heartbeat import WatchReport
 from gittensor.controller.locks import BoxLocks
 from gittensor.controller.manifest import ManifestError
+from gittensor.controller.pay.ledger import Ledger, is_withheld
 from gittensor.controller.pay.oracle import CoinGeckoChainOracle, FailSafeOracle, MetagraphedOracle, StaticOracle
 from gittensor.controller.pay.rates import RatesError, load_rates
 from gittensor.controller.pay.scorecard import LATEST, ScorecardError, read_scorecard
@@ -512,6 +513,9 @@ class RoundReport:
     boxes: list[BoxRound]
     not_probed: list[BoxState]
     timings_ms: dict[str, float]
+    # Every box dialled failed at SSH and none was scraped: the controller's own link is the likelier fault, so no
+    # box's unreachable count moved this round (Kimbo 9/16). Boxes flagged endpoint_changed are not dialled and count.
+    no_box_answered: bool = False
 
     @property
     def exit_code(self) -> int:
@@ -538,14 +542,18 @@ def run_round(
     write_lock: threading.RLock | None = None,
     box_locks: BoxLocks | None = None,
     lock_wait_s: float = cfg.ROUND_BOX_LOCK_WAIT_S,
+    pending: Mapping[str, Collection[str]] | None = None,
 ) -> RoundReport:
     """One probe cycle over every ADMIT / IDLE box (``23`` §3b). Benches that have expired are released first.
+    ``pending``: per box, cards an instance record still names (a lease ended while the box was unreachable, its
+    container not yet undeployed): skipped this round like a busy card.
 
     Phase 1: connect and scrape every box in parallel; judge identity with fleet-wide UUID uniqueness over every pin
     and every card reported this round; stage the proof on every box that passed, in parallel. Phase 2: one start
     signal — every staged box fires at once (a thread per box, cards parallel inside ``fire_box``). Then clean up,
     judge, ``apply_verdict``. A box lost to SSH gets no verdict; its unreachable count goes up and three in a row
-    bench it for 12 h (``apply_unreachable``).
+    bench it for 12 h (``apply_unreachable``), unless no dialled box answered at all: then the controller's own link
+    is the suspect and no count moves (``RoundReport.no_box_answered``).
 
     Inside `gitt controller run` the round shares the daemon's ``store`` and ``write_lock`` and holds each box's lock
     from connect to verdict. A box whose lock stays held for ``lock_wait_s`` (a start or drain in flight) is skipped
@@ -604,8 +612,10 @@ def run_round(
     def stage(r: BoxRound) -> None:
         if r.runner is None or r.scrape is None:
             return  # only rows that connected and scraped are staged
-        r.proved = _provable_gpus(r.box, r.scrape.gpus)
+        held = set((pending or {}).get(r.box.box_id, ()))
+        r.proved = [g for g in _provable_gpus(r.box, r.scrape.gpus) if g.uuid not in held]
         r.skipped = busy_cards(r.box, r.scrape.uuids)
+        r.skipped.update({u: f'{r.box.card(u).state} (instance pending)' for u in r.scrape.uuids if u in held})
         if not r.proved:
             return  # every card hosts our workload: nothing staged, nothing fired, no verdict
         try:
@@ -667,6 +677,8 @@ def run_round(
                     r.runner.close()
 
         now = time.time()
+        dialled = [r for r in rows if r.runner is not None]
+        no_box_answered = bool(dialled) and all(r.scrape is None for r in dialled)
         with write_lock:
             for r in rows:
                 if r.busy:
@@ -676,7 +688,7 @@ def run_round(
                     r.after = current  # benched by the watch mid-round: the bench stands, no verdict applied
                     continue
                 if r.scrape is None:
-                    if r.transport_error:
+                    if r.transport_error and not (no_box_answered and r.runner is not None):
                         r.after = store.boxes[r.box.box_id] = apply_unreachable(current, now)
                     continue
                 if not identity_passed(r.checks):
@@ -710,7 +722,7 @@ def run_round(
     fired = [r.fired_at for r in armed if r.fired_at is not None]
     if fired:
         timings['fire_spread'] = round((max(fired) - min(fired)) * 1000.0, 3)
-    return RoundReport(provider, rows, not_probed, {k: v for k, v in timings.items() if v is not None})
+    return RoundReport(provider, rows, not_probed, {k: v for k, v in timings.items() if v is not None}, no_box_answered)
 
 
 def reprove_box(
@@ -722,12 +734,15 @@ def reprove_box(
     write_lock: threading.RLock,
     box_locks: BoxLocks,
     lock_wait_s: float = cfg.ROUND_BOX_LOCK_WAIT_S,
+    exclude: Collection[str] = (),
 ) -> RoundReport:
-    """One box's CHECKING cards proved at once, inside `gitt controller run` (Kimbo 9/15), instead of at the next 20-min
-    round: identity on the box and the same two-phase probe (``probe_box``: stage, fire, clean up) on those cards only,
-    holding the box's lock, then ``apply_verdict`` returning only the proved cards to IDLE. A BENCH verdict benches the
-    box as the round would. No verdict (the lock stayed held, no CHECKING card left, SSH down) changes nothing: the
-    daemon retries later, and unreachable boxes are counted by the round."""
+    """One box proved at once, inside `gitt controller run`, instead of at the next 20-min round: an IDLE box's CHECKING
+    cards (Kimbo 9/15; not ``exclude``, the cards an instance record still names), or every card of a box at ADMIT,
+    its first proof (Kimbo 9/16). Identity on the box and the same
+    two-phase probe (``probe_box``: stage, fire, clean up) on those cards only, holding the box's lock, then
+    ``apply_verdict`` (pinning an ADMIT box; returning only the proved cards to IDLE). A BENCH verdict benches the box
+    as the round would. No verdict (the lock stayed held, no CHECKING card left, SSH down) changes nothing: the daemon
+    retries later, and unreachable boxes are counted by the round."""
     provider = str(getattr(proof, 'version', '?'))
     started = time.monotonic()
     with write_lock:
@@ -746,18 +761,23 @@ def reprove_box(
             fleet: dict[str, Iterable[str]] = {
                 b.box_id: list(b.pinned_uuids) for b in store.boxes.values() if b.box_id != box_id
             }
-        if current is None or current.status != IDLE or not current.host:
-            row.busy = f'{current.status if current else "removed"} meanwhile: not re-proved'
+        if current is None or current.status not in (ADMIT, IDLE) or not current.host or current.endpoint_changed:
+            why = 'endpoint changed' if current is not None and current.endpoint_changed else None
+            row.busy = f'{why or (current.status if current else "removed")} meanwhile: not re-proved'
             return report()
-        checking = sorted(uuid for uuid, card in current.cards.items() if card.state == CHECKING)
-        if not checking:
-            row.busy = 'no CHECKING card left: nothing to re-prove'
-            return report()
+        cards: list[str] | None = None  # ADMIT: every card the box reports, its first proof
+        if current.status == IDLE:
+            cards = sorted(
+                uuid for uuid, card in current.cards.items() if card.state == CHECKING and uuid not in exclude
+            )
+            if not cards:
+                row.busy = 'no CHECKING card left: nothing to re-prove'
+                return report()
         row.box, row.status_before = current, current.status
         row.runner = TimedRunner(_make_runner(setup.state, current, setup.ca_key, 'reprove'))
         try:
             outcome = check_box(
-                row.runner, current, fleet, proof, setup.allowlist(), setup.config, time.time(), cards=checking
+                row.runner, current, fleet, proof, setup.allowlist(), setup.config, time.time(), cards=cards
             )
         finally:
             row.runner.close()
@@ -1360,6 +1380,7 @@ def _print_round(report: RoundReport, n: int, json_mode: bool) -> None:
                 'round': n,
                 'provider': report.provider,
                 'timings_ms': report.timings_ms,
+                'no_box_answered': report.no_box_answered,
                 'boxes': [
                     {
                         'hotkey': r.box.box_id,
@@ -1411,6 +1432,10 @@ def _print_round(report: RoundReport, n: int, json_mode: bool) -> None:
             escape(b.box_id), escape(_host_field(b.host, b.port)), b.status, '[dim]not probed[/dim]', '', '', ''
         )
     console.print(table)
+    if report.no_box_answered:
+        console.print(
+            "[red]no box answered SSH: the controller's own link is suspect; no unreachable round counted[/red]"
+        )
     console.print(f'[dim]{_timings_text(report.timings_ms) or "no boxes to probe"}[/dim]')
 
 
@@ -1423,7 +1448,8 @@ def _print_round(report: RoundReport, n: int, json_mode: bool) -> None:
 @_state_options
 def release_command(hotkey, reason, state_dir, json_mode):
     """End a bench early: BENCHED → ADMIT, re-pinned by the next proof round like an expired bench, with a `released`
-    standing event carrying the reason. The ladder rung and any withheld pay stay.
+    standing event carrying the reason. The ladder rung stays; the pay withheld by the bench (the box's UTC day ±1) is
+    given back: the ledger rows already written stay, the next settlement pays them.
 
     \b
     Beside `gitt controller run` the release is recorded in boxes.json and the controller applies it on its next round;
@@ -2012,6 +2038,9 @@ class _DaemonPrinter:
     def note(self, loop: str, message: str) -> None:
         self._emit('note', {'loop': loop, 'message': message}, f'[yellow]{loop}:[/yellow] {escape(message)}')
 
+    def error(self, loop: str, message: str) -> None:
+        self._emit('error', {'loop': loop, 'message': message}, f'[red]{loop} error:[/red] {escape(message)}')
+
 
 @controller_group.command('run')
 @click.option(
@@ -2111,12 +2140,13 @@ def run_command(
     json_mode,
     **opts,
 ):
-    """The controller as one process: the proof round (every --round-interval, --build-cmd between rounds), the
+    """The controller as one process: the proof round (every --round-interval on the wall clock, caught up at once
+    after a sleep; --build-cmd after each round, retried every few seconds while it fails), the
     reconciler (every --reconcile-interval), the in-lease watch (heartbeat every --heartbeat-interval, manifest
     health probe every health.interval_s) with the pay ledger's settlement tick, the signed scorecard (every
     --scorecard-interval) and, with --discover, discovery (the metagraph every --discover-interval), each on its own
-    thread over one state. A card that reaches CHECKING is re-proved on its own box at the next watch tick, not at
-    the next round.
+    thread over one state. A card that reaches CHECKING, or a box that enters ADMIT, is proved on its own box at the
+    next watch tick, not at the next round; with --discover one metagraph read runs before round 1.
 
     \b
     It holds the state directory for its whole life: `check`, `round`, `reconcile` and `discover` refuse beside it
@@ -2236,12 +2266,63 @@ def _pay_line(view: dict, now: float) -> str:
     )
 
 
+def _live_pay(state: StateDir, boxes: dict[str, BoxState], view: dict, now: float) -> dict[str, dict]:
+    """Per hotkey, what the ledger has settled since the last scorecard (or over the trailing window when there is
+    none): idle / leased / withheld seconds and the USD they imply at the scorecard's implied per-card-hour rates
+    (the table's target rates for a GPU type the scorecard did not price). A card LEASED since the scorecard shows
+    its seconds here, not 0 (Kimbo 9/16)."""
+    doc = view.get('scorecard') or {}
+    since = float(doc['issued_at']) if doc.get('issued_at') is not None else now - cfg.SETTLEMENT_WINDOW_S
+    implied = (doc.get('pool') or {}).get('implied_usd_per_card_hour') or {}
+    try:
+        table = load_rates()
+    except RatesError:
+        table = {}
+
+    def rate(gpu: str) -> tuple[float, float]:
+        if gpu in implied:
+            return float(implied[gpu]['idle']), float(implied[gpu]['leased'])
+        row = table.get(gpu)
+        return (row.idle_usd_per_hr, row.leased_usd_per_hr) if row else (0.0, 0.0)
+
+    out: dict[str, dict] = {}
+    for row in Ledger(state.root / 'ledger').rows(since, now):
+        live = out.setdefault(
+            row.hotkey, {'since': since, 'idle_s': 0.0, 'leased_s': 0.0, 'withheld_s': 0.0, 'usd': 0.0}
+        )
+        withheld = row.withheld or (row.leased_s > 0 and is_withheld(boxes.get(row.hotkey), row.t1))
+        leased = 0.0 if withheld else row.leased_s
+        idle_rate, leased_rate = rate(row.gpu)
+        live['idle_s'] += row.idle_s
+        live['leased_s'] += leased
+        live['withheld_s'] += row.leased_s - leased
+        live['usd'] += (row.idle_s * idle_rate + leased * leased_rate) / 3600.0
+    for live in out.values():
+        for key in ('idle_s', 'leased_s', 'withheld_s'):
+            live[key] = round(live[key], 3)
+        live['usd'] = round(live['usd'], 6)
+    return out
+
+
+def _pay_entry(scored: dict, live: dict | None, age_s: float | None) -> dict:
+    """A box's pay as `status` shows it: the last scorecard's window, the ledger since it, and the two summed."""
+    entry = {k: scored.get(k) for k in ('weight', 'usd', 'idle_s', 'leased_s', 'withheld_s')}
+    entry['scorecard_age_s'] = age_s
+    entry['live'] = live or {}
+    entry['total'] = {
+        k: round(float(scored.get(k) or 0.0) + float((live or {}).get(k) or 0.0), 6 if k == 'usd' else 3)
+        for k in ('usd', 'idle_s', 'leased_s', 'withheld_s')
+    }
+    return entry
+
+
 @controller_group.command('status')
 @_state_options
 def status_command(state_dir, json_mode):
     """The controller as its state files show it: running or not, the last round / reconcile / watch, every box with
-    its cards (state and age) and standing, what the last scorecard pays it, every instance with its heartbeat and
-    health. Read-only; safe beside `run`."""
+    its cards (state and age) and standing, its pay (the last scorecard's window plus what the ledger has settled
+    since it, so a card leased after the scorecard shows its seconds and USD now, labelled with the scorecard's age),
+    every instance with its heartbeat and health. Read-only; safe beside `run`."""
     state = StateDir(Path(state_dir).expanduser())
     now = time.time()
     running = state.root.is_dir() and state.daemon_running()
@@ -2252,7 +2333,10 @@ def status_command(state_dir, json_mode):
         info = {}
     pay_view = _scorecard_view(state, now)
     paid = {h['hotkey']: h for h in (pay_view.get('scorecard') or {}).get('hotkeys', [])}
+    issued_at = (pay_view.get('scorecard') or {}).get('issued_at')
+    age_s = round(now - float(issued_at), 1) if issued_at is not None else None
     store = state.store()
+    live_pay = _live_pay(state, store.boxes, pay_view, now)
     boxes = []
     for box in sorted(store.boxes.values(), key=lambda b: b.box_id):
         cards = [
@@ -2260,6 +2344,7 @@ def status_command(state_dir, json_mode):
             for u, c in sorted(box.cards.items())
         ]
         entry = paid.get(box.box_id) or {}
+        live = live_pay.get(box.box_id)
         boxes.append(
             {
                 'hotkey': box.box_id,
@@ -2275,9 +2360,7 @@ def status_command(state_dir, json_mode):
                 'source': box.source,
                 'endpoint_changed': box.endpoint_changed,
                 'standing_events': box.standing_events[-5:],
-                'pay': {k: entry.get(k) for k in ('weight', 'usd', 'idle_s', 'leased_s', 'withheld_s')}
-                if entry
-                else {},
+                'pay': _pay_entry(entry, live, age_s) if entry or live else {},
             }
         )
     instances = _instance_rows(InstanceStore(state.instances), store)
@@ -2314,7 +2397,10 @@ def status_command(state_dir, json_mode):
     )
     console.print(_pay_line(pay_view, now))
     table = Table(title='boxes', show_header=True)
-    for column in ('Hotkey', 'Host', 'Status', 'Standing', 'Cards', 'Pay (window)', 'Last check', 'Bench / withheld', 'Last event'):  # fmt: skip
+    pay_head = (
+        f'Pay (scorecard {_age(issued_at, now)} ago + since)' if issued_at is not None else 'Pay (ledger, last hour)'
+    )
+    for column in ('Hotkey', 'Host', 'Status', 'Standing', 'Cards', pay_head, 'Last check', 'Bench / withheld', 'Last event'):  # fmt: skip
         table.add_column(column, no_wrap=column not in ('Cards', 'Last event'))
     for b in boxes:
         cards = '\n'.join(
@@ -2328,12 +2414,19 @@ def status_command(state_dir, json_mode):
             bench += f'{" · " if bench else ""}pay withheld from {_when(b["withheld_from"])}'
         event = b['standing_events'][-1] if b['standing_events'] else None
         pay = b['pay']
-        pay_cell = (
-            f'${pay["usd"]:.3f} · idle {pay["idle_s"] / 3600:.2f} h · leased {pay["leased_s"] / 3600:.2f} h'
-            + (f' · [red]withheld {pay["withheld_s"] / 3600:.2f} h[/red]' if pay.get('withheld_s') else '')
-            if pay
-            else '[dim]—[/dim]'
-        )
+        if pay:
+            total, live = pay['total'], pay['live']
+            pay_cell = (
+                f'${total["usd"]:.3f} · idle {total["idle_s"] / 3600:.2f} h · leased {total["leased_s"] / 3600:.2f} h'
+                + (f' · [red]withheld {total["withheld_s"] / 3600:.2f} h[/red]' if total['withheld_s'] else '')
+                + (
+                    f' [dim](since: leased {live["leased_s"]:.0f} s, idle {live["idle_s"]:.0f} s, ${live["usd"]:.3f})[/dim]'
+                    if live
+                    else ''
+                )
+            )
+        else:
+            pay_cell = '[dim]—[/dim]'
         table.add_row(
             escape(b['hotkey'][:16]),
             escape(b['host']),

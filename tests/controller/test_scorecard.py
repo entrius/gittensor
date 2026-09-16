@@ -27,6 +27,7 @@ from gittensor.controller.pay.scorecard import (
     uuid_hash,
     write_scorecard,
 )
+from gittensor.controller.reconcile import InstanceRecord, InstanceStore
 from gittensor.controller.registry import Registry
 from gittensor.controller.standing import CLEAN_LEASE
 from tests.controller.test_cli import invoke
@@ -147,3 +148,55 @@ def test_the_daemon_writes_a_scorecard_from_its_own_ledger_and_the_cli_reads_it(
     assert 'pay: scorecard' in text and 'probation' in text
 
     assert invoke('scorecard', '--state-dir', tmp_path / 'empty').exit_code == 2
+
+
+def test_status_shows_the_pay_settled_since_the_last_scorecard_not_the_scorecards_stale_window(tmp_path, monkeypatch):
+    monkeypatch.setenv('COLUMNS', '250')
+    root = tmp_path / 'state'
+    root.mkdir()
+    now = __import__('time').time()
+    issued = now - 600  # the last scorecard: 10 min old, written while the card was IDLE
+    StateStore(root / 'boxes.json').put(
+        BoxState(HK_A, status=IDLE, pinned_uuids=[UUID_A, UUID_B], card_name='NVIDIA GeForce RTX 5090',
+                 last_check_at=issued - 60, host='10.0.0.1', port=2200,
+                 cards={UUID_A: CardState(IDLE, '', issued - 60), UUID_B: CardState(LEASED, 'i1', issued)})
+    )  # fmt: skip
+    record = InstanceRecord('i1', 'e@1', HK_A, UUID_B, healthy=True, leased_at=issued, last_health_at=issued,
+                            health_ok=True, pay_from=issued, pay_through=issued, pay_open=True)  # fmt: skip
+    InstanceStore(root / 'instances.json').put(record)
+    controller = Controller(
+        ctl.StateDir(root), Registry(root / 'registry', 'unused'), make_runner=cast(Any, None),
+        run_round=cast(Any, None), load_proof=cast(Any, None), intervals=Intervals(),
+        oracle=FailSafeOracle(StaticOracle(226.84, 0.003384)),
+    )  # fmt: skip
+    controller.settle_once(issued - 36)
+    controller.settle_once(issued)
+    doc = controller.scorecard_once(issued)
+    (entry,) = doc['hotkeys']
+    assert entry['leased_s'] == 0 and entry['idle_s'] == pytest.approx(36, abs=0.01)  # the card had just been leased
+
+    record.pay_through = issued + 600  # ten minutes of confirmed lease since, settled by the ledger
+    controller.instances.put(record)
+    assert controller.settle_once(issued + 600) == 2
+
+    payload = json.loads(invoke('status', '--state-dir', root, '--json').stdout)
+    (box,) = payload['boxes']
+    pay = box['pay']
+    assert pay['leased_s'] == 0 and pay['idle_s'] == pytest.approx(36, abs=0.01)  # the scorecard's own window
+    assert pay['scorecard_age_s'] == pytest.approx(600, abs=5)
+    assert pay['live']['leased_s'] == 600 and pay['live']['idle_s'] == 600 and pay['live']['withheld_s'] == 0
+    implied = doc['pool']['implied_usd_per_card_hour']['RTX5090']  # the other card stayed IDLE on a fresh proof
+    assert pay['live']['since'] == doc['issued_at']
+    assert pay['live']['usd'] == pytest.approx((600 * implied['idle'] + 600 * implied['leased']) / 3600, abs=1e-6)
+    assert pay['total']['leased_s'] == 600 and pay['total']['idle_s'] == pytest.approx(636, abs=0.01)
+    assert pay['total']['usd'] == pytest.approx(pay['usd'] + pay['live']['usd'], abs=1e-6)
+    text = invoke('status', '--state-dir', root).output
+    assert 'leased 0.17 h' in text and '(since: leased 600 s, idle 600 s' in text
+    assert 'Pay (scorecard 10m ago + since)' in text
+
+    (root / 'scorecard' / 'latest.json').unlink()  # no scorecard at all: the trailing hour of the ledger, labelled
+    payload = json.loads(invoke('status', '--state-dir', root, '--json').stdout)
+    pay = payload['boxes'][0]['pay']
+    assert pay['weight'] is None and pay['scorecard_age_s'] is None and pay['live']['leased_s'] == 600
+    assert pay['total']['leased_s'] == 600 and pay['total']['idle_s'] == pytest.approx(636, abs=0.01)
+    assert 'Pay (ledger, last hour)' in invoke('status', '--state-dir', root).output

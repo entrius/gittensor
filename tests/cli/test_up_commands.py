@@ -1,7 +1,8 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-"""gitt up / gitt down: prerequisite checks against a fake host, --dry-run output, and the docker calls issued."""
+"""gitt up / gitt down: prerequisite checks against a fake host, --dry-run output, the docker calls issued, the clean
+leave (`down` drains and removes our workloads before the agent) and `up --reclaim` over an orphan of ours."""
 
 import json
 import subprocess
@@ -12,6 +13,7 @@ import pytest
 from click.testing import CliRunner
 
 from gittensor.agent.channel import Channel, ChannelError
+from gittensor.agent.launch import Workload, parse_workloads, workload_list_command
 from gittensor.cli.main import cli
 from gittensor.cli.up_commands import prereqs
 from gittensor.cli.up_commands.prereqs import PrereqReport, check_ports, check_toolkit, run_prereqs
@@ -40,6 +42,14 @@ class FakeProbe:
         self.on_chain: tuple | None = None  # (ip, port, compute marker) the chain holds for the hotkey
         self.served: list[tuple] = []
         self.serve_error = ''
+        self.workloads: list[Workload] = []  # the controller's gt-i-* containers present on the box
+
+    def ps_output(self) -> str:
+        """What `docker ps` prints for our workloads (the format `workload_list_command` asks for)."""
+        return ''.join(
+            f'{w.container_id}\t{w.name}\t{w.state}\t{w.port or ""}\t{"" if w.drain_max_s is None else w.drain_max_s}\n'
+            for w in self.workloads
+        )
 
     def public_ip(self):
         return self.ip
@@ -82,6 +92,9 @@ class FakeProbe:
     def container_state(self, name):
         return self.states.get(name)
 
+    def workload_containers(self):
+        return list(self.workloads)
+
 
 @pytest.fixture(autouse=True)
 def _wide_terminal(monkeypatch):
@@ -99,6 +112,8 @@ def docker_calls(probe):
     calls = []
 
     def _run(cmd):
+        if cmd[:2] == ['docker', 'ps']:  # `gitt down` lists our workloads through the same seam
+            return subprocess.CompletedProcess(cmd, 0, probe.ps_output(), '')
         calls.append(cmd)
         return subprocess.CompletedProcess(cmd, 0, 'abc123\n', '')
 
@@ -292,6 +307,35 @@ class TestUpCommand:
         result = runner.invoke(cli, UP)
         assert result.exit_code == 0 and 'Already up' in result.output and docker_calls == []
 
+    def test_a_port_held_by_our_own_orphan_is_named_not_refused_and_reclaimed_with_the_flag(
+        self, runner, docker_calls, probe
+    ):
+        probe.workloads, probe.busy_ports = [ORPHAN], {20000}  # 9/16: the returning `gitt up` was refused on it
+        result = runner.invoke(cli, [*UP, '--json'])
+        assert result.exit_code == 0, result.output
+        row = _json_checks(result)['Workload ports']
+        assert row['status'] == 'warn' and 'gt-i-6f31220812a5' in row['detail'] and '--reclaim' in row['detail']
+        assert docker_calls == [] or docker_calls[0][1] == 'run'  # nothing of ours touched without the flag
+        assert len(docker_calls) == 1 and json.loads(result.stdout)['reclaimed'] == []
+
+        docker_calls.clear()
+        result = runner.invoke(cli, [*UP, '--reclaim', '--json'])
+        assert result.exit_code == 0, result.output
+        row = _json_checks(result)['Workload ports']
+        assert row['status'] == 'pass' and 'removed by --reclaim' in row['detail']
+        assert docker_calls[:2] == [
+            ['docker', 'stop', '--time', '240', ORPHAN.container_id],
+            ['docker', 'rm', '-f', ORPHAN.container_id],
+        ] and docker_calls[2][1] == 'run'  # fmt: skip
+        assert json.loads(result.stdout)['reclaimed'] == ['gt-i-6f31220812a5']
+
+        docker_calls.clear()
+        probe.busy_ports = {20000, 20003}  # 20003 is somebody else's: still a refusal, naming only that port
+        result = runner.invoke(cli, [*UP, '--reclaim', '--json'])
+        assert result.exit_code == 1 and docker_calls == []
+        detail = _json_checks(result)['Workload ports']['detail']
+        assert 'in use: 20003 (' in detail  # 20000, ours, is not what refuses it
+
     def test_docker_run_failure_exits_1(self, runner, probe):
         with (
             patch('gittensor.cli.up_commands.up._make_probe', return_value=probe),
@@ -328,6 +372,11 @@ class TestUpCommand:
         assert docs[0]['checks'][-2]['status'] == 'fail'
 
 
+ORPHAN = Workload('a' * 64, 'gt-i-6f31220812a5', 'running', 20000, 240)  # the 27B the 9/16 `gitt down` left serving
+STOPPED = Workload('b' * 64, 'gt-i-0123456789ab', 'exited', 20001, 30)
+UNLABELLED = Workload('c' * 64, 'gt-i-before0label', 'running', 20002, None)  # started before the drain label existed
+
+
 class TestDownCommand:
     def test_dry_run(self, runner, docker_calls):
         result = runner.invoke(cli, ['down', '--dry-run'])
@@ -341,13 +390,53 @@ class TestDownCommand:
         assert docker_calls == [['docker', 'rm', '-f', 'gt-agent-runner'], ['docker', 'rm', '-f', 'gt-agent']]
         assert result.output.count('Removed') == 2
 
+    def test_our_workloads_are_drained_and_removed_before_the_agent(self, runner, docker_calls, probe):
+        probe.workloads = [ORPHAN, STOPPED, UNLABELLED]
+        result = runner.invoke(cli, ['down', '--json'])
+        assert result.exit_code == 0, result.output
+        assert docker_calls == [
+            ['docker', 'stop', '--time', '240', ORPHAN.container_id],  # SIGTERM, the manifest's drain.max_s
+            ['docker', 'stop', '--time', '30', UNLABELLED.container_id],  # no label: the 30 s default; STOPPED: no stop
+            ['docker', 'rm', '-f', ORPHAN.container_id],
+            ['docker', 'rm', '-f', STOPPED.container_id],
+            ['docker', 'rm', '-f', UNLABELLED.container_id],
+            ['docker', 'rm', '-f', 'gt-agent-runner'],
+            ['docker', 'rm', '-f', 'gt-agent'],
+        ]
+        payload = json.loads(result.stdout)
+        assert payload['workloads'] == [ORPHAN.name, STOPPED.name, UNLABELLED.name] and payload['list_error'] == ''
+        assert [(c['container'], c['action'], c['ok']) for c in payload['containers']][:3] == [
+            (ORPHAN.name, 'stop', True), (UNLABELLED.name, 'stop', True), (ORPHAN.name, 'rm', True),
+        ]  # fmt: skip
+
+        docker_calls.clear()
+        result = runner.invoke(cli, ['down', '--now'])  # no wait: rm -f at once
+        assert result.exit_code == 0 and not any(c[1] == 'stop' for c in docker_calls)
+        assert [c[-1] for c in docker_calls] == [ORPHAN.container_id, STOPPED.container_id, UNLABELLED.container_id, 'gt-agent-runner', 'gt-agent']  # fmt: skip
+        assert 'Drained' not in result.output and result.output.count('Removed') == 5
+
+        docker_calls.clear()
+        result = runner.invoke(cli, ['down', '--dry-run'])
+        assert docker_calls == [] and f'docker stop --time 240 {ORPHAN.container_id}' in result.output
+        assert result.output.index('docker stop') < result.output.index('docker rm -f gt-agent-runner')
+
     def test_missing_containers_are_reported_quietly(self, runner, probe):
         missing = subprocess.CompletedProcess([], 1, '', 'Error response from daemon: No such container: gt-agent')
         with patch('gittensor.cli.up_commands.docker_exec.run_docker', return_value=missing):
             result = runner.invoke(cli, ['down', '--json'])
         assert result.exit_code == 0
         payload = json.loads(result.stdout)
-        assert [c['removed'] for c in payload['containers']] == [False, False]
+        assert [c['ok'] for c in payload['containers']] == [False, False] and 'No such container' in payload[
+            'list_error'
+        ]
+
+
+def test_workload_listing_round_trips_the_labels():
+    cmd = workload_list_command()
+    assert cmd[:3] == ['docker', 'ps', '-a'] and 'label=io.gittensor.instance' in cmd
+    assert 'io.gittensor.drain_max_s' in cmd[-1] and 'io.gittensor.port' in cmd[-1]
+    out = f'{ORPHAN.container_id}\t{ORPHAN.name}\trunning\t20000\t240\n{"c" * 64}\tgt-i-x\texited\t\t\nnot a row\n'
+    assert parse_workloads(out) == [ORPHAN, Workload('c' * 64, 'gt-i-x', 'exited', None, None)]
 
 
 def test_docker_assets_exist():

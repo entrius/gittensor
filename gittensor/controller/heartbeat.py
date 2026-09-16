@@ -11,7 +11,10 @@ about the workload and asks three questions:
   passing full check (``BoxState.identity``).
 * **Our container running?** ``docker inspect`` on the container ID our ``docker run`` returned: up, the start time
   and image ID recorded at deploy, an image carrying the blessed digest. A restarted or recreated container fails
-  even on the right image; a vanished one (gone, or exited without our stop) fails too (Kimbo 9/15).
+  even on the right image; a vanished one (gone, or exited without our stop) fails too (Kimbo 9/15), **unless the
+  box was unreachable at a heartbeat since the last good one** (Kimbo 9/16: a clean `gitt down` and return, a reboot):
+  then it is ``instance_stopped``, not a cheat: the lease ends at the last good heartbeat, nothing is withheld, the
+  card goes to CHECKING for the one-box probe. Gone under an agent that answered throughout stays a bench.
 * **Card ours alone?** Every GPU process on a leased card belongs to that card's instance: ``nvidia-smi
   --query-compute-apps`` PIDs, each mapped through the host's ``/proc/<pid>/cgroup`` to a container ID. Positive and
   per card: a PID we cannot attribute to our container fails. NVML only lists processes with a CUDA context, so a
@@ -25,10 +28,15 @@ about the workload and asks three questions:
 Any failure benches the box on the fraud ladder, withholds its pay from that instant (``BoxState.withheld_from``, which
 WS-F consumes) and undeploys every instance on it with a kill. A visit that gets no answer (SSH down, docker erroring)
 is not a verdict: the miss is counted on the instance and nothing is paid for that interval (the heartbeat is a pay
-condition). It also counts on the box's ``unreachable_count``, the counter unreachable proof rounds use: the
-``UNREACHABLE_BENCH_AFTER``-th miss in a row benches the box for the flat ``UNREACHABLE_BENCH_S``, off the fraud ladder,
-and undeploys its instances (Kimbo 9/15). Any answered heartbeat or verdict resets it. A miss waits out the interval
-like an answer does, so three misses span three intervals, not three watch ticks.
+condition). A LEASED card whose box the heartbeat cannot reach carries no traffic and does not stay leased (Kimbo
+9/16): the **first** miss marks the instance ``healthy: false`` in ``instances.json`` at once, so the gateway stops
+routing to it (a passing heartbeat restores it, and the record and pay cursor stay so a returning agent resumes
+cleanly); the ``HEARTBEAT_UNREACHABLE_AFTER``-th miss in a row (~3 min) ends the lease: ``stopped_at`` at the last
+good heartbeat (pay ends there, nothing withheld: unreachable is not a cheat), the card LEASED -> CHECKING with an
+``instance_unreachable`` standing event, the record left draining for the reconciler to undeploy once the box answers
+again, then the one-box probe re-proves the card. The box's own unreachable count (proof rounds) and its 12 h bench
+are the round's; a miss here does not touch them. A miss waits out the interval like an answer does, so three misses
+span three intervals, not three watch ticks.
 
 **Health while leased.** Per instance, every ``manifest.health.interval_s``, the manifest health probe.
 ``failure_threshold`` failures in a row replace the replica: undeploy with the manifest's drain, card to CHECKING, a
@@ -67,7 +75,8 @@ from gittensor.controller.checks.state import (
     StateStore,
     add_event,
     apply_heartbeat_failure,
-    apply_unreachable,
+    apply_instance_stopped,
+    apply_instance_unreachable,
     mark_reachable,
     transition_card,
 )
@@ -234,6 +243,21 @@ class HeartbeatResult:
             out.append(f'{CARD_OURS_ALONE} (device handles): {self.devices.detail}')
         return out
 
+    def gone(self) -> list[str]:
+        """The instances whose container this visit found gone or stopped (not restarted, not another image)."""
+        return [i for i, a in self.containers.items() if not a.ok and a.evidence.get('gone')]
+
+    def without(self, instance_ids: set[str], uuids: set[str]) -> HeartbeatResult:
+        """This result judged without those instances (stopped, not cheated): their answers are dropped."""
+        return HeartbeatResult(
+            self.at,
+            self.same_card,
+            {i: a for i, a in self.containers.items() if i not in instance_ids},
+            {u: a for u, a in self.alone.items() if u not in uuids},
+            self.recorded,
+            self.devices,
+        )
+
     def evidence_for(self, record: InstanceRecord) -> dict:
         container = self.containers.get(record.id, Answer(False, 'not asked'))
         alone = self.alone.get(record.uuid, Answer(False, 'not asked'))
@@ -303,10 +327,10 @@ def _our_container(runner: HostRunner, record: InstanceRecord, manifest: Manifes
     except PlacementError as e:
         raise NoAnswer(str(e)) from e
     if info is None:
-        return Answer(False, f'container {record.container_id[:12]} vanished (not stopped by us)'), ()
+        return Answer(False, f'container {record.container_id[:12]} vanished (not stopped by us)', {'gone': True}), ()
     evidence: dict[str, Any] = {'status': info.status, 'started_at': info.started_at, 'image_id': info.image_id}
     if not info.up:
-        return Answer(False, f'container {info.status} (not stopped by us)', evidence), ()
+        return Answer(False, f'container {info.status} (not stopped by us)', {**evidence, 'gone': True}), ()
     recorded: tuple = ()
     if not record.docker_started_at or not record.image_id:
         recorded = (record.docker_started_at or info.started_at, record.image_id or info.image_id)
@@ -442,7 +466,7 @@ def observe_pay(record: InstanceRecord, now: float) -> None:
 
 @dataclass
 class WatchAction:
-    kind: str  # heartbeat | health | bench | replace | miss
+    kind: str  # heartbeat | health | bench | replace | miss | stopped | unreachable
     box: str
     instance: str = ''
     uuid: str = ''
@@ -572,17 +596,24 @@ class Watch:
             result.devices = None  # a start, drain or proof took the box mid-scan: its containers are no verdict
         took = {'heartbeat': round((self.clock() - started) * 1000.0, 1)}
         with self.lock:
+            # A container gone after a missed heartbeat is a stop, not a cheat (Kimbo 9/16): judged apart, below.
+            stopped = [
+                r for r in records
+                if r.id in result.gone() and (self.instances.instances.get(r.id) or r).heartbeat_misses > 0
+            ]  # fmt: skip
+            result = result.without({r.id for r in stopped}, {r.uuid for r in stopped})
             if box_id in self.boxes.boxes:
                 reached = mark_reachable(self.boxes.boxes[box_id])
                 if reached is not self.boxes.boxes[box_id]:
                     self.boxes.put(reached)
             for record in records:
                 current = self.instances.instances.get(record.id)
-                if current is None or current.draining:
+                if current is None or current.draining or record.id in {r.id for r in stopped}:
                     continue
                 if record.id in result.recorded:
                     current.docker_started_at, current.image_id = result.recorded[record.id]
                 current.last_heartbeat_at, current.heartbeat_ok, current.heartbeat_misses = now, result.ok, 0
+                current.healthy = current.health_ok is not False  # routable again after a miss made it not
                 current.heartbeat = result.evidence_for(current)
                 observe_pay(current, now)
                 self.instances.put(current)
@@ -592,38 +623,103 @@ class Watch:
                         'ok' if result.ok else '; '.join(result.reasons())[:500], [LEASED], took,
                     )
                 )  # fmt: skip
+        for record in stopped:
+            self._stop(box_id, runner, record, 'heartbeat', report)
         if result.ok:
             return True
         self._bench(box_id, runner, records, result, report)
         return False
 
+    def _stop(self, box_id: str, runner: HostRunner, record: InstanceRecord, via: str, report: WatchReport) -> None:
+        """Our container was gone once the agent answered again after missed heartbeats: the lease ended at the last
+        good heartbeat (pay through there, nothing withheld), ``instance_stopped`` on the box, the card to CHECKING for
+        the one-box probe, and whatever the container left behind removed. No bench."""
+        now = self.wall()
+        with self.lock:
+            current = self.instances.instances.get(record.id)
+            if current is None:
+                return
+            last_good = current.last_heartbeat_at or current.leased_at or now
+            misses = current.heartbeat_misses
+            current.draining, current.healthy, current.pay_open = True, False, False
+            current.stopped_at = min(current.stopped_at, last_good) if current.stopped_at is not None else last_good
+            current.drain_type, current.drain_max_s = 'kill', 0
+            current.heartbeat = {'at': now, 'ok': False, 'stopped': True, 'missed_heartbeats': misses}
+            self.instances.put(current)
+            box = self.boxes.boxes.get(box_id)
+            if box is not None:
+                self.boxes.put(
+                    apply_instance_stopped(
+                        box, record.uuid, now, instance=record.id, missed_heartbeats=misses,
+                        lease_ended_at=last_good, via=via,
+                    )
+                )  # fmt: skip
+        action = WatchAction(
+            'stopped', box_id, record.id, record.uuid, False,
+            f'container gone after {misses} missed heartbeat(s): instance stopped, not a cheat; lease ended at the '
+            f'last good heartbeat ({now - last_good:.0f} s ago), nothing withheld; card CHECKING for the re-prove',
+            [LEASED, CHECKING],
+        )  # fmt: skip
+        try:
+            undeploy(runner, record.id, Drain('kill'), self.clock)  # a stopped container left behind is removed
+        except (*_TRANSPORT, PlacementError) as e:
+            action.detail += f'; undeploy failed ({type(e).__name__}), reconcile retries'
+        else:
+            with self.lock:
+                self.instances.remove(record.id)
+        with self.lock:
+            report.actions.append(action)
+
     def _miss(self, box_id, runner, records, why: str, now: float, report: WatchReport) -> None:
-        """No answer: a miss on every instance (no pay for the interval) and on the box's unreachable count; the
-        ``UNREACHABLE_BENCH_AFTER``-th in a row benches the box for a flat 12 h and undeploys its instances."""
+        """No answer: a miss on every instance (no pay for the interval, ``healthy: false`` at once so the gateway
+        stops routing to it); the ``HEARTBEAT_UNREACHABLE_AFTER``-th in a row ends the lease (card CHECKING, the record
+        left draining for the reconciler, no bench, nothing withheld)."""
         with self.lock:
             report.unreachable[box_id] = why
+            ended = []
             for record in records:
                 current = self.instances.instances.get(record.id)
-                if current is not None and not current.draining:
-                    current.heartbeat_misses += 1
-                    current.heartbeat_ok, current.pay_open = None, False  # no answer, no pay
-                    current.heartbeat = {'at': now, 'ok': None, 'error': why}
+                if current is None or current.draining:
+                    continue
+                current.heartbeat_misses += 1
+                current.heartbeat_ok, current.pay_open, current.healthy = (
+                    None,
+                    False,
+                    False,
+                )  # no answer: no pay, no traffic
+                current.heartbeat = {'at': now, 'ok': None, 'error': why}
+                misses = current.heartbeat_misses
+                in_a_row = f'{misses}/{cfg.HEARTBEAT_UNREACHABLE_AFTER} in a row'
+                if misses < cfg.HEARTBEAT_UNREACHABLE_AFTER:
                     self.instances.put(current)
-            before = self.boxes.boxes.get(box_id)
-            if before is None:
-                return
-            after = apply_unreachable(before, now)
-            self.boxes.put(after)
-            benched = after.status == BENCHED and before.status != BENCHED
-            in_a_row = f'{after.unreachable_count}/{cfg.UNREACHABLE_BENCH_AFTER} in a row'
-            report.actions.append(
-                WatchAction('miss', box_id, ok=False, detail=f'no answer, no verdict ({in_a_row}): {why}')
-            )
-            victims = self._mark_for_kill(box_id, now) if benched else []
-        if benched:
-            hours = cfg.UNREACHABLE_BENCH_S / 3600
-            detail = f'{in_a_row} without an answer: BENCHED for {hours:.0f} h (off the ladder)'
-            self._kill(runner, victims, WatchAction('bench', box_id, ok=False, detail=detail, states=[BENCHED]), report)
+                    report.actions.append(
+                        WatchAction(
+                            'miss', box_id, record.id, record.uuid, False,
+                            f'no answer, no verdict ({in_a_row}): unroutable until a heartbeat passes: {why}',
+                        )
+                    )  # fmt: skip
+                    continue
+                last_good = current.last_heartbeat_at or current.leased_at or now
+                current.draining, current.stopped_at = True, last_good  # the lease ended at the last good heartbeat
+                current.drain_type, current.drain_max_s = 'kill', 0
+                self.instances.put(current)
+                ended.append((record, misses, last_good))
+            box = self.boxes.boxes.get(box_id)
+            for record, misses, last_good in ended:
+                if box is not None:
+                    box = apply_instance_unreachable(
+                        box, record.uuid, now, instance=record.id, failed_heartbeats=misses, lease_ended_at=last_good
+                    )
+                    self.boxes.put(box)
+                report.actions.append(
+                    WatchAction(
+                        'unreachable', box_id, record.id, record.uuid, False,
+                        f'no answer {misses} heartbeats in a row: lease ended at the last good heartbeat '
+                        f'({now - last_good:.0f} s ago), nothing withheld, no bench; card CHECKING, the reconciler '
+                        f'undeploys the instance once the box answers: {why}',
+                        [LEASED, CHECKING],
+                    )
+                )  # fmt: skip
 
     def _bench(self, box_id, runner, records, result: HeartbeatResult, report: WatchReport) -> None:
         """BENCHED + pay withheld at once (one short state write), then every instance on the box undeployed with a

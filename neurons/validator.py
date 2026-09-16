@@ -19,17 +19,13 @@
 import os
 import time
 from functools import partial
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Set
 
 import bittensor as bt
 import wandb
 
 from gittensor import __version__
-from gittensor.classes import MinerEvaluation, MinerEvaluationCache, ServingPricing
-from gittensor.serving.api import parse_api_keys, start_serving_api
-from gittensor.serving.loadout import load_serving_loadout
-from gittensor.serving.state import ServingState
-from gittensor.serving.store import ServingStore, serving_store_path
+from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.validator import pat_storage
 from gittensor.validator.forward import forward
 from gittensor.validator.pat_handler import (
@@ -40,15 +36,7 @@ from gittensor.validator.pat_handler import (
     priority_pat_broadcast,
     priority_pat_check,
 )
-from gittensor.validator.serving.forward import ServingAuditThread
 from gittensor.validator.utils.config import (
-    SERVING_API_HOST,
-    SERVING_API_KEYS,
-    SERVING_API_PORT,
-    SERVING_AUDIT_INTERVAL_S,
-    SERVING_BASELINE_API_KEYS,
-    SERVING_BASELINE_PER_ROUND,
-    SERVING_ENABLED,
     STORE_DB_RESULTS,
     WANDB_PROJECT,
     WANDB_VALIDATOR_NAME,
@@ -66,7 +54,6 @@ class Validator(BaseValidatorNeuron):
     """
 
     db_storage: DatabaseStorage = None
-    last_serving_pricing: Optional[ServingPricing] = None  # set each OSS round; read by the serving audit thread
     evaluation_cache: MinerEvaluationCache = None
 
     def __init__(self, config=None):
@@ -93,37 +80,6 @@ class Validator(BaseValidatorNeuron):
 
         # Init in-memory cache for miner evaluations (fallback when GitHub API fails)
         self.evaluation_cache = MinerEvaluationCache()
-
-        # Serving sub-mechanism (beta): audit loop publishes READY miners here; the inference API dispatches to them.
-        # The API starts only when SERVING_API_KEYS is set.
-        self.serving_state = ServingState()
-        self.serving_store = None
-        store_path = serving_store_path(getattr(getattr(self.config, 'neuron', None), 'full_path', None))
-        if store_path is not None:
-            self.serving_store = ServingStore(store_path)
-            self.serving_store.migrate_json(store_path.with_name('serving_audits.json'))
-            self.serving_store.load(self.serving_state)
-        self.serving_api = None
-        if SERVING_ENABLED:
-            api_keys = parse_api_keys(SERVING_API_KEYS)
-            if api_keys:
-                loadout = load_serving_loadout()
-                self.serving_api = start_serving_api(
-                    state=self.serving_state,
-                    loadout=loadout,
-                    wallet=self.wallet,
-                    api_keys=api_keys,
-                    host=SERVING_API_HOST,
-                    port=SERVING_API_PORT,
-                    request_timeout=loadout.primary.request_timeout,
-                    baseline_keys=parse_api_keys(SERVING_BASELINE_API_KEYS),
-                )
-            else:
-                bt.logging.info('Serving: SERVING_API_KEYS unset — audits only, no API')
-            self.serving_audits = ServingAuditThread(
-                self, self.serving_state, SERVING_AUDIT_INTERVAL_S, SERVING_BASELINE_PER_ROUND, self.serving_store
-            )
-            self.serving_audits.start()
 
         # DB connection for validation result storage.
         # Requires STORE_DB_RESULTS=true in .env

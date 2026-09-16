@@ -2,8 +2,6 @@ import os
 
 import bittensor as bt
 
-from gittensor.constants import SERVING_API_DEFAULT_PORT, SERVING_BASELINE_PER_ROUND
-
 VALIDATOR_WAIT = 60  # 60 seconds
 VALIDATOR_STEPS_INTERVAL = int(
     os.getenv('VALIDATOR_STEPS_INTERVAL', '120')
@@ -16,27 +14,14 @@ WANDB_VALIDATOR_NAME = os.getenv('WANDB_VALIDATOR_NAME', 'vali')
 
 # optional env vars
 STORE_DB_RESULTS = os.getenv('STORE_DB_RESULTS', 'false').lower() == 'true'
-SERVING_ENABLED = os.getenv('SERVING_ENABLED', 'false').lower() == 'true'
-# Testnet only: pay the whole serving cap pro-rata when there is no usable pricing to read. On a network that has a
-# price, leaving this false is what keeps a single verified card from earning the entire cap.
-SERVING_PAY_CAP_WITHOUT_PRICING = os.getenv('SERVING_PAY_CAP_WITHOUT_PRICING', 'false').lower() == 'true'
-SERVING_AUDIT_INTERVAL_S = float(
-    os.getenv('SERVING_AUDIT_INTERVAL_S', '300')
-)  # wall-clock seconds between audit rounds
-if VALIDATOR_STEPS_INTERVAL < 1 or SERVING_AUDIT_INTERVAL_S <= 0:
-    raise ValueError('VALIDATOR_STEPS_INTERVAL must be >= 1 and SERVING_AUDIT_INTERVAL_S > 0')
-# Serving inference API: off unless keys are set; loopback by default (0.0.0.0 inside docker), front it with the host proxy.
-SERVING_API_KEYS = os.getenv('SERVING_API_KEYS', '')
-# Keys whose traffic may be routed to not-yet-READY miners (probation). The baseline-traffic client uses one of
-# these; user keys only ever reach READY miners.
-SERVING_BASELINE_API_KEYS = os.getenv('SERVING_BASELINE_API_KEYS', '')
-SERVING_BASELINE_PER_ROUND = int(os.getenv('SERVING_BASELINE_PER_ROUND', str(SERVING_BASELINE_PER_ROUND)))
-SERVING_API_HOST = os.getenv('SERVING_API_HOST', '127.0.0.1')
-SERVING_API_PORT = int(os.getenv('SERVING_API_PORT', str(SERVING_API_DEFAULT_PORT)))
+if VALIDATOR_STEPS_INTERVAL < 1:
+    raise ValueError('VALIDATOR_STEPS_INTERVAL must be >= 1')
+# Compute pool (vault 23 §8a, 26 §1): the controller's signed scorecard (`<controller state>/scorecard/latest.json`).
+# Unset: the compute share recycles. Set: the validator signs and commits its sha256 and pays the compute share from
+# its weights; a stale or invalid scorecard recycles the compute share.
+COMPUTE_SCORECARD_PATH = os.getenv('COMPUTE_SCORECARD_PATH', '')
 
 # log values
 bt.logging.info(f'VALIDATOR_WAIT: {VALIDATOR_WAIT}')
 bt.logging.info(f'VALIDATOR_STEPS_INTERVAL: {VALIDATOR_STEPS_INTERVAL}')
 bt.logging.info(f'WANDB_PROJECT: {WANDB_PROJECT}')
-bt.logging.info(f'SERVING_ENABLED: {SERVING_ENABLED}')
-bt.logging.info(f'SERVING_AUDIT_INTERVAL_S: {SERVING_AUDIT_INTERVAL_S}')

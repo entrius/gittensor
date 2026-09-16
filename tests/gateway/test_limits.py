@@ -1,16 +1,23 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-"""The limits alone: they clamp and refuse, and never touch message shapes."""
+"""The limits alone: they refuse, never clamp or inject, and never touch message shapes."""
 
 import pytest
 
-from gittensor.gateway.limits import MAX_TOKENS, RequestRefused, enforce_openai_limits, remote_media
+from gittensor.gateway.limits import RequestRefused, enforce_openai_limits, remote_media
 
 
-def test_the_cap_is_4096():
-    # Phase 0's SERVING_MAX_TOKENS is gone with the cutover; the pool's cap stands on its own.
-    assert MAX_TOKENS == 4096
+def test_the_token_fields_go_on_as_sent_and_nothing_is_injected():
+    # No cap of ours (Kimbo 9/16): the runtime's own limit applies. 9/16 soak: the gateway still clamped at 4096.
+    big = {'model': 'm', 'max_tokens': 20_000}
+    assert enforce_openai_limits(big, '/v1/completions') is None and big == {'model': 'm', 'max_tokens': 20_000}
+    other = {'model': 'm', 'max_completion_tokens': 5_000}
+    enforce_openai_limits(other, '/v1/chat/completions')
+    assert other == {'model': 'm', 'max_completion_tokens': 5_000}
+    none = {'model': 'm', 'messages': []}
+    enforce_openai_limits(none, '/v1/chat/completions')
+    assert none == {'model': 'm', 'messages': []}  # no max_tokens key appears
 
 
 @pytest.mark.parametrize(
@@ -31,7 +38,7 @@ def test_remote_media(content, expected):
 
 def test_limits_leave_unusual_shapes_to_the_runtime():
     body = {'model': 'm', 'messages': 'not even a list', 'max_tokens': 10, 'tools': 'whatever', 'n': 1}
-    assert enforce_openai_limits(body, '/v1/chat/completions') == []
+    enforce_openai_limits(body, '/v1/chat/completions')
     assert body == {'model': 'm', 'messages': 'not even a list', 'max_tokens': 10, 'tools': 'whatever', 'n': 1}
 
 

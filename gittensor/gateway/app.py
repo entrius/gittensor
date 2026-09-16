@@ -11,8 +11,9 @@
 
 Every request but ``GET /healthz`` carries ``X-GT-Gateway-Key``: das sends it; user keys, quota and billing are das's.
 A request takes a slot on a routable instance, least loaded first; nothing free is a 429 at once, never a queue. The
-body goes on as sent, save the limits in ``limits.py`` and ``model`` set to the runtime's own id when the client
-named the entry; the runtime's answer comes back unchanged: SSE relayed chunk by chunk, errors with their body. One
+body goes on as sent (no output cap of ours: ``limits.py``), save ``model`` set to the runtime's own id when the
+client named the entry; the runtime's answer comes back unchanged: SSE relayed chunk by chunk, errors with their
+body. One
 JSON usage line per request goes to stdout with the manifest expected-profile signals (``23`` §5), recorded here and
 judged by no one here.
 
@@ -36,7 +37,7 @@ import aiohttp
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 
-from gittensor.gateway.limits import MAX_TOKENS, RequestRefused, enforce_openai_limits, parse_object
+from gittensor.gateway.limits import RequestRefused, enforce_openai_limits, parse_object
 from gittensor.gateway.table import Instance, InstanceTable
 
 KEY_HEADER = 'X-GT-Gateway-Key'
@@ -332,7 +333,7 @@ class Gateway:
             usage.stream = body.get('stream') is True
             if not isinstance(model, str) or not model:
                 raise RequestRefused(400, 'model is required: see GET /v1/models')
-            changed = enforce_openai_limits(body, path, MAX_TOKENS)
+            enforce_openai_limits(body, path)
             candidates = self.table.openai_candidates(model)
             if not candidates:
                 raise RequestRefused(404, f'model {model!r} is not served: see GET /v1/models', 'model_not_found')
@@ -342,10 +343,9 @@ class Gateway:
         if instance is None:
             return self._no_capacity(usage, started, candidates)
         runtime_model = self.table.runtime_model_for(instance, model)
-        if runtime_model:
+        if runtime_model:  # the one rewrite: the entry's name -> the runtime's own id; otherwise the exact bytes
             body['model'] = runtime_model
-            changed.append('model')
-        payload = raw if not changed else json.dumps(body, ensure_ascii=False, separators=(',', ':')).encode()
+        payload = raw if not runtime_model else json.dumps(body, ensure_ascii=False, separators=(',', ':')).encode()
         headers = {'Content-Type': 'application/json', 'Accept': request.headers.get('accept', '*/*')}
         return await self._forward(instance, 'POST', path, payload, headers, usage, started, relay='sse')
 
@@ -500,7 +500,7 @@ def build_app(gateway: Gateway) -> FastAPI:
 
     @app.get('/v1/models')
     async def models():
-        return {'object': 'list', 'data': gateway.table.model_objects(MAX_TOKENS)}
+        return {'object': 'list', 'data': gateway.table.model_objects()}
 
     @app.post('/v1/chat/completions')
     async def chat_completions(request: Request):

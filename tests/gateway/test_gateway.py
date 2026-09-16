@@ -12,7 +12,6 @@ import socket
 from click.testing import CliRunner
 
 from gittensor.gateway.cli import gateway_command
-from gittensor.gateway.limits import MAX_TOKENS
 from tests.gateway.conftest import (
     AUTH,
     NAME,
@@ -85,22 +84,23 @@ def test_tools_tool_calls_and_role_tool_reach_the_runtime_byte_for_byte(world):
     asyncio.run(scenario())
 
 
-def test_the_token_cap_is_clamped_and_the_manifest_name_becomes_the_runtime_id_nothing_else_changes(world):
+def test_the_token_fields_reach_the_runtime_as_sent_and_only_the_manifest_name_becomes_the_runtime_id(world):
     async def scenario():
         entry = world.bless()
         async with runtimes(FakeRuntime()) as (rt,):
             world.place('i-a', entry, rt.port)
             async with gateway(world) as (_, client):
-                assert (await post(client, {**TOOL_BODY, 'model': NAME, 'max_tokens': 99_999}))[0] == 200
+                assert (await post(client, {**TOOL_BODY, 'model': NAME, 'max_tokens': 20_000}))[0] == 200
                 no_limit = {k: v for k, v in TOOL_BODY.items() if k != 'max_tokens'}
+                no_limit_raw = json.dumps(no_limit, indent=2).encode()
                 assert (await post(client, {**no_limit, 'max_completion_tokens': 5000}))[0] == 200
-                assert (await post(client, no_limit))[0] == 200
+                assert (await post(client, raw=no_limit_raw))[0] == 200
                 raw = json.dumps({'model': RUNTIME_ID, 'prompt': '<|im_start|>user\nhi', 'max_tokens': 8}).encode()
                 assert (await post(client, path='/v1/completions', raw=raw))[0] == 200
         sent = [json.loads(r['body']) for r in rt.received]
-        assert sent[0] == {**TOOL_BODY, 'model': RUNTIME_ID, 'max_tokens': MAX_TOKENS}
-        assert sent[1] == {**no_limit, 'max_completion_tokens': MAX_TOKENS}
-        assert sent[2] == {**no_limit, 'max_tokens': MAX_TOKENS}
+        assert sent[0] == {**TOOL_BODY, 'model': RUNTIME_ID, 'max_tokens': 20_000}  # no cap of ours: as sent
+        assert sent[1] == {**no_limit, 'max_completion_tokens': 5000}
+        assert rt.received[2]['body'] == no_limit_raw and 'max_tokens' not in sent[2]  # nothing injected: the bytes
         assert (rt.received[3]['path'], rt.received[3]['body']) == ('/v1/completions', raw)
 
     asyncio.run(scenario())
@@ -288,11 +288,26 @@ def test_models_republish_the_runtime_under_the_manifest_name_with_the_override(
             'owned_by': 'gittensor',
             'created': 0,
             'context_length': 32768,
-            'max_output_tokens': MAX_TOKENS,
             'capabilities': {'tools': True, 'vision': {'image': True, 'video': True}},
             'description': 'override by entry id',
-        }
+        }  # no max_output_tokens: the manifest names no cap and the gateway invents none (the runtime's 32768 is not ours to publish)
         assert answers == [{'object': 'list', 'data': [expected]}] * 2
+
+    asyncio.run(scenario())
+
+
+def test_models_publish_the_output_cap_only_when_the_manifest_names_one(world):
+    async def scenario():
+        capped = world.bless({**manifest_doc(name='gt-capped'), 'profile': {'max_output_tokens': 16384, 'vram_gb': 30}})
+        uncapped = world.bless(manifest_doc(name='gt-open'))
+        async with runtimes(FakeRuntime(), FakeRuntime()) as (rt_a, rt_b):
+            world.place('i-a', capped, rt_a.port)
+            world.place('i-b', uncapped, rt_b.port)
+            async with gateway(world) as (_, client):
+                async with client.get('/v1/models', headers=AUTH) as resp:
+                    data = (await resp.json())['data']
+        by_id = {m['id']: m for m in data}
+        assert by_id['gt-capped']['max_output_tokens'] == 16384 and 'max_output_tokens' not in by_id['gt-open']
 
     asyncio.run(scenario())
 

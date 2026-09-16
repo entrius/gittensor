@@ -6,7 +6,11 @@
 Three loops, each on its own thread, over one in-memory state (``boxes.json`` + ``instances.json``) that every write
 changes under one short lock and saves at once:
 
-* **the proof round** every ``FULL_CHECK_INTERVAL_S`` (20 min), the proof build (``--build-cmd``) between rounds;
+* **the proof round** every ``FULL_CHECK_INTERVAL_S`` (20 min) on the wall clock, checked every ``ROUND_WAKE_S`` so a
+  controller that slept runs the round it missed on waking (one catch-up, then the cadence resumes); the proof build
+  (``--build-cmd``) after every round, retried on every wake while it fails (the previous binary stays in use). A
+  round that fails before any box answered SSH (the provider missing, the controller's own link down) is logged once
+  as an error and counts no box unreachable;
 * **the reconciler** every ``RECONCILE_INTERVAL_S`` (30 s); its starts and drains run on their own threads holding
   their box's lock, so a pass never waits for a model load;
 * **the watch** every ``WATCH_TICK_S``: the generic heartbeat (``HEARTBEAT_INTERVAL_S``) and the manifest health probe
@@ -63,6 +67,7 @@ def _no_scan(host: str, port: int) -> str:
 
 class Reporter(Protocol):
     def round(self, report: Any, n: int) -> None: ...
+    def error(self, loop: str, message: str) -> None: ...
     def reconcile(self, report: ReconcileReport, n: int) -> None: ...
     def background(self, report: ReconcileReport) -> None: ...
     def watch(self, report: WatchReport) -> None: ...
@@ -91,6 +96,9 @@ class SilentReporter:
         pass
 
     def note(self, loop, message):
+        pass
+
+    def error(self, loop, message):
         pass
 
 
@@ -129,8 +137,10 @@ class Controller:
         rates: dict[str, GpuRate] | None = None,
         read_chain: Callable[[], list[ChainEndpoint]] | None = None,
         scan_host_key: Callable[[str, int], str] | None = None,
+        wall: Callable[[], float] = time.time,
     ):
         self.state = state
+        self.wall = wall
         self.oracle = oracle or FailSafeOracle(StaticOracle())
         self.rates = rates if rates is not None else load_rates()
         self.ledger = Ledger(state.root / 'ledger')
@@ -147,6 +157,8 @@ class Controller:
         self._reproving: dict[str, threading.Thread] = {}
         self._reprove_retry_at: dict[str, float] = {}  # box -> not before: its last re-prove got no verdict
         self._build, self.build_cmd = build, build_cmd
+        self._build_failed = False  # the last --build-cmd exited non-zero: retried on every wake
+        self._last_round_at: float | None = None  # wall clock; the round schedule runs from it
         self.proof = None
         self.counts = {'round': 0, 'reconcile': 0}
         self.status: dict[str, Any] = {
@@ -191,6 +203,25 @@ class Controller:
 
     # -- one pass of each loop (tests call these directly) ---------------------------------------------------------
 
+    def round_tick(self, now: float | None = None) -> bool:
+        """The round loop's wake, every ``ROUND_WAKE_S``: run the round when it is due on the wall clock (the first at
+        once; then ``round_s`` after the last), catching up at once after a sleep, and retry a failed build. True when a
+        round ran."""
+        now = self.wall() if now is None else now
+        last = self._last_round_at
+        if last is not None and now - last < self.intervals.round_s:
+            if self._build_failed:
+                self.build_once()
+            return False
+        if last is not None and now - last > self.intervals.round_s * cfg.ROUND_CATCH_UP_FACTOR:
+            self.reporter.note(
+                'round', f'catching up: the last round was {(now - last) / 60:.0f} min ago (interval {self.intervals.round_s / 60:.0f} min)'
+            )  # fmt: skip
+        self._last_round_at = now
+        self.round_once()
+        self.build_once()
+        return True
+
     def round_once(self) -> Any:
         self.counts['round'] += 1
         n = self.counts['round']
@@ -198,12 +229,23 @@ class Controller:
             self.proof = self._load_proof()
         except Exception as e:
             if self.proof is None:
-                self.reporter.note('round', f'round {n} not run: no proof provider ({e})')
+                self.reporter.error('round', f'round {n} not run: no proof provider ({e})')
                 self._set_status('round', {'n': n, 'at': time.time(), 'error': str(e)[:300]})
                 return None
             self.reporter.note('round', f'round {n}: keeping the previous proof ({e})')
         started = time.time()
-        report = self._run_round(self.proof, store=self.boxes, write_lock=self.write_lock, box_locks=self.box_locks)
+        try:
+            report = self._run_round(self.proof, store=self.boxes, write_lock=self.write_lock, box_locks=self.box_locks)
+        except Exception as e:  # before any box was visited (the allowlist fetch, our own link): nobody's fault
+            self.reporter.error('round', f'round {n} failed before any box was visited: {type(e).__name__}: {e}')
+            self._set_status('round', {'n': n, 'at': time.time(), 'error': f'{type(e).__name__}: {e}'[:300]})
+            return None
+        if getattr(report, 'no_box_answered', False):
+            self.reporter.error(
+                'round',
+                f"round {n}: none of {len(report.boxes)} box(es) answered SSH: the controller's own link is suspect, "
+                'no unreachable round counted',
+            )
         boxes = {
             r.box.box_id: {
                 'before': r.status_before,
@@ -229,14 +271,32 @@ class Controller:
         self.reporter.round(report, n)
         return report
 
-    def build_once(self) -> None:
+    def build_once(self) -> bool:
+        """``--build-cmd`` once. A non-zero exit keeps the previous provider and binary, is logged as an error with the
+        command's tail, and is retried on the next wake (``round_tick``), not at the next round. A build that made it
+        re-reads the provider, so the newest built version is what the next probe runs. True when the build passed."""
         if not self.build_cmd or self._build is None:
-            return
+            return True
         started = time.monotonic()
         proc = self._build(self.build_cmd)
-        tail = (proc.stdout or proc.stderr or '').strip().splitlines()[-1:] or ['']
+        tail = (proc.stderr or proc.stdout or '').strip().splitlines()[-1:] or ['']
         took = (time.monotonic() - started) * 1000.0
-        self.reporter.note('round', f'build exit {proc.returncode} in {took:.0f} ms: {tail[0][:200]}')
+        if proc.returncode != 0:
+            self._build_failed = True
+            version = getattr(self.proof, 'version', None)
+            self.reporter.error(
+                'round',
+                f'build exit {proc.returncode} in {took:.0f} ms: {tail[0][:200]!r}; keeping proof {version or "(none)"}, '
+                f'retrying in {cfg.ROUND_WAKE_S:.0f} s',
+            )
+            return False
+        was_failing, self._build_failed = self._build_failed, False
+        self.reporter.note('round', f'build exit 0 in {took:.0f} ms: {tail[0][:200]}' + (' (recovered)' if was_failing else ''))  # fmt: skip
+        try:
+            self.proof = self._load_proof()
+        except Exception as e:
+            self.reporter.error('round', f'built, but the provider did not load: {e}; keeping the previous proof')
+        return True
 
     def reconcile_once(self) -> ReconcileReport:
         self.counts['reconcile'] += 1
@@ -467,7 +527,7 @@ class Controller:
 
     def start(self) -> None:
         loops = (
-            ('round', self.round_once, self.intervals.round_s, self.build_once),
+            ('round', self.round_tick, cfg.ROUND_WAKE_S, None),
             ('reconcile', self.reconcile_once, self.intervals.reconcile_s, None),
             ('watch', self.watch_once, self.intervals.watch_tick_s, None),
             ('scorecard', self.scorecard_once, self.intervals.scorecard_s, None),

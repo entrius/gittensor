@@ -410,6 +410,26 @@ def test_round_skips_benched_boxes_and_releases_expired_ones(state):
     assert payload['not_probed'][0]['hotkey'] == HK_B and store(state).get(HK_B).status == BENCHED
 
 
+def test_a_round_no_box_answers_counts_nobody_unreachable_and_one_dead_box_still_counts(state):
+    admit(state, HK_A, '10.0.0.1')
+    admit(state, HK_B, '10.0.0.2', key=KEY_2)
+    dead = FakeRunner().on('true', SshTransportError('Connection refused'))
+    with runners({HK_A: dead, HK_B: dead}):  # the controller's own link is down: every dial fails
+        result = invoke(*round_args(state, '--json'))
+    assert result.exit_code == 2, result.output
+    payload = json.loads(result.stdout)
+    assert payload['no_box_answered'] is True and all(b['transport_error'] for b in payload['boxes'])
+    assert [store(state).get(hk).unreachable_count for hk in (HK_A, HK_B)] == [0, 0]
+    with runners({HK_A: dead, HK_B: dead}):
+        assert 'no box answered SSH' in invoke(*round_args(state)).output
+
+    with runners({HK_A: dead, HK_B: box_runner()}):  # one box down: that box is counted, as before
+        result = invoke(*round_args(state, '--json'))
+    assert result.exit_code == 2 and json.loads(result.stdout)['no_box_answered'] is False
+    assert [store(state).get(hk).unreachable_count for hk in (HK_A, HK_B)] == [1, 0]
+    assert store(state).get(HK_B).status == IDLE
+
+
 def test_round_loop_runs_the_build_between_rounds_and_reloads_the_proof(state, tmp_path, monkeypatch):
     (tmp_path / 'fake_loop_provider.py').write_text(
         'from tests.controller.conftest import FakeProof\n\nmade = []\n\n\n'

@@ -10,8 +10,11 @@ import json
 import os
 import shutil
 import signal
+import subprocess
 import threading
 import time
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -28,7 +31,7 @@ from gittensor.controller.checks.state import (
     BoxState,
     StateStore,
 )
-from gittensor.controller.daemon import Controller, Intervals
+from gittensor.controller.daemon import Controller, Intervals, SilentReporter
 from gittensor.controller.registry import DeploymentStore, Registry
 from tests.controller.conftest import (
     AGENT_DIGEST,
@@ -239,6 +242,109 @@ def test_discovery_runs_before_round_1_and_without_it_the_round_runs_at_start(tm
     finally:
         assert plain.shutdown()
     assert seen == [[]] and 'discover' not in plain.status
+
+
+class Notes(SilentReporter):
+    """A reporter that keeps the notes and errors."""
+
+    def __init__(self):
+        self.notes, self.errors = [], []
+
+    def note(self, loop, message):
+        self.notes.append((loop, message))
+
+    def error(self, loop, message):
+        self.errors.append((loop, message))
+
+
+def _tick_controller(tmp_path, clock, run_round, load_proof: Callable[[], Any] = FakeProof, **kw):
+    notes = Notes()
+    controller = Controller(
+        ctl.StateDir(tmp_path / 'state').ensure(),
+        registry=None,  # type: ignore[arg-type]
+        make_runner=lambda box, purpose: None,  # type: ignore[return-value]
+        run_round=run_round,
+        load_proof=load_proof,
+        reporter=notes,
+        wall=lambda: clock[0],
+        intervals=Intervals(round_s=1200),
+        **kw,
+    )
+    return controller, notes
+
+
+def test_the_round_catches_up_once_after_a_sleep_then_keeps_its_cadence(tmp_path):
+    clock, rounds = [0.0], []
+    controller, notes = _tick_controller(
+        tmp_path, clock, lambda proof, **shared: rounds.append(clock[0]) or ctl.RoundReport('fake', [], [], {})
+    )
+    for t, expect in ((0, True), (5, False), (600, False), (1200, True), (1800, False)):
+        clock[0] = float(t)
+        assert controller.round_tick() is expect, t
+    assert rounds == [0.0, 1200.0] and not [m for _, m in notes.notes if 'catching up' in m]
+
+    clock[0] = 1200.0 + 90 * 60  # the controller slept 90 min (9/15: 21:51 -> 23:17): one round, at once
+    assert controller.round_tick() is True and rounds[-1] == clock[0]
+    assert [m for _, m in notes.notes if 'catching up' in m] == [
+        'catching up: the last round was 90 min ago (interval 20 min)'
+    ]
+    for dt, expect in ((5, False), (1199, False), (1200, True), (1205, False)):  # the cadence resumes from it
+        clock[0] = 1200.0 + 90 * 60 + dt
+        assert controller.round_tick() is expect, dt
+    assert len(rounds) == 4 and len([m for _, m in notes.notes if 'catching up' in m]) == 1
+
+
+def test_a_failed_build_keeps_the_previous_proof_and_is_retried_on_the_next_wake_not_the_next_round(tmp_path):
+    clock, version, builds = [0.0], ['fake-1'], []
+
+    def build(command):
+        builds.append(command)
+        if len(builds) < 3:
+            return subprocess.CompletedProcess(command, 100, 'Reading package lists...\n', 'E: apt offline\n')
+        version[0] = 'fake-2'
+        return subprocess.CompletedProcess(command, 0, 'built fake-2\n', '')
+
+    rounds = []
+    controller, notes = _tick_controller(
+        tmp_path,
+        clock,
+        lambda proof, **shared: rounds.append(proof.version) or ctl.RoundReport(proof.version, [], [], {}),
+        load_proof=lambda: FakeProof(version[0]),
+        build=build,
+        build_cmd='ci/gen_secret.sh && ci/build.sh',
+    )
+    assert controller.round_tick() is True and rounds == ['fake-1']  # tick 1: the round, then the build fails
+    assert controller.proof is not None and controller.proof.version == 'fake-1' and len(builds) == 1
+    clock[0] = 5.0
+    assert controller.round_tick() is False and len(builds) == 2  # tick 2: no round; the build is retried, fails
+    assert controller.proof.version == 'fake-1'
+    assert [m for _, m in notes.errors] == [
+        "build exit 100 in 0 ms: 'E: apt offline'; keeping proof fake-1, retrying in 5 s"
+    ] * 2
+    clock[0] = 10.0
+    assert controller.round_tick() is False and len(builds) == 3  # tick 3: the build makes it: the new version
+    assert controller.proof.version == 'fake-2' and rounds == ['fake-1']
+    assert notes.notes[-1] == ('round', 'build exit 0 in 0 ms: built fake-2 (recovered)')
+    clock[0] = 15.0
+    assert controller.round_tick() is False and len(builds) == 3  # no more retries once it passed
+    clock[0] = 1200.0
+    assert controller.round_tick() is True and rounds == ['fake-1', 'fake-2'] and len(builds) == 4
+
+
+def test_a_round_that_raises_before_the_first_visit_blames_no_box(tmp_path):
+    clock = [0.0]
+
+    def down(proof, **shared):
+        raise ConnectionError('allowlist https://example/nvml.json: Network is unreachable')
+
+    controller, notes = _tick_controller(tmp_path, clock, down)
+    for hotkey, count in ((HK_A, 1), (HK_B, 0)):
+        controller.boxes.put(BoxState(hotkey, status=IDLE, host='10.0.0.1', port=2200, unreachable_count=count))
+    assert controller.round_tick() is True and controller.round_once() is None
+    assert [b.unreachable_count for b in controller.boxes.boxes.values()] == [1, 0]
+    why = 'failed before any box was visited: ConnectionError: allowlist https://example/nvml.json: Network is unreachable'
+    assert notes.errors == [('round', f'round {n} {why}') for n in (1, 2)]
+    assert 'Network is unreachable' in controller.status['round']['error'] and controller.status['round']['n'] == 2
 
 
 def test_run_owns_the_state_directory(state, tmp_path):

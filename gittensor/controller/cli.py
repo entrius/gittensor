@@ -512,6 +512,9 @@ class RoundReport:
     boxes: list[BoxRound]
     not_probed: list[BoxState]
     timings_ms: dict[str, float]
+    # Every box dialled failed at SSH and none was scraped: the controller's own link is the likelier fault, so no
+    # box's unreachable count moved this round (Kimbo 9/16). Boxes flagged endpoint_changed are not dialled and count.
+    no_box_answered: bool = False
 
     @property
     def exit_code(self) -> int:
@@ -545,7 +548,8 @@ def run_round(
     and every card reported this round; stage the proof on every box that passed, in parallel. Phase 2: one start
     signal — every staged box fires at once (a thread per box, cards parallel inside ``fire_box``). Then clean up,
     judge, ``apply_verdict``. A box lost to SSH gets no verdict; its unreachable count goes up and three in a row
-    bench it for 12 h (``apply_unreachable``).
+    bench it for 12 h (``apply_unreachable``), unless no dialled box answered at all: then the controller's own link
+    is the suspect and no count moves (``RoundReport.no_box_answered``).
 
     Inside `gitt controller run` the round shares the daemon's ``store`` and ``write_lock`` and holds each box's lock
     from connect to verdict. A box whose lock stays held for ``lock_wait_s`` (a start or drain in flight) is skipped
@@ -667,6 +671,8 @@ def run_round(
                     r.runner.close()
 
         now = time.time()
+        dialled = [r for r in rows if r.runner is not None]
+        no_box_answered = bool(dialled) and all(r.scrape is None for r in dialled)
         with write_lock:
             for r in rows:
                 if r.busy:
@@ -676,7 +682,7 @@ def run_round(
                     r.after = current  # benched by the watch mid-round: the bench stands, no verdict applied
                     continue
                 if r.scrape is None:
-                    if r.transport_error:
+                    if r.transport_error and not (no_box_answered and r.runner is not None):
                         r.after = store.boxes[r.box.box_id] = apply_unreachable(current, now)
                     continue
                 if not identity_passed(r.checks):
@@ -710,7 +716,7 @@ def run_round(
     fired = [r.fired_at for r in armed if r.fired_at is not None]
     if fired:
         timings['fire_spread'] = round((max(fired) - min(fired)) * 1000.0, 3)
-    return RoundReport(provider, rows, not_probed, {k: v for k, v in timings.items() if v is not None})
+    return RoundReport(provider, rows, not_probed, {k: v for k, v in timings.items() if v is not None}, no_box_answered)
 
 
 def reprove_box(
@@ -1364,6 +1370,7 @@ def _print_round(report: RoundReport, n: int, json_mode: bool) -> None:
                 'round': n,
                 'provider': report.provider,
                 'timings_ms': report.timings_ms,
+                'no_box_answered': report.no_box_answered,
                 'boxes': [
                     {
                         'hotkey': r.box.box_id,
@@ -1415,6 +1422,10 @@ def _print_round(report: RoundReport, n: int, json_mode: bool) -> None:
             escape(b.box_id), escape(_host_field(b.host, b.port)), b.status, '[dim]not probed[/dim]', '', '', ''
         )
     console.print(table)
+    if report.no_box_answered:
+        console.print(
+            "[red]no box answered SSH: the controller's own link is suspect; no unreachable round counted[/red]"
+        )
     console.print(f'[dim]{_timings_text(report.timings_ms) or "no boxes to probe"}[/dim]')
 
 
@@ -2016,6 +2027,9 @@ class _DaemonPrinter:
     def note(self, loop: str, message: str) -> None:
         self._emit('note', {'loop': loop, 'message': message}, f'[yellow]{loop}:[/yellow] {escape(message)}')
 
+    def error(self, loop: str, message: str) -> None:
+        self._emit('error', {'loop': loop, 'message': message}, f'[red]{loop} error:[/red] {escape(message)}')
+
 
 @controller_group.command('run')
 @click.option(
@@ -2115,7 +2129,8 @@ def run_command(
     json_mode,
     **opts,
 ):
-    """The controller as one process: the proof round (every --round-interval, --build-cmd between rounds), the
+    """The controller as one process: the proof round (every --round-interval on the wall clock, caught up at once
+    after a sleep; --build-cmd after each round, retried every few seconds while it fails), the
     reconciler (every --reconcile-interval), the in-lease watch (heartbeat every --heartbeat-interval, manifest
     health probe every health.interval_s) with the pay ledger's settlement tick, the signed scorecard (every
     --scorecard-interval) and, with --discover, discovery (the metagraph every --discover-interval), each on its own

@@ -103,6 +103,12 @@ POWER_LIMIT_TOLERANCE_W = 1.0  # nvidia-smi rounds the limit; a real change is t
 # `gitt controller run` (one process). A box mid-start or mid-drain holds its lock for minutes: the proof round waits
 # this long for it (a heartbeat visit takes seconds), then skips the box until the next round.
 ROUND_BOX_LOCK_WAIT_S = 30.0
+# The round is scheduled on the wall clock and the schedule is checked every ROUND_WAKE_S, never slept through in one
+# long monotonic wait: a controller that slept (the 9/15 run: 86 min) runs the round it missed as soon as it wakes and
+# resumes the cadence from there. A round more than ROUND_CATCH_UP_FACTOR x the interval after the last is logged as a
+# catch-up; exactly one runs. A `--build-cmd` that fails keeps the previous proof binary and is retried on every wake.
+ROUND_WAKE_S = 5.0
+ROUND_CATCH_UP_FACTOR = 1.5
 # A card that reaches CHECKING (drain done, failed start, health replacement) is re-proved on its own box at the next
 # watch tick instead of waiting for the 20-min round (Kimbo 9/15). A re-prove that got no verdict (box busy, SSH down)
 # is tried again after this long, not every tick.

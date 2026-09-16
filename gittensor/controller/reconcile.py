@@ -10,9 +10,11 @@ visits, so a restarted controller rebuilds its view from the boxes (``docker ps 
 
 One pass, one SSH visit per box:
 
-* **Confirm.** A recorded instance whose container is gone or stopped is lost: its card goes to CHECKING. A running
-  labelled container with no record is re-adopted when its card is LEASED to that instance; a container caught
-  mid-start (card STARTING) or on a card we did not lease is undeployed.
+* **Confirm.** A recorded instance whose container is gone or stopped is lost: its card goes to CHECKING. Under a
+  LEASED card that is a heartbeat failure (bench, pay withheld), unless the box missed a heartbeat since its last good
+  one: then it is ``instance_stopped`` (Kimbo 9/16: a clean leave or a reboot, not a cheat; the lease ends at the
+  last good heartbeat, no bench). A running labelled container with no record is re-adopted when its card is LEASED
+  to that instance; a container caught mid-start (card STARTING) or on a card we did not lease is undeployed.
 * **Too many** (or a disabled / unverifiable entry, or a benched box): DRAINING, undeploy with the manifest's drain,
   CHECKING. The next proof round returns the card to IDLE after a pass.
 * **Too many** releases the lowest standing first, then the oldest last full check.
@@ -64,6 +66,7 @@ from gittensor.controller.checks.state import (
     StateStore,
     add_event,
     apply_heartbeat_failure,
+    apply_instance_stopped,
     record_start,
     transition_card,
 )
@@ -206,7 +209,7 @@ def card_fits(box: BoxState, manifest: Manifest) -> tuple[bool, str]:
 
 @dataclass
 class Action:
-    kind: str  # start | drain | lost | adopt | orphan
+    kind: str  # start | drain | lost | stopped | adopt | orphan
     box: str
     instance: str
     entry: str = ''
@@ -424,7 +427,11 @@ class Reconciler:
                     f'container {container.state} ({container.container_id[:12]})' if container else 'container gone'
                 )
                 if state == LEASED and not record.draining:
-                    self._bench_vanished(box_id, record, action)
+                    if record.heartbeat_misses > 0:
+                        action.kind = 'stopped'
+                        self._stop_vanished(box_id, record, action)
+                    else:
+                        self._bench_vanished(box_id, record, action)
                     report.actions.append(action)
                     continue
                 self._drop_record(record.id)
@@ -495,6 +502,30 @@ class Reconciler:
                 self.instances.put(other)
         action.states.append(BENCHED)
         action.detail += ': not stopped by us, a heartbeat failure; box BENCHED, pay withheld'
+
+    def _stop_vanished(self, box_id: str, record: InstanceRecord, action: Action) -> None:
+        """A container gone or stopped under a LEASED card after the watch missed a heartbeat on the box (the agent was
+        unreachable: a clean leave, a reboot) is a stop, not a cheat (Kimbo 9/16): the lease ends at the last good
+        heartbeat, nothing is withheld, ``instance_stopped`` on the box, the card to CHECKING; the record drains with a
+        kill this pass, which removes whatever the container left behind."""
+        now = self.wall()
+        last_good = record.last_heartbeat_at or record.leased_at or now
+        with self._lock:
+            record.draining, record.healthy, record.heartbeat_ok, record.pay_open = True, False, False, False
+            record.stopped_at = min(record.stopped_at, last_good) if record.stopped_at is not None else last_good
+            record.drain_type, record.drain_max_s = 'kill', 0
+            self.instances.put(record)
+            self.boxes.put(
+                apply_instance_stopped(
+                    self._box(box_id), record.uuid, now, instance=record.id,
+                    missed_heartbeats=record.heartbeat_misses, lease_ended_at=last_good, via='reconcile',
+                )
+            )  # fmt: skip
+        action.states.append(CHECKING)
+        action.detail += (
+            f': gone after {record.heartbeat_misses} missed heartbeat(s): instance stopped, not a cheat; lease ended '
+            'at the last good heartbeat, nothing withheld; card CHECKING for the re-prove'
+        )
 
     def _to_checking(self, box_id: str, uuid: str, action: Action) -> None:
         box = self._box(box_id)

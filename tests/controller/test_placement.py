@@ -708,6 +708,42 @@ def test_a_restarted_controller_re_adopts_running_containers_by_label(world):
     assert box.containers == {} and InstanceStore(root / 'instances.json').instances == {}
 
 
+@pytest.mark.parametrize('how', ['vanished', 'exited'])
+def test_the_reconciler_reads_a_container_gone_after_a_missed_heartbeat_as_a_stop(world, how):
+    # 9/16: the reconcile pass, not the heartbeat, found the container gone once the agent was back: `lost`, 4 h bench
+    root, registry = world
+    seed(root, idle_box(), replicas=1)
+    box = FakeDocker()
+    clock = Clock()
+    rec = reconciler(root, registry, {'hk1': box}, clock=clock)
+    assert rec.run_pass().ok
+    (record,) = rec.instances.instances.values()
+    record.last_heartbeat_at, record.heartbeat_ok, record.heartbeat_misses = clock.t, None, 1  # a missed heartbeat
+    rec.instances.put(record)
+    good_at = clock.t
+    clock.t += 90
+    if how == 'vanished':
+        box.containers.pop(record.container_id)
+    else:
+        box.containers[record.container_id]['state'] = 'exited'
+    report = rec.run_pass()
+    stopped = next(a for a in report.actions if a.kind == 'stopped')
+    assert stopped.instance == record.id and stopped.states == [LEASED, CHECKING] and not stopped.ok
+    assert 'gone after 1 missed heartbeat(s): instance stopped, not a cheat' in stopped.detail
+    assert 'BENCHED' not in stopped.detail
+    after = StateStore(root / 'boxes.json').get('hk1')
+    assert after.status == IDLE and after.withheld_from is None and after.bench_count == 0
+    event = after.standing_events[-1]
+    assert event['kind'] == 'instance_stopped' and event['lease_ended_at'] == good_at and event['via'] == 'reconcile'
+    assert after.cards[UUID_5090].state == CHECKING or after.cards[UUID_5090_B].state == CHECKING
+    assert record.container_id not in box.containers  # a stopped container left behind is removed in the same pass
+    drained = next(a for a in report.actions if a.kind == 'drain')
+    assert drained.instance == record.id and drained.states[0] == CHECKING  # no clean_lease / drain_failed event
+    assert [e['kind'] for e in after.standing_events] == ['instance_stopped']
+    assert record.id not in InstanceStore(root / 'instances.json').instances
+    assert rec.run_pass().ok and len(box.commands('docker run -d')) == 2  # re-placed on the free card
+
+
 def test_a_leftover_mid_start_container_is_undeployed(world):
     root, registry = world
     box_state = transition_card(idle_box(), UUID_5090, STARTING, 1.0, 'i-00000000dead')

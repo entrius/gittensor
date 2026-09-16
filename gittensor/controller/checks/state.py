@@ -367,6 +367,20 @@ def apply_heartbeat_failure(state: BoxState, failed: Sequence[str], now: float, 
     return _bench(new, now, [f'heartbeat:{name}' for name in failed])
 
 
+INSTANCE_STOPPED = 'instance_stopped'
+
+
+def apply_instance_stopped(state: BoxState, uuid: str, now: float, **detail) -> BoxState:
+    """A lease that ended because our container was gone once the agent answered again after being unreachable
+    (Kimbo 9/16: a clean leave, a reboot, not a cheat): an ``instance_stopped`` standing event (neutral: the fold
+    neither resets nor drops standing on it), the card to CHECKING for the one-box probe, nothing withheld, no bench.
+    A container that vanishes while the agent answered throughout stays ``apply_heartbeat_failure``. Pure."""
+    new = add_event(state, INSTANCE_STOPPED, now, uuid=uuid, **detail)
+    if new.status == IDLE and uuid in new.cards and new.cards[uuid].state in BUSY:
+        new = transition_card(new, uuid, CHECKING, now)
+    return new
+
+
 def provable_uuids(state: BoxState, reported: Sequence[str]) -> List[str]:
     """The reported cards the proof may run on this round: every card of a box at ADMIT; on an IDLE box, cards in IDLE
     or CHECKING plus any card that is not pinned (it fails the UUID pin anyway). A STARTING, LEASED or DRAINING card

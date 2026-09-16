@@ -157,6 +157,50 @@ def test_a_heartbeat_failure_benches_the_box_withholds_pay_and_undeploys_its_ins
     assert box.containers == {} and not box.commands('docker stop')  # undeployed with a kill, no graceful drain
 
 
+@pytest.mark.parametrize('how', ['vanished', 'exited'])
+def test_a_container_gone_after_the_agent_was_unreachable_is_a_stop_not_a_cheat(world, how):
+    # 9/16: `gitt down` under a lease (agent gone, one missed heartbeat), `gitt up`, our container gone -> 4 h bench
+    rec, watch, box, clock, record = leased(world)
+    assert watch.run_pass().ok  # a good heartbeat at t
+    good_at = clock.t
+    clock.t += 60
+    box.runner.on(regex(r'^nvidia-smi --query-gpu'), SshTransportError('10.0.0.1:2200: Connection refused'))
+    assert [a.kind for a in watch.run_pass().actions] == ['miss']  # the agent is gone
+    box.runner.on(regex(r'^nvidia-smi --query-gpu'), box.respond)  # the agent is back, our container is not
+    if how == 'vanished':
+        box.containers.pop(record.container_id)
+    else:
+        box.containers[record.container_id]['state'] = 'exited'
+    box.processes = {}
+    clock.t += 60
+    report = watch.run_pass()
+    (stopped,) = report.actions
+    assert stopped.kind == 'stopped' and stopped.states == [LEASED, CHECKING] and not stopped.ok
+    assert 'gone after 1 missed heartbeat(s): instance stopped, not a cheat' in stopped.detail
+    after = StateStore(rec.boxes.path).get('hk1')
+    assert after.status == IDLE and after.bench_count == 0 and after.withheld_from is None  # no bench, no withhold
+    assert after.cards[UUID_5090].state == CHECKING and after.cards[UUID_5090_B].state == IDLE
+    event = after.standing_events[-1]
+    assert event['kind'] == 'instance_stopped' and event['instance'] == record.id and event['via'] == 'heartbeat'
+    assert event['missed_heartbeats'] == 1 and event['lease_ended_at'] == good_at
+    assert InstanceStore(rec.instances.path).instances == {} and box.containers == {}  # whatever was left is removed
+    assert not box.commands('docker stop')  # nothing to drain: a kill removal only
+
+    # the reconciler re-places on the other card meanwhile; the CHECKING card waits for the one-box probe
+    assert rec.run_pass().ok and rec.boxes.boxes['hk1'].cards[UUID_5090_B].state == LEASED
+    assert rec.boxes.boxes['hk1'].cards[UUID_5090].state == CHECKING
+
+
+def test_a_container_gone_under_an_agent_that_answered_throughout_stays_a_bench(world):
+    rec, watch, box, clock, record = leased(world)
+    assert watch.run_pass().ok
+    clock.t += 60
+    box.containers.pop(record.container_id)  # killed under a live agent: a cheat
+    report = watch.run_pass()
+    assert [a.kind for a in report.actions] == ['heartbeat', 'bench']
+    assert StateStore(rec.boxes.path).get('hk1').status == BENCHED
+
+
 def test_a_heartbeat_with_no_answer_counts_a_miss_and_benches_nothing(world):
     rec, watch, box, clock, record = leased(world)
     box.runner.on(regex(r'^nvidia-smi --query-gpu'), SshTransportError('10.0.0.1:2200: reset'))

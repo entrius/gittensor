@@ -857,7 +857,8 @@ def test_the_committed_27b_manifest_agrees_with_itself_and_with_the_release_cont
     assert env['SPARKINFER_NO_DOWNLOAD'] == '1' and env['SPARKINFER_MODE'] == 'serve-dspark'
     assert env['SPARKINFER_MAX_QUEUE_DEPTH'] == str(manifest.front_door.concurrency)
     assert env['SPARKINFER_ADMISSION_WAIT_S'] == '0' and env['SPARKINFER_DRAIN_GRACE_S'] == '0'
-    assert manifest.drain.max_s >= 2 * int(env['SPARKINFER_MAX_OUTPUT_TOKENS']) / 94  # ~94 tok/s decode, doubled
+    assert 'SPARKINFER_MAX_OUTPUT_TOKENS' not in env  # the runtime's own cap (16384 in their container), never ours
+    assert manifest.drain.max_s >= 16384 / 94  # the drain covers that cap at ~94 tok/s decode
     assert all(c.spec['body']['temperature'] == 0 for c in manifest.entry_canary)
     assert spec.volumes == (('/var/lib/gt-models/qwen3.8-27b-nvfp4/models', '/models', True),)
     assert spec.network == 'gt-noegress' and manifest.image.startswith('ghcr.io/gittensor-ai-lab/sparkinfer-qwen38@')

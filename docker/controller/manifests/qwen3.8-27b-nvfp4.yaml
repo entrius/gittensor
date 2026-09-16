@@ -9,8 +9,9 @@
 #     type/code, SPARKINFER_NO_DOWNLOAD, the #1088 fix). Their entrypoint execs the server, so SIGTERM lands.
 #   * the DSpark drafter (speculative decoding) is on: a second 1.4 GB artifact, SPARKINFER_MODE=serve-dspark.
 #   * CTX 65536 (the product caps context at 64K; 131072 with the drafter peaks ~31.4 GB on a 31.8 GB card).
-#   * SPARKINFER_MAX_OUTPUT_TOKENS 4096 (das caps there too), so a drain never waits on more than ~45 s of decode;
-#     drain.max_s 90 with SPARKINFER_DRAIN_GRACE_S=0 (the runtime waits, the controller kills at 90).
+#   * no output cap at the gateway or in das (Chutes' shape: the runtime owns its limits): the container's own
+#     SPARKINFER_MAX_OUTPUT_TOKENS default (16384) is the cap, so drain.max_s 240 covers a full 16K completion at
+#     ~94 tok/s, with SPARKINFER_DRAIN_GRACE_S=0 (the runtime waits, the controller kills at 240).
 #   * SPARKINFER_MAX_QUEUE_DEPTH = front_door.concurrency and SPARKINFER_ADMISSION_WAIT_S=0: refuse, never queue.
 #   * canaries at temperature 0 (omitted sampling now follows generation_config.json).
 #   * no tokenizer.json / .tokenizer_repo artifacts: the server reads MODEL_DIR/tokenizer.json.
@@ -34,7 +35,6 @@ run:
     DRAFT_DIR: /models/qwen38-dspark
     MODEL_NAME: qwen3.8-27b           # the id the gateway republishes; the container's default is qwen38-nvfp4
     CTX: '65536'
-    SPARKINFER_MAX_OUTPUT_TOKENS: '4096'
     SPARKINFER_MAX_QUEUE_DEPTH: '1'   # keep equal to front_door.concurrency (TODO after re-measuring)
     SPARKINFER_ADMISSION_WAIT_S: '0'
     SPARKINFER_DRAIN_GRACE_S: '0'
@@ -100,4 +100,4 @@ front_door:
     - {path: /v1/models, method: GET}
 drain:
   type: requests
-  max_s: 90                  # 4096 output tokens at ~94 tok/s ≈ 45 s, doubled; SPARKINFER_DRAIN_GRACE_S=0 leaves the kill to us
+  max_s: 240                 # the container's own 16384-token output cap at ~94 tok/s ≈ 175 s; SPARKINFER_DRAIN_GRACE_S=0 leaves the kill to us

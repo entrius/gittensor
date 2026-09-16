@@ -11,7 +11,7 @@ full check and box state (``controller.checks``), the GPU-proof slot (``controll
     gitt controller allowlist add <hotkey> | show              curate the NVML allowlist from a known-good box
     gitt controller check <hotkey>                             one full check: verdict, new state, exit 0 / 1 / 2
     gitt controller round [--loop]                             the 20-min two-phase probe over every idle card
-    gitt controller release <hotkey> [--reason TEXT]           end a bench early: BENCHED -> ADMIT, re-pinned next round
+    gitt controller release <hotkey> [--reason TEXT]           end a bench early: BENCHED -> ADMIT, withheld pay given back
     gitt controller bless <manifest.yaml> --image <repo@sha256> --sign-key <key>   sign an entry into the registry
     gitt controller deploy <entry> --enabled/--disabled --replicas N               operator deployment settings
     gitt controller registry show                              entries (re-verified), deployments, running counts
@@ -1438,7 +1438,8 @@ def _print_round(report: RoundReport, n: int, json_mode: bool) -> None:
 @_state_options
 def release_command(hotkey, reason, state_dir, json_mode):
     """End a bench early: BENCHED → ADMIT, re-pinned by the next proof round like an expired bench, with a `released`
-    standing event carrying the reason. The ladder rung and any withheld pay stay.
+    standing event carrying the reason. The ladder rung stays; the pay withheld by the bench (the box's UTC day ±1) is
+    given back: the ledger rows already written stay, the next settlement pays them.
 
     \b
     Beside `gitt controller run` the release is recorded in boxes.json and the controller applies it on its next round;

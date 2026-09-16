@@ -220,6 +220,33 @@ def test_the_withheld_window_is_the_failure_day_and_the_day_before_and_unrated_c
     assert s.unrated_s == 100.0 and s.hotkeys['hkB'].weight == 0.0
 
 
+def test_an_operators_release_clears_the_withheld_window_and_settlement_recomputes_the_rows_already_written():
+    from gittensor.controller.checks.state import BENCHED, apply_heartbeat_failure, release_from_bench, request_release
+
+    t0 = 20 * DAY_S + 10 * HOUR
+    lease = [
+        LedgerRow(t0 - 12, t0 - 500 + 12 * i, 'hkA', A, 'RTX5090', LEASED, 'i', 0.0, 12.0, False) for i in range(37)
+    ]
+    clean = box('hkA', cards={A: CardState(LEASED, 'i', t0 - 500)})
+    paid = settle_window(lease, {'hkA': clean}, RATES, RICH, t0 - HOUR, t0).hotkeys['hkA']
+    assert (paid.leased_s, paid.withheld_s) == (444.0, 0.0)  # the 9/15 lease: 444 s, clean
+
+    benched = apply_heartbeat_failure(clean, ['our_container'], t0)  # the bench at t: the day +-1 is withheld
+    assert benched.status == BENCHED and benched.withheld_from == t0
+    withheld = settle_window(lease, {'hkA': benched}, RATES, RICH, t0 - HOUR, t0 + 60).hotkeys['hkA']
+    assert (withheld.leased_s, withheld.withheld_s) == (0.0, 444.0)  # retroactive, as designed
+
+    released = release_from_bench(request_release(benched, t0 + 100, 'test over'), t0 + 120)
+    assert released.status == 'ADMIT' and released.withheld_from is None and released.bench_count == 1
+    assert released.standing_events[-1]['kind'] == 'released' and released.standing_events[-1]['withheld_from'] == t0
+    again = settle_window(lease, {'hkA': released}, RATES, RICH, t0 - HOUR, t0 + 200).hotkeys['hkA']
+    assert (again.leased_s, again.withheld_s) == (444.0, 0.0)  # the same rows, paid: the window is the current field
+    assert all(not r.withheld and r.leased_s == 12.0 for r in lease)  # nothing was rewritten
+
+    expired = BoxState.from_dict({**benched.as_dict(), 'bench_until': t0 + 1})
+    assert release_from_bench(expired, t0 + 2).withheld_from == t0  # a bench that ran its course keeps the window
+
+
 # ---------------------------------------------------------------- the oracle -----------------------------------------
 
 

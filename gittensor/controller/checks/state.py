@@ -251,7 +251,10 @@ def release_requested(state: BoxState) -> bool:
 
 def release_from_bench(state: BoxState, now: float) -> BoxState:
     """BENCHED -> ADMIT once the bench has expired, or at once when an operator released it (Kimbo 9/15: a ``released``
-    standing event with the reason; the ladder rung and any withheld pay stay). Otherwise unchanged."""
+    standing event with the reason; the ladder rung stays). An operator's release also clears ``withheld_from`` (Kimbo
+    9/16: the operator has judged the bench wrong or the test over, so the leased pay withheld over the box's UTC day
+    +-1 is given back; the ledger is append-only and ``settle_window`` recomputes from the current field); the event
+    records what was cleared. An expired bench keeps its withheld window. Otherwise unchanged."""
     early = release_requested(state)
     if state.status != BENCHED or (not early and (state.bench_until is None or now < state.bench_until)):
         return state
@@ -267,7 +270,9 @@ def release_from_bench(state: BoxState, now: float) -> BoxState:
             reason=request.get('reason', ''),
             requested_at=request['at'],
             bench_until=state.bench_until,
+            withheld_from=state.withheld_from,  # what the release gave back (None: nothing was withheld)
         )
+        new.withheld_from = None
     return new
 
 

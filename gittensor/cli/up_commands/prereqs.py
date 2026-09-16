@@ -31,6 +31,7 @@ from gittensor.agent.config import (
     WORKLOAD_PORT_RANGE,
     is_compute_axon,
 )
+from gittensor.agent.launch import Workload, parse_workloads, workload_list_command
 
 BLESSED_GPU_MARKER = '5090'  # the only card the pool blesses today (vault 24 §5: multi-type is later)
 DEFAULT_WALLET_PATH = Path.home() / '.bittensor' / 'wallets'
@@ -66,6 +67,7 @@ class PrereqReport:
     public_ip: str | None = None  # what `gitt up` publishes on chain; None when it has none
     agent_state: str | None = None  # docker container status, None when no such container
     runner_state: str | None = None
+    workloads: list[Workload] = field(default_factory=list)  # the controller's gt-i-* containers present on the box
 
     @property
     def ok(self) -> bool:
@@ -171,6 +173,10 @@ class HostProbe:
         proc = self.run(['docker', 'inspect', '--format', '{{.State.Status}}', name])
         return proc.stdout.strip() or None if proc.returncode == 0 else None
 
+    def workload_containers(self) -> list[Workload]:
+        proc = self.run(workload_list_command())
+        return parse_workloads(proc.stdout) if proc.returncode == 0 else []
+
 
 # --- individual checks -------------------------------------------------------------------------------------------
 
@@ -227,15 +233,30 @@ def check_ports(probe: HostProbe, ports: Sequence[int], report: PrereqReport) ->
     return CheckResult('Ports free', True, ', '.join(map(str, ports)))
 
 
-def check_workload_ports(probe: HostProbe, ports: range, report: PrereqReport) -> CheckResult:
+def check_workload_ports(probe: HostProbe, ports: range, report: PrereqReport, reclaim: bool = False) -> CheckResult:
+    """A port held by one of our own gt-i-* containers (an orphan of a previous `gitt up`, found 9/16) is never a
+    refusal: it is named, and removed with --reclaim; a port held by anything else fails the check."""
     name = 'Workload ports'
     span = f'{ports[0]}-{ports[-1]}'
     busy = [p for p in ports if not probe.port_free(p)]
     if busy and report.already_up:
         return CheckResult(name, True, f'{span}: {len(busy)} in use (instances already placed here)')
-    if busy:
+    ours = {w.port: w for w in report.workloads if w.port is not None}
+    foreign = [p for p in busy if p not in ours]
+    if foreign:
         return CheckResult(
-            name, False, f'{span} in use: {", ".join(map(str, busy))} (the controller places instances on these)'
+            name, False, f'{span} in use: {", ".join(map(str, foreign))} (the controller places instances on these)'
+        )
+    if busy:
+        held = ', '.join(f'{p} by {ours[p].name}' for p in busy)
+        if reclaim:
+            return CheckResult(name, True, f'{span}: {held}: our own workload(s), removed by --reclaim')
+        return CheckResult(  # a warning, not a refusal: ours, so the agent may start beside it
+            name,
+            False,
+            f'{span}: {held}: our own workload(s) left behind; the controller re-adopts or removes them, '
+            '`gitt up --reclaim` removes them now',
+            required=False,
         )
     return CheckResult(name, True, f'{span} free (open them to the internet, like the sshd port)')
 
@@ -314,9 +335,11 @@ def run_prereqs(
     public_ip: str | None = None,
     skip_reachability: bool = False,
     workload_ports: range = WORKLOAD_PORTS,
+    reclaim: bool = False,
 ) -> PrereqReport:
     """``no_chain`` is for our own dev boxes only: no registration lookup, nothing published (so no public IP or
-    reachability rows), and no hotkey needed on disk. ``public_ip`` overrides detection."""
+    reachability rows), and no hotkey needed on disk. ``public_ip`` overrides detection. ``reclaim``: a workload
+    container of ours left behind will be removed, so a port it holds passes."""
     report = PrereqReport()
     report.results.extend(check_driver(probe))
     docker = check_docker(probe)
@@ -325,8 +348,9 @@ def run_prereqs(
     if docker.ok:
         report.agent_state = probe.container_state(AGENT_CONTAINER_NAME)
         report.runner_state = probe.container_state(RUNNER_CONTAINER_NAME)
+        report.workloads = probe.workload_containers()
     report.results.append(check_ports(probe, [ssh_port], report))
-    report.results.append(check_workload_ports(probe, workload_ports, report))
+    report.results.append(check_workload_ports(probe, workload_ports, report, reclaim))
     if no_chain:
         report.results.append(CheckResult('Public IP', None, 'skipped (--no-chain: nothing published)'))
     else:

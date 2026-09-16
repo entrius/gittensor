@@ -28,14 +28,11 @@ from typing import Any, Protocol
 
 import yaml
 
+from gittensor.agent.config import DRAIN_LABEL, ENTRY_LABEL, INSTANCE_LABEL, PORT_LABEL, UUID_LABEL
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import CommandResult, HostRunner
 from gittensor.controller.manifest import Artifact, Canary, Drain, Manifest
 
-INSTANCE_LABEL = 'io.gittensor.instance'
-ENTRY_LABEL = 'io.gittensor.entry'
-UUID_LABEL = 'io.gittensor.uuid'
-PORT_LABEL = 'io.gittensor.port'
 _CONTAINER_ID = re.compile(r'^[0-9a-f]{64}$')
 _INSTANCE_ID = re.compile(r'^[a-z0-9][a-z0-9-]{3,62}$')
 
@@ -71,6 +68,7 @@ class RunSpec:
     # The blessed manifest, written to the box at pre-stage and mounted read-only over the image's baked copy, so the
     # entrypoint verifies the artifacts the registry entry names, not whatever the image was built with.
     manifest_host_path: str = ''
+    drain_max_s: int = 0  # the manifest's drain.max_s, on the container as a label so `gitt down` can drain it too
 
     @property
     def name(self) -> str:
@@ -137,6 +135,7 @@ def build_run_spec(
         network=network,
         notes=tuple(notes),
         manifest_host_path=manifest_host_path(manifest, entry_id),
+        drain_max_s=manifest.drain.max_s if manifest.drain.type != 'kill' else 0,
     )
 
 
@@ -153,6 +152,7 @@ def run_command(spec: RunSpec) -> str:
     host_port = spec.host_port if spec.host_port is not None else spec.port
     if spec.port is not None:
         parts.append(f'--label {shlex.quote(f"{PORT_LABEL}={host_port}")}')  # the host port: what a restart re-adopts
+    parts.append(f'--label {shlex.quote(f"{DRAIN_LABEL}={int(spec.drain_max_s)}")}')  # `gitt down` drains by it
     parts.append(f'--gpus "device={spec.uuid}"')
     if spec.port is not None:
         parts.append(f'-p {host_port}:{spec.port}')

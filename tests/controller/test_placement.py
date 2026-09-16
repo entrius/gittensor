@@ -196,7 +196,7 @@ def test_the_exact_docker_line_for_the_27b_example():
     assert run_command(spec) == (
         'docker run -d --name gt-i-0123456789ab '
         '--label io.gittensor.instance=i-0123456789ab --label io.gittensor.entry=qwen3.8-27b-nvfp4@1 '
-        f'--label io.gittensor.uuid={UUID_5090} --label io.gittensor.port=8080 '
+        f'--label io.gittensor.uuid={UUID_5090} --label io.gittensor.port=8080 --label io.gittensor.drain_max_s=60 '
         f'--gpus "device={UUID_5090}" -p 8080:8080 --restart no '
         '-v /var/lib/gt-models/qwen3.8-27b-nvfp4/models:/models:ro '
         '-v /var/lib/gt-models/qwen3.8-27b-nvfp4/manifest.qwen3.8-27b-nvfp4@1.yaml:/manifest.yaml:ro '

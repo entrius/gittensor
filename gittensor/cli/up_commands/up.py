@@ -19,7 +19,7 @@ from gittensor.agent.config import (
     RUNNER_CONTAINER_NAME,
     WORKLOAD_PORT_RANGE,
 )
-from gittensor.agent.launch import agent_run_command, render, runner_run_command
+from gittensor.agent.launch import agent_run_command, render, runner_run_command, workload_stop_commands
 from gittensor.cli.helpers import NETWORK_CHOICE, console, err_console
 from gittensor.cli.json_output import emit_json
 from gittensor.cli.miner_commands.helpers import NETUID_DEFAULT, _error, _load_config_value, _resolve_endpoint
@@ -47,8 +47,10 @@ def plan_commands(
     allow_dev_keys: bool = False,
     channel: release_channel.Channel | None = None,
     channel_url: str = AGENT_CHANNEL_URL,
+    reclaim: bool = False,
 ) -> list[list[str]]:
-    """The docker commands `gitt up` will issue, in order. A stopped-but-present container is removed first.
+    """The docker commands `gitt up` will issue, in order. With ``reclaim``, our own workload containers left behind
+    (``report.workloads``) are drained and removed first; a stopped-but-present agent / runner is removed next.
 
     With the runner (the default) the runner image comes from the verified ``channel``, by digest; ``image`` is
     only used by ``--no-update`` (a local build started directly)."""
@@ -65,7 +67,7 @@ def plan_commands(
             runner_image=channel.runner, ssh_port=ssh_port, miner_hotkey=hotkey, channel_url=channel_url
         )
         state = report.runner_state
-    plan = []
+    plan = workload_stop_commands(report.workloads) if reclaim else []
     if state is not None and state != 'running':
         plan.append(['docker', 'rm', '-f', target])
     plan.append(cmd)
@@ -131,6 +133,13 @@ def publish_endpoint(
     help='Only the chain step, from a machine holding the wallet: publish --ip and --ssh-port for a box elsewhere.',
 )
 @click.option(
+    '--reclaim',
+    is_flag=True,
+    default=False,
+    help='Drain and remove a workload container of ours left behind (gt-i-*, e.g. after a `gitt down` that '
+    'predates the clean leave) before starting.',
+)
+@click.option(
     '--dry-run', is_flag=True, default=False, help='Print what would be published and run, without doing either.'
 )
 @click.option('--json', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
@@ -149,6 +158,7 @@ def up_command(
     allow_dev_keys,
     no_chain,
     publish_only,
+    reclaim,
     dry_run,
     json_mode,
 ):
@@ -214,6 +224,7 @@ def up_command(
         no_chain=no_chain,
         public_ip=public_ip,
         skip_reachability=skip_reachability,
+        reclaim=reclaim,
     )
 
     channel = None
@@ -259,6 +270,7 @@ def up_command(
             allow_dev_keys=allow_dev_keys,
             channel=channel,
             channel_url=channel_url,
+            reclaim=reclaim and not report.already_up,
         )
         # What the runner itself will issue: printed so the miner can see exactly what runs privileged on their box.
         agent_image, agent_digest = (
@@ -289,6 +301,8 @@ def up_command(
                 },
                 'channel': None if channel is None else channel.__dict__,
                 'checks': [r.as_dict() for r in report.results],
+                'workloads': [w.name for w in report.workloads],
+                'reclaimed': [w.name for w in report.workloads] if reclaim and not report.already_up else [],
                 'commands': [render(c) for c in plan],
                 'agent_command': render(agent_line),
             }

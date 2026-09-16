@@ -5,7 +5,7 @@
 #
 # What changed from v5 (entrius/sparkinfer v0.5.7 — do not bless: it predates sparkinfer#1088, so past 16K tokens the
 # decode attended only the sink and the last 4K and an agent lost its own context):
-#   * image: their tag at or after 30bc52d (drain exits at once when idle, SPARKINFER_DRAIN_GRACE_S, 429 bodies with
+#   * image: their v0.5.8 (b1ed168; drain exits at once when idle, SPARKINFER_DRAIN_GRACE_S, 429 bodies with
 #     type/code, SPARKINFER_NO_DOWNLOAD, the #1088 fix). Their entrypoint execs the server, so SIGTERM lands.
 #   * the DSpark drafter (speculative decoding) is on: a second 1.4 GB artifact, SPARKINFER_MODE=serve-dspark.
 #   * CTX 65536 (the product caps context at 64K; 131072 with the drafter peaks ~31.4 GB on a 31.8 GB card).
@@ -19,13 +19,13 @@
 #     65536 with the drafter, profile, concurrency (upstream fixed the serialised 4 × 8k case).
 name: qwen3.8-27b-nvfp4
 version: 6
-description: Qwen3.8-27B (NVFP4) chat with the DSpark drafter on sparkinfer's release container, one RTX 5090 per instance
+description: Qwen3.8-27B (NVFP4) chat with the DSpark drafter on sparkinfer v0.5.8's release container, one RTX 5090 per instance
 runtime: sparkinfer
-image: ghcr.io/gittensor-ai-lab/sparkinfer-qwen38@sha256:0000000000000000000000000000000000000000000000000000000000000000  # TODO the tag's digest
+image: ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:v0.5.8@sha256:0000000000000000000000000000000000000000000000000000000000000000  # TODO the digest once ghcr has the tag (building 9/16)
 placement:
   gpu_types: {include: [RTX5090]}
   cards_per_instance: 1
-  min_vram_gb: 32            # TODO measure at CTX 65536 with the drafter (upstream: ~31.4 GB peak at 131072); v5 was 25 GB resident, no drafter
+  min_vram_gb: 32            # upstream 9/16: 30.1 GB peak at CTX 65536 with the drafter (30,835 MiB under 4 × 16K prompts); 30 is too tight
   max_load_s: 90             # TODO measure: v5 loaded in 11–17 s warm; the drafter is a second load
 run:
   env:
@@ -90,7 +90,7 @@ profile:                     # health and standing only, never pay. TODO re-qual
   decode_tps_single: 94      # v5 (no drafter, 9/15): 94 tok/s single, 13k tok/s prefill, 25 GB resident
   decode_tps_aggregate: 338
   prefill_tps: [12500, 13000]
-  vram_gb: 25
+  vram_gb: 30                # upstream 9/16: 30,057 MiB idle / 30,835 MiB peak at 65536 with the drafter (v5 no-drafter: 25)
 front_door:
   type: gateway-openai
   port: 8080

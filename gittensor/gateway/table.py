@@ -198,9 +198,9 @@ class InstanceTable:
 
     def model_objects(self) -> list[dict[str, Any]]:
         """One object per model name with a routable instance: the runtime's own object (capabilities kept) with the
-        manifest name as ``id``, ``max_output_tokens`` only when the blessed manifest names one (``profile``; the
-        gateway invents no cap of its own, Kimbo 9/16), then the operator override (keyed by name, then by entry id)
-        merged on top."""
+        manifest name as ``id``, ``max_output_tokens`` from the blessed manifest when it names one (``profile``), else
+        the runtime's own advertised number, else absent (the gateway invents and clamps no cap of its own, Kimbo
+        9/16), then the operator override (keyed by name, then by entry id) merged on top."""
         source = self.models_source()
         by_name: dict[str, str] = {}
         for entry_id in sorted(source, key=_entry_order):
@@ -210,10 +210,9 @@ class InstanceTable:
             data = [m for m in self.runtime_models.get(entry_id, []) if isinstance(m, dict)]
             runtime = next((m for m in data if m.get('id') == name), data[0] if data else {})
             obj = {**copy.deepcopy(runtime), 'id': name, 'object': 'model', 'owned_by': 'gittensor'}
-            obj.pop('max_output_tokens', None)
             cap = manifest_output_cap(next((i.manifest for i in source[entry_id] if i.manifest), None))
             if cap:
-                obj['max_output_tokens'] = cap
+                obj['max_output_tokens'] = cap  # else the runtime's own stays as advertised, or there is none
             for key in (name, entry_id):
                 _merge(obj, {k: v for k, v in self.overrides.get(key, {}).items() if k != 'id'})
             out.append(obj)
@@ -221,7 +220,7 @@ class InstanceTable:
 
 
 def manifest_output_cap(manifest: Manifest | None) -> int | None:
-    """The output cap the manifest names (``profile.max_output_tokens``, a number), or None: no cap is published."""
+    """The output cap the manifest names (``profile.max_output_tokens``, a number), or None: the runtime's own stands."""
     value = manifest.profile.get('max_output_tokens') if manifest is not None else None
     return int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0 else None
 

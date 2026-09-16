@@ -390,35 +390,38 @@ class TestDownCommand:
         assert docker_calls == [['docker', 'rm', '-f', 'gt-agent-runner'], ['docker', 'rm', '-f', 'gt-agent']]
         assert result.output.count('Removed') == 2
 
-    def test_our_workloads_are_drained_and_removed_before_the_agent(self, runner, docker_calls, probe):
+    def test_the_agent_goes_first_then_our_workloads_are_drained_and_removed(self, runner, docker_calls, probe):
+        """The agent is removed before any workload: the controller then only ever sees "unreachable" and "gone after
+        unreachable" (lease ends at the last good heartbeat), never a workload vanishing under a live agent."""
         probe.workloads = [ORPHAN, STOPPED, UNLABELLED]
         result = runner.invoke(cli, ['down', '--json'])
         assert result.exit_code == 0, result.output
         assert docker_calls == [
+            ['docker', 'rm', '-f', 'gt-agent-runner'],
+            ['docker', 'rm', '-f', 'gt-agent'],
             ['docker', 'stop', '--time', '240', ORPHAN.container_id],  # SIGTERM, the manifest's drain.max_s
             ['docker', 'stop', '--time', '30', UNLABELLED.container_id],  # no label: the 30 s default; STOPPED: no stop
             ['docker', 'rm', '-f', ORPHAN.container_id],
             ['docker', 'rm', '-f', STOPPED.container_id],
             ['docker', 'rm', '-f', UNLABELLED.container_id],
-            ['docker', 'rm', '-f', 'gt-agent-runner'],
-            ['docker', 'rm', '-f', 'gt-agent'],
         ]
         payload = json.loads(result.stdout)
         assert payload['workloads'] == [ORPHAN.name, STOPPED.name, UNLABELLED.name] and payload['list_error'] == ''
-        assert [(c['container'], c['action'], c['ok']) for c in payload['containers']][:3] == [
-            (ORPHAN.name, 'stop', True), (UNLABELLED.name, 'stop', True), (ORPHAN.name, 'rm', True),
+        assert [(c['container'], c['action'], c['ok']) for c in payload['containers']][:4] == [
+            ('gt-agent-runner', 'rm', True), ('gt-agent', 'rm', True), (ORPHAN.name, 'stop', True), (UNLABELLED.name, 'stop', True),
         ]  # fmt: skip
 
         docker_calls.clear()
         result = runner.invoke(cli, ['down', '--now'])  # no wait: rm -f at once
         assert result.exit_code == 0 and not any(c[1] == 'stop' for c in docker_calls)
-        assert [c[-1] for c in docker_calls] == [ORPHAN.container_id, STOPPED.container_id, UNLABELLED.container_id, 'gt-agent-runner', 'gt-agent']  # fmt: skip
+        assert [c[-1] for c in docker_calls] == ['gt-agent-runner', 'gt-agent', ORPHAN.container_id, STOPPED.container_id, UNLABELLED.container_id]  # fmt: skip
         assert 'Drained' not in result.output and result.output.count('Removed') == 5
 
         docker_calls.clear()
         result = runner.invoke(cli, ['down', '--dry-run'])
         assert docker_calls == [] and f'docker stop --time 240 {ORPHAN.container_id}' in result.output
-        assert result.output.index('docker stop') < result.output.index('docker rm -f gt-agent-runner')
+        assert result.output.index('docker rm -f gt-agent-runner') < result.output.index('docker rm -f gt-agent\n')
+        assert result.output.index('docker rm -f gt-agent\n') < result.output.index('docker stop')
 
     def test_missing_containers_are_reported_quietly(self, runner, probe):
         missing = subprocess.CompletedProcess([], 1, '', 'Error response from daemon: No such container: gt-agent')

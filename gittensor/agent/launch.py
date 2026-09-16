@@ -7,10 +7,12 @@
 agent line, which :func:`agent_run_command` reproduces here so ``--dry-run`` can print it and tests can hold the
 shell script to the same flags. ``gitt up --no-update`` issues :func:`agent_run_command` directly (local builds).
 
-``gitt down`` is a clean leave (Kimbo 9/16; the 9/16 soak left the 27B serving with no agent behind it): it lists the
-controller's workload containers on the box (``INSTANCE_LABEL``, named ``gt-i-…``), drains and stops each (SIGTERM,
-wait up to the manifest's ``drain.max_s`` from the container's ``DRAIN_LABEL``, else ``WORKLOAD_STOP_DEFAULT_S``),
-removes them, then the runner and the agent. ``gitt up --reclaim`` uses the same commands on a workload left behind.
+``gitt down`` is a clean leave (Kimbo 9/16; the 9/16 soak left the 27B serving with no agent behind it): it removes the
+runner and the agent first, then lists the controller's workload containers on the box (``INSTANCE_LABEL``, named
+``gt-i-…``), drains and stops each (SIGTERM, wait up to the manifest's ``drain.max_s`` from the container's
+``DRAIN_LABEL``, else ``WORKLOAD_STOP_DEFAULT_S``) and removes them. The agent goes first so the controller can only
+ever see "unreachable" and then "gone after unreachable" (a stop, not a cheat), never a container gone under a live
+agent. ``gitt up --reclaim`` uses the same drain-and-remove commands on a workload left behind.
 """
 
 from __future__ import annotations
@@ -182,12 +184,14 @@ def down_commands(
     workloads: list[Workload] | None = None,
     now: bool = False,
 ) -> list[list[str]]:
-    """Our workloads first (drained, then removed, so nothing keeps serving with no agent behind it and no orphan holds
-    a workload port for the next `gitt up`), then the runner (so it cannot resurrect the agent), then the agent."""
+    """The runner first (so it cannot resurrect the agent), then the agent, then our workloads (drained, then removed,
+    so no orphan holds a workload port for the next `gitt up`). The agent goes before the workloads on purpose: with
+    the agent gone the controller can only ever see "unreachable" and then "gone after unreachable" (the lease ends at
+    the last good heartbeat, no bench); a workload removed under a live agent looks like a killed placement."""
     return [
-        *workload_stop_commands(workloads or [], now),
         ['docker', 'rm', '-f', runner_name],
         ['docker', 'rm', '-f', agent_name],
+        *workload_stop_commands(workloads or [], now),
     ]
 
 

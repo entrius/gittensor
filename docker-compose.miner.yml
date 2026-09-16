@@ -27,6 +27,10 @@ services:
       CTX: ${CTX:-}
       # already baked into the image; repeated here so nobody turns it off by accident (contract D1)
       SPARKINFER_DETERMINISTIC: "1"
+      # 19ef39ec2 ships sparse GQA on by default: past 16,384 tokens decode sees only the sink and the last 4,096
+      # tokens, so a long prompt silently loses its middle. Off = full attention; identical output under 16K,
+      # ~10% slower decode above it (sparkinfer, 9/16). The pin and its digest are unchanged.
+      SPARKINFER_SPARSE_GQA6: "0"
     ports:
       - "127.0.0.1:${RUNTIME_PORT:-8080}:8080"
     volumes:

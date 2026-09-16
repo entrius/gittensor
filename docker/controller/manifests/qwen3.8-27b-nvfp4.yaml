@@ -1,65 +1,70 @@
-# The Qwen3.8-27B (NVFP4) chat workload as blessed for the compute pool: the phase-0 sparkinfer image, unchanged.
-# Spec: entrius/gittensor-compute-template MANIFEST.md. Bless: `gitt controller bless <this> --image <repo@sha256>`.
+# The Qwen3.8-27B (NVFP4) chat workload as blessed for the compute pool, v6 (9/16): sparkinfer's own release
+# container (ghcr.io/gittensor-ai-lab/sparkinfer-qwen38, built and published from their repo), blessed by digest.
+# The same document is PR'd to gittensor-ai-lab/sparkinfer as docker/gittensor-manifest.yaml (the author-owned copy,
+# baked at /manifest.yaml); at bless time the controller mounts THIS signed copy over it and pins the digest.
 #
-# The image is not template-shaped: its entrypoint (docker/sparkinfer-entrypoint.sh) downloads the model itself unless
-# `<MODELS_DIR>/<repo basename>/.revision` matches, and its run.sh re-downloads the tokenizer unless
-# `<MODELS_DIR>/.tokenizer_repo` matches TOK_REPO. The workload has no egress and a read-only volume, so every file
-# either script checks is a pre-staged, sha256-verified artifact:
-#   * the model directory at the pinned revision; the controller's fetch writes its `.revision` marker, which the
-#     directory hash skips (top-level dotfiles are markers, not content);
-#   * tokenizer.json from that same revision, because the entrypoint copies it to MODELS_DIR when absent (a write);
-#   * `.tokenizer_repo` as a `data:` artifact, because run.sh downloads a tokenizer when it is absent (egress).
-# The volume stays read-only: `read_only: false` would still fail on the tokenizer marker, and it would let the
-# workload rewrite the weights it is verified against.
+# What changed from v5 (entrius/sparkinfer v0.5.7 — do not bless: it predates sparkinfer#1088, so past 16K tokens the
+# decode attended only the sink and the last 4K and an agent lost its own context):
+#   * image: their tag at or after 30bc52d (drain exits at once when idle, SPARKINFER_DRAIN_GRACE_S, 429 bodies with
+#     type/code, SPARKINFER_NO_DOWNLOAD, the #1088 fix). Their entrypoint execs the server, so SIGTERM lands.
+#   * the DSpark drafter (speculative decoding) is on: a second 1.4 GB artifact, SPARKINFER_MODE=serve-dspark.
+#   * CTX 65536 (the product caps context at 64K; 131072 with the drafter peaks ~31.4 GB on a 31.8 GB card).
+#   * SPARKINFER_MAX_OUTPUT_TOKENS 4096 (das caps there too), so a drain never waits on more than ~45 s of decode;
+#     drain.max_s 90 with SPARKINFER_DRAIN_GRACE_S=0 (the runtime waits, the controller kills at 90).
+#   * SPARKINFER_MAX_QUEUE_DEPTH = front_door.concurrency and SPARKINFER_ADMISSION_WAIT_S=0: refuse, never queue.
+#   * canaries at temperature 0 (omitted sampling now follows generation_config.json).
+#   * no tokenizer.json / .tokenizer_repo artifacts: the server reads MODEL_DIR/tokenizer.json.
+#   * TODO before bless (qualification on our own card, `deploy --box`): the digest, max_load_s, min_vram_gb at
+#     65536 with the drafter, profile, concurrency (upstream fixed the serialised 4 × 8k case).
 name: qwen3.8-27b-nvfp4
-version: 5
-description: Qwen3.8-27B (NVFP4) chat on sparkinfer v0.5.7, one RTX 5090 per instance
+version: 6
+description: Qwen3.8-27B (NVFP4) chat with the DSpark drafter on sparkinfer's release container, one RTX 5090 per instance
 runtime: sparkinfer
-image: entrius/sparkinfer:v0.5.7@sha256:9968020928cfbed73796fbbbc86a330d4260cfa78b1f48908cde82c6f3a13f32
+image: ghcr.io/gittensor-ai-lab/sparkinfer-qwen38@sha256:0000000000000000000000000000000000000000000000000000000000000000  # TODO the tag's digest
 placement:
   gpu_types: {include: [RTX5090]}
   cards_per_instance: 1
-  min_vram_gb: 30            # 25 GiB resident at CTX 131072 (9/8)
-  max_load_s: 60             # 9/15 measured 16.5 s with weights in page cache on a fast disk; 60 until a cold-cache load on a slower box is measured (Kimbo 9/15)
-                             # cache because the pre-start hash had just read them; a start that skips that hash reads cold
+  min_vram_gb: 32            # TODO measure at CTX 65536 with the drafter (upstream: ~31.4 GB peak at 131072); v5 was 25 GB resident, no drafter
+  max_load_s: 90             # TODO measure: v5 loaded in 11–17 s warm; the drafter is a second load
 run:
   env:
-    MODELS_DIR: /models
-    SPARKINFER_DETERMINISTIC: '0'   # v5: no output audits any more; determinism off (TTFT +2-8% when on)
-    MODEL_DIR_REPO: gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090
-    MODEL_DIR_REVISION: 8e2c0cd25468ac5c1f85f621c2b8edb15ea1f03a
-    MODEL_DIR_SHA256: model-00001-of-00002.safetensors=cdd37b0e61eccc8a3d7d08f9d1a4f52856a9d88e4e8b42089bd18a970e3a01ec,model-00002-of-00002.safetensors=713b84b8287e2193290214766c5384fa6475c5626a628e4021c2c9ca90aa61df
-    TOK_REPO: gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090
-    MODEL_NAME: qwen3.8-27b
-    CTX: '131072'
+    SPARKINFER_NO_DOWNLOAD: '1'       # pre-staged weights, no egress: a missing checkpoint fails loudly instead of downloading
+    SPARKINFER_MODE: serve-dspark     # the release container's drafter mode (gittensor-entrypoint.sh maps env → argument)
+    MODEL_DIR: /models/qwen38-nvfp4
+    DRAFT_DIR: /models/qwen38-dspark
+    MODEL_NAME: qwen3.8-27b           # the id the gateway republishes; the container's default is qwen38-nvfp4
+    CTX: '65536'
+    SPARKINFER_MAX_OUTPUT_TOKENS: '4096'
+    SPARKINFER_MAX_QUEUE_DEPTH: '1'   # keep equal to front_door.concurrency (TODO after re-measuring)
+    SPARKINFER_ADMISSION_WAIT_S: '0'
+    SPARKINFER_DRAIN_GRACE_S: '0'
+    SPARKINFER_DETERMINISTIC: '0'     # no output audits; on costs TTFT
   volumes: [{name: models, mount: /models, read_only: true}]
 network:
-  egress: []                 # none: the controller pre-stages every file the entrypoint and run.sh look for
+  egress: []                 # none: the controller pre-stages every file the entrypoint looks for
 artifacts:
-  - path: /models/Qwen3.8-27B-NVFP4-RTX5090
+  - path: /models/qwen38-nvfp4
     source: hf://gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090
     revision: 8e2c0cd25468ac5c1f85f621c2b8edb15ea1f03a
-    sha256: d4382c5ebc8c9ece150aafc831910e01b6fb022ac9a72d36c3acc9715456e632
-  - path: /models/tokenizer.json
-    source: https://huggingface.co/gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090/resolve/8e2c0cd25468ac5c1f85f621c2b8edb15ea1f03a/tokenizer.json
-    revision: 8e2c0cd25468ac5c1f85f621c2b8edb15ea1f03a
-    sha256: 0997f410c57a1f4e53b09e4be8f4a172d90edd9564368fb0847030937229b9f3
-  - path: /models/.tokenizer_repo
-    source: data:,gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090
-    revision: inline
-    sha256: bcd0e1c18dd8fe8def2cbb7d8d80e29b7b2d7869f2b89f7f158685951fd479d9
+    sha256: d4382c5ebc8c9ece150aafc831910e01b6fb022ac9a72d36c3acc9715456e632   # same files as v5; the hash is over relative paths
+  - path: /models/qwen38-dspark
+    source: hf://gittensor-model-hub/Qwen3.8-27B-DSpark-NVFP4
+    revision: eba1ac5a66c74902eaa95a4000a7c5eda96d8e95
+    sha256: 506d2ebdc91de82bb5fcd8413490eafb484731d765d7b509ee7a60dad002c865
 health:
   http: {path: /v1/models, port: 8080, expect_status: 200}
   interval_s: 60
   failure_threshold: 3
 entry_canary:                # one picked at random each start; sent at front_door.concurrency (warmup)
   # Every canary is a tool call: one call proves the weights decode AND that `tools` reach the chat template. Thinking
-  # is off (the release's `enable_thinking: false`): Qwen3.8 thinks by default and would spend max_tokens before calling.
+  # is off (Qwen3.8 thinks by default and would spend max_tokens before calling); temperature 0 so the canary does not
+  # depend on the checkpoint's generation_config.json.
   - type: http
     http: {method: POST, path: /v1/chat/completions, port: 8080}
     body:
       messages: [{role: user, content: "What is 17 × 23? Use the multiply tool."}]
       max_tokens: 64
+      temperature: 0
       enable_thinking: false
       tools:
         - type: function
@@ -73,6 +78,7 @@ entry_canary:                # one picked at random each start; sent at front_do
     body:
       messages: [{role: user, content: "What's the weather in Paris right now? Use the tool."}]
       max_tokens: 64
+      temperature: 0
       enable_thinking: false
       tools:
         - type: function
@@ -80,21 +86,18 @@ entry_canary:                # one picked at random each start; sent at front_do
             name: get_weather
             parameters: {type: object, properties: {city: {type: string}}, required: [city]}
     pass: {status: 200, regex: '(?=[\s\S]*"finish_reason":\s*"tool_calls")(?=[\s\S]*"name":\s*"get_weather")(?=[\s\S]*\\"city\\":\s*\\"Paris)'}
-profile:                     # health and standing only, never pay
-  decode_tps_single: 93      # 9/15 client side, 256 tokens after 30 / 8k / 18k / 32k-token prompts: 92.6–97.9 tok/s
-  decode_tps_aggregate: 338  # 9/8, 16 concurrent short prompts; 9/15: 275 at 4 short, 67 at 4 × 8k (served in turn)
-  prefill_tps: [6700, 7500]  # 9/15 server ttft_ms: 7.5k tok/s at 8k, 7.0k at 18k, 6.75k at 32k tokens
+profile:                     # health and standing only, never pay. TODO re-qualify on the new tag with the drafter;
+  decode_tps_single: 94      # v5 (no drafter, 9/15): 94 tok/s single, 13k tok/s prefill, 25 GB resident
+  decode_tps_aggregate: 338
+  prefill_tps: [12500, 13000]
   vram_gb: 25
 front_door:
   type: gateway-openai
   port: 8080
-  concurrency: 1             # 9/15: 4 concurrent 8k-token prompts are served one at a time (server TTFT 1.1 / 4.4 / 8.3 /
-                             # 12.2 s; the same with SPARKINFER_DETERMINISTIC=0), so a second slot only queues inside the
-                             # runtime, which never 429s (max_queue_depth unlimited). Short prompts do batch (275 tok/s at 4).
+  concurrency: 1             # TODO re-measure at agent-sized prompts: upstream fixed the case where 4 × 8k prompts were served in turn
   routes:
     - {path: /v1/chat/completions, method: POST, stream: true}
     - {path: /v1/models, method: GET}
 drain:
   type: requests
-  max_s: 30                  # what sparkinfer 19ef39ec2 actually delivers: it force-exits 30 s after SIGTERM whatever is in flight (Kimbo 9/15; upstream asks filed)
-                             # SIGTERM, and an idle instance takes all 30 s (it reports requests still draining)
+  max_s: 90                  # 4096 output tokens at ~94 tok/s ≈ 45 s, doubled; SPARKINFER_DRAIN_GRACE_S=0 leaves the kill to us

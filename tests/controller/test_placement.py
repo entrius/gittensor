@@ -842,19 +842,25 @@ def test_bless_deploy_registry_reconcile_instances_commands(state, tmp_path):
     assert 'LEASED → DRAINING → CHECKING' in drained.output and box.containers == {}
 
 
-def test_the_committed_27b_manifest_stages_every_file_the_phase0_image_checks():
+def test_the_committed_27b_manifest_agrees_with_itself_and_with_the_release_container():
+    """v6 (9/16): sparkinfer's own release container. Its entrypoint reads MODEL_DIR / DRAFT_DIR, so both must be
+    pre-staged artifacts; refuse-never-queue means the runtime's queue depth equals our front door's concurrency; the
+    drain window must cover the output cap; the canaries must not depend on the checkpoint's sampling defaults. The
+    digest is a placeholder until upstream tags (bless pins it), so the placeholder is allowed here and nowhere else."""
     manifest = load_manifest(
-        Path(__file__).parents[2] / 'docker' / 'controller' / 'manifests' / 'qwen3.8-27b-nvfp4.yaml'
+        Path(__file__).parents[2] / 'docker' / 'controller' / 'manifests' / 'qwen3.8-27b-nvfp4.yaml',
+        allow_placeholder_digest=True,
     )
     spec = build_run_spec('qwen3.8-27b-nvfp4@1', manifest, UUID_5090, 'i-0123456789ab')
     env = dict(spec.env)
-    model_dir = f'{env["MODELS_DIR"]}/{env["MODEL_DIR_REPO"].rsplit("/", 1)[1]}'
-    assert [a.path for a in manifest.artifacts] == [model_dir, '/models/tokenizer.json', '/models/.tokenizer_repo']
+    assert [a.path for a in manifest.artifacts] == [env['MODEL_DIR'], env['DRAFT_DIR']]
+    assert env['SPARKINFER_NO_DOWNLOAD'] == '1' and env['SPARKINFER_MODE'] == 'serve-dspark'
+    assert env['SPARKINFER_MAX_QUEUE_DEPTH'] == str(manifest.front_door.concurrency)
+    assert env['SPARKINFER_ADMISSION_WAIT_S'] == '0' and env['SPARKINFER_DRAIN_GRACE_S'] == '0'
+    assert manifest.drain.max_s >= 2 * int(env['SPARKINFER_MAX_OUTPUT_TOKENS']) / 94  # ~94 tok/s decode, doubled
+    assert all(c.spec['body']['temperature'] == 0 for c in manifest.entry_canary)
     assert spec.volumes == (('/var/lib/gt-models/qwen3.8-27b-nvfp4/models', '/models', True),)
-    assert spec.network == 'gt-noegress' and manifest.image_digest.startswith('sha256:9968020928')
-    marker = manifest.artifacts[2]
-    assert hashlib.sha256(env['TOK_REPO'].encode()).hexdigest() == marker.sha256  # run.sh compares it to TOK_REPO
-    assert marker.source == 'data:,' + env['TOK_REPO'] and manifest.artifacts[0].revision == env['MODEL_DIR_REVISION']
+    assert spec.network == 'gt-noegress' and manifest.image.startswith('ghcr.io/gittensor-ai-lab/sparkinfer-qwen38@')
 
 
 # ---------------------------------------------------------------- workload ports ------------------------------------

@@ -193,7 +193,9 @@ def test_deployments_are_separate_and_round_trip(tmp_path):
     store.set('x@1', enabled=True, replicas=2)
     store.set('x@1', enabled=False)
     reopened = DeploymentStore(tmp_path / 'deployments.json')
-    assert vars(reopened.get('x@1')) == {'enabled': False, 'replicas': 2, 'box': ''} and reopened.get('x@1').desired == 0
+    assert (
+        vars(reopened.get('x@1')) == {'enabled': False, 'replicas': 2, 'box': ''} and reopened.get('x@1').desired == 0
+    )
     with pytest.raises(ValueError):
         store.set('x@1', replicas=-1)
 

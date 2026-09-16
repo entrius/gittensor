@@ -131,7 +131,10 @@ class TestRunLines:
             ['git', '-C', str(REPO), 'ls-files', 'docker/agent/keys'], capture_output=True, text=True
         ).stdout.split()
         assert not [p for p in tracked if Path(p).name.startswith('gt_')]
-        assert config.RELEASE_PUBKEY_OPENSSH.startswith('ssh-ed25519 ') and config.DEV_KEY_MARKER not in config.RELEASE_PUBKEY_OPENSSH
+        assert (
+            config.RELEASE_PUBKEY_OPENSSH.startswith('ssh-ed25519 ')
+            and config.DEV_KEY_MARKER not in config.RELEASE_PUBKEY_OPENSSH
+        )
 
 
 # --- the release channel --------------------------------------------------------------------------------------------

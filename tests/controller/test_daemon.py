@@ -40,6 +40,7 @@ from tests.controller.conftest import (
     UUID_5090,
     UUID_5090_B,
     FakeProof,
+    challenge_for,
     fixture,
 )
 from tests.controller.test_cli import FAKE_PROOF, HK_A, HK_B, KEY_2, NET, admit, box_runner, invoke, round_args
@@ -166,6 +167,47 @@ def test_a_drained_card_is_re_proved_at_the_next_watch_tick_and_the_round_does_n
         assert len(proofs(drained)) == 2 and len(proofs(other)) == 1  # proved once by the round, not twice
         controller.watch_once()
         assert len(proofs(drained)) == 2
+
+
+def test_the_one_box_probe_runs_the_newest_build(world):
+    root, registry = world
+    shutil.copy(FIXTURES / 'nvml_allowlist.json', root / 'nvml_allowlist.json')
+    seed(root, idle_box('hkA'), replicas=1)
+    docker = FakeDocker()
+    one = fixture('nvidia_smi_5090.csv')
+    prover = box_runner(nvidia_smi=one + one.replace(UUID_5090, UUID_5090_B))
+    setup = ctl._setup(
+        root, None, FAKE_PROOF, (), (AGENT_DIGEST,), (), 'entrius/gt-proof:test', None, NETWORK_TARGETS, 100
+    )
+    version, probes = ['fake-1'], []
+
+    class Probes(Notes):
+        def reprove(self, report):
+            probes.append(report.provider)
+
+    controller = Controller(
+        ctl.StateDir(root),
+        registry,
+        make_runner=lambda box, purpose: docker.runner,
+        run_round=lambda proof, **shared: ctl.run_round(setup, proof, **shared),
+        load_proof=lambda: FakeProof(version[0]),
+        reprove=lambda proof, box_id, **shared: ctl.reprove_box(setup, proof, box_id, **shared),
+        reporter=Probes(),
+    )
+    with patch.object(ctl, '_make_runner', side_effect=lambda st, box, ca, purpose: prover):
+        assert controller.round_once().provider == 'fake-1'
+        controller.reconcile_once()
+        assert controller.reconciler.join(5)
+        version[0] = 'fake-2'  # `--build-cmd` made a new version between the round and the re-prove
+        DeploymentStore(root / 'deployments.json').set(ENTRY, enabled=False)
+        controller.reconcile_once()
+        assert controller.reconciler.join(5)
+        controller.watch_once()
+        _until(lambda: probes)
+    assert probes == ['fake-2'] and controller.proof is not None and controller.proof.version == 'fake-2'
+    staged = [c for c in prover.calls if c.startswith('docker create')]
+    assert len(staged) == 3  # two by the round, one by the re-prove
+    assert any(f'--challenge {challenge_for(u, "fake-2")}' in staged[-1] for u in (UUID_5090, UUID_5090_B))
 
 
 def test_a_discovered_box_is_proved_at_the_next_watch_tick_and_the_round_does_not_prove_it_twice(world):

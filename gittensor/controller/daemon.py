@@ -385,7 +385,8 @@ class Controller:
     def reprove_once(self) -> list[str]:
         """Launch the one-box probe on every box that is due one and not already being probed (or waiting to retry
         one that got no verdict): an IDLE box with a CHECKING card, and a box at ADMIT (its first proof, at once).
-        Returns the boxes launched."""
+        The provider (version, binary, secret store) is re-read first, exactly as the round does after ``--build-cmd``,
+        so the probe runs the newest build. Returns the boxes launched."""
         if self._reprove is None:
             return []
         now = time.time()
@@ -404,13 +405,14 @@ class Controller:
             )
         if not due:
             return []
-        proof = self.proof
-        if proof is None:
-            try:
-                proof = self.proof = self._load_proof()
-            except Exception as e:
+        try:
+            proof = self.proof = self._load_proof()  # the newest build, re-read as the round does (Kimbo 9/16)
+        except Exception as e:
+            proof = self.proof
+            if proof is None:
                 self.reporter.note('reprove', f'not run: no proof provider ({e})')
                 return []
+            self.reporter.note('reprove', f'keeping the previous proof ({e})')
         for box_id in due:
             thread = threading.Thread(
                 target=self._reprove_box, args=(proof, box_id), name=f'reprove-{box_id[:16]}', daemon=True

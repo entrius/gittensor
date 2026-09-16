@@ -723,11 +723,12 @@ def reprove_box(
     box_locks: BoxLocks,
     lock_wait_s: float = cfg.ROUND_BOX_LOCK_WAIT_S,
 ) -> RoundReport:
-    """One box's CHECKING cards proved at once, inside `gitt controller run` (Kimbo 9/15), instead of at the next 20-min
-    round: identity on the box and the same two-phase probe (``probe_box``: stage, fire, clean up) on those cards only,
-    holding the box's lock, then ``apply_verdict`` returning only the proved cards to IDLE. A BENCH verdict benches the
-    box as the round would. No verdict (the lock stayed held, no CHECKING card left, SSH down) changes nothing: the
-    daemon retries later, and unreachable boxes are counted by the round."""
+    """One box proved at once, inside `gitt controller run`, instead of at the next 20-min round: an IDLE box's CHECKING
+    cards (Kimbo 9/15), or every card of a box at ADMIT, its first proof (Kimbo 9/16). Identity on the box and the same
+    two-phase probe (``probe_box``: stage, fire, clean up) on those cards only, holding the box's lock, then
+    ``apply_verdict`` (pinning an ADMIT box; returning only the proved cards to IDLE). A BENCH verdict benches the box
+    as the round would. No verdict (the lock stayed held, no CHECKING card left, SSH down) changes nothing: the daemon
+    retries later, and unreachable boxes are counted by the round."""
     provider = str(getattr(proof, 'version', '?'))
     started = time.monotonic()
     with write_lock:
@@ -746,18 +747,21 @@ def reprove_box(
             fleet: dict[str, Iterable[str]] = {
                 b.box_id: list(b.pinned_uuids) for b in store.boxes.values() if b.box_id != box_id
             }
-        if current is None or current.status != IDLE or not current.host:
-            row.busy = f'{current.status if current else "removed"} meanwhile: not re-proved'
+        if current is None or current.status not in (ADMIT, IDLE) or not current.host or current.endpoint_changed:
+            why = 'endpoint changed' if current is not None and current.endpoint_changed else None
+            row.busy = f'{why or (current.status if current else "removed")} meanwhile: not re-proved'
             return report()
-        checking = sorted(uuid for uuid, card in current.cards.items() if card.state == CHECKING)
-        if not checking:
-            row.busy = 'no CHECKING card left: nothing to re-prove'
-            return report()
+        cards: list[str] | None = None  # ADMIT: every card the box reports, its first proof
+        if current.status == IDLE:
+            cards = sorted(uuid for uuid, card in current.cards.items() if card.state == CHECKING)
+            if not cards:
+                row.busy = 'no CHECKING card left: nothing to re-prove'
+                return report()
         row.box, row.status_before = current, current.status
         row.runner = TimedRunner(_make_runner(setup.state, current, setup.ca_key, 'reprove'))
         try:
             outcome = check_box(
-                row.runner, current, fleet, proof, setup.allowlist(), setup.config, time.time(), cards=checking
+                row.runner, current, fleet, proof, setup.allowlist(), setup.config, time.time(), cards=cards
             )
         finally:
             row.runner.close()
@@ -2115,8 +2119,8 @@ def run_command(
     reconciler (every --reconcile-interval), the in-lease watch (heartbeat every --heartbeat-interval, manifest
     health probe every health.interval_s) with the pay ledger's settlement tick, the signed scorecard (every
     --scorecard-interval) and, with --discover, discovery (the metagraph every --discover-interval), each on its own
-    thread over one state. A card that reaches CHECKING is re-proved on its own box at the next watch tick, not at
-    the next round.
+    thread over one state. A card that reaches CHECKING, or a box that enters ADMIT, is proved on its own box at the
+    next watch tick, not at the next round; with --discover one metagraph read runs before round 1.
 
     \b
     It holds the state directory for its whole life: `check`, `round`, `reconcile` and `discover` refuse beside it

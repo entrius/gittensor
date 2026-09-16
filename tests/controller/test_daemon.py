@@ -2,8 +2,9 @@
 # Copyright © 2025 Entrius
 
 """gitt controller run over fakes: a slow start on one box blocks neither the proof round on another box nor the other
-loops; run owns the state directory (one-shots and a second run refuse beside it); run serves its loops, stops on
-SIGTERM with state written, and status reads what it did."""
+loops; a drained card and a newly discovered box are proved at the next watch tick; discovery runs before round 1;
+run owns the state directory (one-shots and a second run refuse beside it); run serves its loops, stops on SIGTERM
+with state written, and status reads what it did."""
 
 import json
 import os
@@ -38,7 +39,8 @@ from tests.controller.conftest import (
     FakeProof,
     fixture,
 )
-from tests.controller.test_cli import FAKE_PROOF, HK_A, HK_B, NET, admit, box_runner, invoke, round_args
+from tests.controller.test_cli import FAKE_PROOF, HK_A, HK_B, KEY_2, NET, admit, box_runner, invoke, round_args
+from tests.controller.test_discovery import PUB_B, metagraph
 from tests.controller.test_placement import ENTRY, FakeDocker, idle_box, keypair, make_world, seed
 
 
@@ -161,6 +163,82 @@ def test_a_drained_card_is_re_proved_at_the_next_watch_tick_and_the_round_does_n
         assert len(proofs(drained)) == 2 and len(proofs(other)) == 1  # proved once by the round, not twice
         controller.watch_once()
         assert len(proofs(drained)) == 2
+
+
+def test_a_discovered_box_is_proved_at_the_next_watch_tick_and_the_round_does_not_prove_it_twice(world):
+    root, registry = world
+    shutil.copy(FIXTURES / 'nvml_allowlist.json', root / 'nvml_allowlist.json')
+    prover = box_runner()
+    setup = ctl._setup(
+        root, None, FAKE_PROOF, (), (AGENT_DIGEST,), (), 'entrius/gt-proof:test', None, NETWORK_TARGETS, 100
+    )
+    controller = Controller(
+        ctl.StateDir(root),
+        registry,
+        make_runner=lambda box, purpose: prover,
+        run_round=lambda proof, **shared: ctl.run_round(setup, proof, **shared),
+        load_proof=FakeProof,
+        reprove=lambda proof, box_id, **shared: ctl.reprove_box(setup, proof, box_id, **shared),
+        read_chain=lambda: metagraph((HK_B, PUB_B, 2200, True)),
+        scan_host_key=lambda host, port: KEY_2,
+    )
+
+    def proofs():
+        return [c for c in prover.calls if c.startswith('docker create')]
+
+    with patch.object(ctl, '_make_runner', side_effect=lambda st, box, ca, purpose: prover):
+        report = controller.discover_once()  # t = 0, between rounds: the chain publishes a new box
+        assert report is not None and [a.kind for a in report.actions] == ['admit']
+        assert controller.boxes.boxes[HK_B].status == ADMIT and not proofs()
+
+        assert controller.watch_once().visited == []  # the next tick: its first proof, on its own
+        _until(lambda: controller.boxes.boxes[HK_B].status == IDLE)
+        _until(lambda: (controller.status.get('reprove') or {}).get('verdict') == 'ADMIT')
+        box = controller.boxes.boxes[HK_B]
+        assert box.pinned_uuids == [UUID_5090] and box.cards[UUID_5090].state == IDLE and len(proofs()) == 1
+        assert controller.status['reprove']['before'] == ADMIT and controller.status['reprove']['after'] == IDLE
+        assert controller.reprove_once() == [] and len(proofs()) == 1  # nothing at ADMIT or CHECKING: no more
+
+        report = controller.round_once()  # t = 20 min: the fleet round proves it once more, like any IDLE box
+        assert report.boxes[0].verdict.admitted and report.boxes[0].status_before == IDLE and len(proofs()) == 2
+        controller.watch_once()
+        assert len(proofs()) == 2
+
+
+def test_discovery_runs_before_round_1_and_without_it_the_round_runs_at_start(tmp_path):
+    def controller_for(name, read_chain):
+        seen = []
+        controller = Controller(
+            ctl.StateDir(tmp_path / name).ensure(),
+            registry=None,  # type: ignore[arg-type]  (no deployments: the reconciler reads nothing)
+            make_runner=lambda box, purpose: None,  # type: ignore[return-value]
+            run_round=lambda proof, **shared: (
+                seen.append(sorted(shared['store'].boxes)) or ctl.RoundReport('fake', [], [], {})
+            ),  # fmt: skip
+            load_proof=FakeProof,
+            read_chain=read_chain,
+            scan_host_key=lambda host, port: KEY_2,
+            intervals=Intervals(round_s=3600, reconcile_s=3600, watch_tick_s=3600, scorecard_s=3600, discover_s=3600),
+        )
+        return controller, seen
+
+    reads = []
+    discovering, seen = controller_for('discover', lambda: reads.append(1) or metagraph((HK_B, PUB_B, 2200, True)))
+    discovering.start()
+    try:
+        _until(lambda: seen)
+    finally:
+        assert discovering.shutdown()
+    assert seen == [[HK_B]] and reads == [1]  # round 1 saw the box discovery admitted first, and one read only
+    assert discovering.status['discover']['at'] <= discovering.status['round']['started_at']
+
+    plain, seen = controller_for('plain', None)
+    plain.start()
+    try:
+        _until(lambda: seen)
+    finally:
+        assert plain.shutdown()
+    assert seen == [[]] and 'discover' not in plain.status
 
 
 def test_run_owns_the_state_directory(state, tmp_path):

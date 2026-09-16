@@ -12,13 +12,15 @@ changes under one short lock and saves at once:
 * **the watch** every ``WATCH_TICK_S``: the generic heartbeat (``HEARTBEAT_INTERVAL_S``) and the manifest health probe
   wherever one is due; on the same tick, **the re-prove**: an IDLE box with a card in CHECKING (a drain done, a
   failed start, a health replacement) gets the proof on that box only, for its CHECKING cards, on a thread of its own,
-  so a replacement can start within a minute instead of waiting up to 20 (Kimbo 9/15). The fleet-wide round is
-  unchanged. A benched box has no cards, so nothing benched is re-proved: it waits out the bench. Then the pay
-  ledger's settlement tick (``pay/ledger.py``) whenever one is due;
+  so a replacement can start within a minute instead of waiting up to 20 (Kimbo 9/15); a box newly at ADMIT
+  (discovery, or `gitt controller admit` beside us) gets its first proof the same way, at once, instead of at the
+  next fleet round (Kimbo 9/16). The fleet-wide round is unchanged. A benched box has no cards, so nothing benched is
+  re-proved: it waits out the bench. Then the pay ledger's settlement tick (``pay/ledger.py``) whenever one is due;
 * **the scorecard** every ``SCORECARD_INTERVAL_S``: the trailing window settled at the oracle's price and written as
   ``scorecard/latest.json`` + ``latest.sha256`` for the validator (``pay/scorecard.py``).
 * **discovery** (``--discover``) every ``DISCOVER_INTERVAL_S``: the metagraph, read-only, settles which boxes exist
-  (``discovery.py``); a new box waits for the next proof round.
+  (``discovery.py``). One pass runs before round 1, so a box already published on chain is in round 1 and does not
+  wait a discovery interval at ADMIT; a box found later is proved at the next watch tick.
 
 No lock is held across a model load: a start holds only its own box, the proof round skips a box whose lock stays held
 (its cards are STARTING anyway) and proves it next round, and the watch takes no box lock at all (``locks.py``). On
@@ -40,7 +42,7 @@ from typing import Any, Protocol
 
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import HostRunner
-from gittensor.controller.checks.state import CHECKING, IDLE, BoxState, StateStore
+from gittensor.controller.checks.state import ADMIT, CHECKING, IDLE, BoxState, StateStore
 from gittensor.controller.discovery import ChainEndpoint, DiscoverReport, Discovery
 from gittensor.controller.heartbeat import Watch, WatchReport
 from gittensor.controller.locks import BoxLocks
@@ -321,8 +323,9 @@ class Controller:
         return report
 
     def reprove_once(self) -> list[str]:
-        """Launch the re-prove on every IDLE box with a CHECKING card that is not already being re-proved (or waiting
-        to retry one that got no verdict). Returns the boxes launched."""
+        """Launch the one-box probe on every box that is due one and not already being probed (or waiting to retry
+        one that got no verdict): an IDLE box with a CHECKING card, and a box at ADMIT (its first proof, at once).
+        Returns the boxes launched."""
         if self._reprove is None:
             return []
         now = time.time()
@@ -331,11 +334,13 @@ class Controller:
             due = sorted(
                 box.box_id
                 for box in self.boxes.boxes.values()
-                if box.status == IDLE
-                and box.host
+                if box.host
                 and box.box_id not in running
                 and now >= self._reprove_retry_at.get(box.box_id, 0.0)
-                and any(card.state == CHECKING for card in box.cards.values())
+                and (
+                    (box.status == ADMIT and not box.endpoint_changed)
+                    or (box.status == IDLE and any(card.state == CHECKING for card in box.cards.values()))
+                )
             )
         if not due:
             return []
@@ -437,7 +442,16 @@ class Controller:
 
     # -- the loops --------------------------------------------------------------------------------------------------
 
-    def _loop(self, name: str, once: Callable[[], Any], interval_s: float, after: Callable[[], None] | None) -> None:
+    def _loop(
+        self,
+        name: str,
+        once: Callable[[], Any],
+        interval_s: float,
+        after: Callable[[], None] | None,
+        first_wait_s: float = 0.0,
+    ) -> None:
+        if first_wait_s and self.stop.wait(first_wait_s):
+            return
         while not self.stop.is_set():
             started = time.monotonic()
             try:
@@ -458,11 +472,22 @@ class Controller:
             ('watch', self.watch_once, self.intervals.watch_tick_s, None),
             ('scorecard', self.scorecard_once, self.intervals.scorecard_s, None),
         )
+        first_wait = {}
         if self.read_chain is not None:
+            # Discovery before round 1 (Kimbo 9/16): a box already on chain is in the first round instead of waiting
+            # at ADMIT for the first discovery pass. A failed read changes nothing; the loop retries on its interval.
+            try:
+                self.discover_once()
+            except Exception as e:
+                self.reporter.note('discover', f'{type(e).__name__}: {e}')
             loops += (('discover', self.discover_once, self.intervals.discover_s, None),)
+            first_wait['discover'] = self.intervals.discover_s
         for name, once, interval_s, after in loops:
             thread = threading.Thread(
-                target=self._loop, args=(name, once, interval_s, after), name=f'controller-{name}', daemon=True
+                target=self._loop,
+                args=(name, once, interval_s, after, first_wait.get(name, 0.0)),
+                name=f'controller-{name}',
+                daemon=True,
             )
             thread.start()
             self._threads.append(thread)

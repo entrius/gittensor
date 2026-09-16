@@ -1,7 +1,7 @@
 # The MIT License (MIT)
 # Copyright © 2025 Entrius
 
-"""gitt down — a clean leave: drain and stop our workloads, then the agent and its runner."""
+"""gitt down — a clean leave: the agent and its runner go first, then our workloads are drained and stopped."""
 
 from __future__ import annotations
 
@@ -29,8 +29,9 @@ def list_workloads() -> tuple[list[Workload], str]:
 @click.option('--dry-run', is_flag=True, default=False, help='Print the docker command(s) without running them.')
 @click.option('--json', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
 def down_command(now, dry_run, json_mode):
-    """Leave cleanly: drain and stop every workload the controller placed here (gt-i-*: SIGTERM, wait up to the
-    manifest's drain.max_s, then remove), then stop the agent and the runner that keeps it updated.
+    """Leave cleanly: stop the runner and the agent first, then drain and stop every workload the controller placed
+    here (gt-i-*: SIGTERM, wait up to the manifest's drain.max_s, then remove). The agent goes first so the
+    controller sees the box as unreachable and then its container as stopped, never as killed under a live agent.
 
     \b
     The sshd host-key volume stays, so a later `gitt up` keeps the same host key and needs no re-registration.

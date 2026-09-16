@@ -182,12 +182,14 @@ def down_commands(
     workloads: list[Workload] | None = None,
     now: bool = False,
 ) -> list[list[str]]:
-    """Our workloads first (drained, then removed, so nothing keeps serving with no agent behind it and no orphan holds
-    a workload port for the next `gitt up`), then the runner (so it cannot resurrect the agent), then the agent."""
+    """The runner first (so it cannot resurrect the agent), then the agent, then our workloads (drained, then removed,
+    so no orphan holds a workload port for the next `gitt up`). The agent goes before the workloads on purpose: with
+    the agent gone the controller can only ever see "unreachable" and then "gone after unreachable" (the lease ends at
+    the last good heartbeat, no bench); a workload removed under a live agent looks like a killed placement."""
     return [
-        *workload_stop_commands(workloads or [], now),
         ['docker', 'rm', '-f', runner_name],
         ['docker', 'rm', '-f', agent_name],
+        *workload_stop_commands(workloads or [], now),
     ]
 
 

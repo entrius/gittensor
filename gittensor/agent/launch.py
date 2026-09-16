@@ -7,10 +7,12 @@
 agent line, which :func:`agent_run_command` reproduces here so ``--dry-run`` can print it and tests can hold the
 shell script to the same flags. ``gitt up --no-update`` issues :func:`agent_run_command` directly (local builds).
 
-``gitt down`` is a clean leave (Kimbo 9/16; the 9/16 soak left the 27B serving with no agent behind it): it lists the
-controller's workload containers on the box (``INSTANCE_LABEL``, named ``gt-i-…``), drains and stops each (SIGTERM,
-wait up to the manifest's ``drain.max_s`` from the container's ``DRAIN_LABEL``, else ``WORKLOAD_STOP_DEFAULT_S``),
-removes them, then the runner and the agent. ``gitt up --reclaim`` uses the same commands on a workload left behind.
+``gitt down`` is a clean leave (Kimbo 9/16; the 9/16 soak left the 27B serving with no agent behind it): it removes the
+runner and the agent first, then lists the controller's workload containers on the box (``INSTANCE_LABEL``, named
+``gt-i-…``), drains and stops each (SIGTERM, wait up to the manifest's ``drain.max_s`` from the container's
+``DRAIN_LABEL``, else ``WORKLOAD_STOP_DEFAULT_S``) and removes them. The agent goes first so the controller can only
+ever see "unreachable" and then "gone after unreachable" (a stop, not a cheat), never a container gone under a live
+agent. ``gitt up --reclaim`` uses the same drain-and-remove commands on a workload left behind.
 """
 
 from __future__ import annotations

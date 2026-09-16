@@ -19,9 +19,18 @@ _.mirror_pr_fetch_failed
 _.should_use_cache_fallback
 
 # Compute gateway: FastAPI route handlers registered by decorator; Usage fields reach the usage line via asdict()
+# (phase 0's serving code carried the same names until the cutover, which is why they were not listed before)
 healthz
+models
+chat_completions
 completions
 http_passthrough
+prompt_tokens
+_.prompt_tokens
+ttft_ms
+_.ttft_ms
+decode_tps
+_.decode_tps
 total_ms
 _.total_ms
 
@@ -55,6 +64,11 @@ regex
 # GpuProof.judge parameter UnconfiguredProof ignores
 challenges
 vram_total_bytes
+# ProofVerdict.filled_bytes / wall_ms are the sealed job's own figures, kept in the verdict record for evidence
+filled_bytes
+wall_ms
+# Manifest.profile is the author's measured block, carried through the signed registry entry and `registry show`
+profile
 
 # Scraped / minted data read only in tests: GpuInfo's extra nvidia-smi columns, VisitCredential.not_before,
 # SshRunner.minted, StateStore.by_status, GpuRate.leased_to_idle; artifact_sha256 is exec'd from the template's

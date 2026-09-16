@@ -8,9 +8,11 @@ and hand its weights to the emission blend. Nothing else — the controller does
 * A scorecard that fails ``read_scorecard`` (sha256 mismatch, past ``valid_until``, malformed) gives an empty pool:
   the whole compute share recycles. Never last-known weights: a dead controller must not keep paying.
 * A valid one: its sha256 is committed on chain as ``gt-scorecard:<sha256>`` with ``subtensor.set_commitment``, an
-  extrinsic the validator hotkey signs. The hotkey's detached signature over the sha256 is also written beside the
-  scorecard in ``validator_commit.json``, for anyone checking a published copy of the document. Only a new sha256 is
-  committed; a failed commit is retried next round and does not block pay.
+  extrinsic the validator hotkey signs. The hotkey's detached signature over the sha256 is also written to the
+  validator's own ``validator_commit.json`` (``COMPUTE_COMMIT_PATH``; else beside its ``state.npz`` under the neuron's
+  full path; else ``~/.bittensor/gittensor/``), for anyone checking a published copy of the document. Never into the
+  controller's scorecard directory: that is read-only input (9/16 soak: mounted read-only on a shared host, the write
+  failed every cycle). Only a new sha256 is committed; a failed commit is retried next round and does not block pay.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ if TYPE_CHECKING:
 
 COMMITMENT_PREFIX = 'gt-scorecard:'
 COMMIT_LOG = 'validator_commit.json'
+DEFAULT_COMMIT_DIR = '~/.bittensor/gittensor'
 
 
 @dataclass
@@ -55,8 +58,20 @@ def pool_from_scorecard(path: str | Path, hotkeys: Sequence[str], now: float) ->
     return ComputePool(rewards, sha)
 
 
-def sign_and_commit(subtensor: Any, wallet: Any, netuid: int, sha256: str, log_dir: Path | None, now: float) -> bool:
-    """Sign ``sha256`` with the hotkey and commit it. True when the chain accepted the commitment."""
+def commit_path_for(validator: Any, override: str | Path | None = None) -> Path:
+    """Where this validator keeps its commit record: ``override`` (``COMPUTE_COMMIT_PATH``), else beside its own state
+    (``config.neuron.full_path``), else ``DEFAULT_COMMIT_DIR``."""
+    if override:
+        return Path(override).expanduser()
+    full_path = getattr(getattr(getattr(validator, 'config', None), 'neuron', None), 'full_path', None)
+    if full_path:
+        return Path(str(full_path)).expanduser() / COMMIT_LOG
+    return Path(DEFAULT_COMMIT_DIR).expanduser() / COMMIT_LOG
+
+
+def sign_and_commit(subtensor: Any, wallet: Any, netuid: int, sha256: str, log_path: Path | None, now: float) -> bool:
+    """Sign ``sha256`` with the hotkey and commit it; the record goes to ``log_path`` (the validator's own state). True
+    when the chain accepted the commitment."""
     record: Dict[str, Any] = {
         'sha256': sha256,
         'hotkey': wallet.hotkey.ss58_address,
@@ -73,15 +88,22 @@ def sign_and_commit(subtensor: Any, wallet: Any, netuid: int, sha256: str, log_d
             record['error'] = str(getattr(response, 'message', 'rejected'))[:300]
     except Exception as e:
         record['error'] = f'{type(e).__name__}: {e}'[:300]
-    if log_dir is not None:
+    if log_path is not None:
         try:
-            (log_dir / COMMIT_LOG).write_text(json.dumps(record, indent=1))
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = log_path.with_name(log_path.name + '.tmp')
+            tmp.write_text(json.dumps(record, indent=1))
+            tmp.replace(log_path)
         except OSError as e:
-            bt.logging.warning(f'Compute pool: could not write {log_dir / COMMIT_LOG} ({e})')
+            bt.logging.warning(f'Compute pool: could not write {log_path} ({e})')
     return record['committed']
 
 
-def compute_pool_for(self: 'Validator', path: str, now: Optional[float] = None) -> ComputePool:
+def compute_pool_for(
+    self: 'Validator', path: str, now: Optional[float] = None, commit_path: str | Path | None = None
+) -> ComputePool:
+    """``path`` is the controller's scorecard (read-only input); ``commit_path`` overrides where the commit record
+    goes (``commit_path_for``)."""
     now = time.time() if now is None else now
     pool = pool_from_scorecard(path, list(self.metagraph.hotkeys), now)
     if pool.sha256 is None:
@@ -89,7 +111,12 @@ def compute_pool_for(self: 'Validator', path: str, now: Optional[float] = None) 
         return pool
     if pool.sha256 != getattr(self, 'last_scorecard_sha256', None):
         if sign_and_commit(
-            self.subtensor, self.wallet, int(self.metagraph.netuid), pool.sha256, Path(path).parent, now
+            self.subtensor,
+            self.wallet,
+            int(self.metagraph.netuid),
+            pool.sha256,
+            commit_path_for(self, commit_path),
+            now,
         ):
             setattr(self, 'last_scorecard_sha256', pool.sha256)
             bt.logging.info(f'Compute pool: committed scorecard {pool.sha256[:16]}…')

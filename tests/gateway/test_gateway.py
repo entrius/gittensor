@@ -288,26 +288,31 @@ def test_models_republish_the_runtime_under_the_manifest_name_with_the_override(
             'owned_by': 'gittensor',
             'created': 0,
             'context_length': 32768,
+            'max_output_tokens': 32768,  # the runtime's own limit, passed through: the manifest names none
             'capabilities': {'tools': True, 'vision': {'image': True, 'video': True}},
             'description': 'override by entry id',
-        }  # no max_output_tokens: the manifest names no cap and the gateway invents none (the runtime's 32768 is not ours to publish)
+        }
         assert answers == [{'object': 'list', 'data': [expected]}] * 2
 
     asyncio.run(scenario())
 
 
-def test_models_publish_the_output_cap_only_when_the_manifest_names_one(world):
+def test_models_output_cap_is_the_manifests_else_the_runtimes_own_never_invented(world):
     async def scenario():
         capped = world.bless({**manifest_doc(name='gt-capped'), 'profile': {'max_output_tokens': 16384, 'vram_gb': 30}})
         uncapped = world.bless(manifest_doc(name='gt-open'))
-        async with runtimes(FakeRuntime(), FakeRuntime()) as (rt_a, rt_b):
+        silent = world.bless(manifest_doc(name='gt-silent'))
+        async with runtimes(FakeRuntime(), FakeRuntime(), FakeRuntime(max_output_tokens=None)) as (rt_a, rt_b, rt_c):
             world.place('i-a', capped, rt_a.port)
             world.place('i-b', uncapped, rt_b.port)
+            world.place('i-c', silent, rt_c.port)
             async with gateway(world) as (_, client):
                 async with client.get('/v1/models', headers=AUTH) as resp:
                     data = (await resp.json())['data']
         by_id = {m['id']: m for m in data}
-        assert by_id['gt-capped']['max_output_tokens'] == 16384 and 'max_output_tokens' not in by_id['gt-open']
+        assert by_id['gt-capped']['max_output_tokens'] == 16384  # the manifest wins over the runtime's 32768
+        assert by_id['gt-open']['max_output_tokens'] == 32768  # no manifest cap: the runtime's own, passed through
+        assert 'max_output_tokens' not in by_id['gt-silent']  # neither names one: nothing invented
 
     asyncio.run(scenario())
 

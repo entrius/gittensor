@@ -10,5 +10,8 @@ signature on every read; an entry that does not verify is never run.
 Blessing is curation (vault 25): read the source, pull the author's published digest onto our own 5090, qualify
 it, sign it. A newer push is a new digest and stays unblessed until we choose it, so nothing auto-updates. When
 there is no published image yet, the workflow can build a pinned commit itself and push it under `entrius/`.
+An author's published digest is copied under `entrius/` at bless time (same digest, one copy, no sync): the entry's
+`image` is our copy, the one boxes pull, and `source_image` records the author's reference, so a deleted or retagged
+upstream package never breaks a placement.
 Dispatch it with the manifest path, either the digest or the source repo + commit, and the qualification JSON. A changed image or manifest under the
 same name@version is refused: bump the manifest's `version`.

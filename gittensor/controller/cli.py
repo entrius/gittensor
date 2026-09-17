@@ -1639,9 +1639,16 @@ def _open_registry(state: StateDir, release_pubkey: Path | None, allow_dev_keys:
     help='JSON of our qualification measurements {at, box, driver, load_s, health_ok, canary_ok, vram_gb, '
     'decode_tps_single?, prefill_tps?, notes}: signed beside the manifest, never inside it.',
 )
+@click.option(
+    '--source-image',
+    default=None,
+    help="The author's reference --image was copied from (same digest): signed into the entry as provenance.",
+)
 @_registry_options
 @_state_options
-def bless_command(manifest_path, image, sign_key, qualified_path, release_pubkey, allow_dev_keys, state_dir, json_mode):
+def bless_command(
+    manifest_path, image, sign_key, qualified_path, source_image, release_pubkey, allow_dev_keys, state_dir, json_mode
+):
     """Sign a manifest and its digest-pinned image together into the registry as <name>@<version>.
 
     The manifest must pass the schema and the consistency checks. The signature is checked against the key the
@@ -1653,11 +1660,15 @@ def bless_command(manifest_path, image, sign_key, qualified_path, release_pubkey
     try:
         document = yaml.safe_load(manifest_path.read_text())
         qualified = json.loads(qualified_path.read_text()) if qualified_path else None
-        verified = make_entry(document if isinstance(document, dict) else {}, image, qualified=qualified)
+        verified = make_entry(
+            document if isinstance(document, dict) else {}, image, qualified=qualified, source_image=source_image
+        )
     except (yaml.YAMLError, ManifestError) as e:
         problems = getattr(e, 'problems', [str(e)])
         _fail(f'{manifest_path}: ' + '; '.join(problems), json_mode, EXIT_BENCH, problems=problems)
-    except (ValueError, RegistryError) as e:  # the --qualified file: not JSON, or not a valid block
+    except RegistryError as e:  # a malformed --qualified block, or a --source-image with another digest
+        _fail(str(e), json_mode, EXIT_BENCH)
+    except ValueError as e:  # the --qualified file is not JSON
         _fail(f'{qualified_path}: {e}', json_mode, EXIT_BENCH)
     entry = verified.entry
     path, _ = registry.paths(entry.entry_id)
@@ -1666,10 +1677,11 @@ def bless_command(manifest_path, image, sign_key, qualified_path, release_pubkey
             current = registry.read(entry.entry_id).entry
         except RegistryError:
             current = None
-        if current is not None and (current.image, current.manifest, current.qualified) == (
+        if current is not None and (current.image, current.manifest, current.qualified, current.source_image) == (
             entry.image,
             entry.manifest,
             entry.qualified,
+            entry.source_image,
         ):
             _bless_output(json_mode, entry.entry_id, current.image, path, already=True)
             return
@@ -1759,9 +1771,16 @@ def registry_show(release_pubkey, allow_dev_keys, state_dir, json_mode):
         try:
             verified = registry.read(entry_id)
             e = verified.entry
-            row.update(verified=True, image=e.image, blessed_at=e.blessed_at, qualified=e.qualified, error='')
+            row.update(
+                verified=True,
+                image=e.image,
+                source_image=e.source_image,
+                blessed_at=e.blessed_at,
+                qualified=e.qualified,
+                error='',
+            )
         except RegistryError as e:
-            row.update(verified=False, image='', blessed_at=None, qualified=None, error=str(e))
+            row.update(verified=False, image='', source_image=None, blessed_at=None, qualified=None, error=str(e))
         rows.append(row)
     if json_mode:
         emit_json({'success': all(r['verified'] for r in rows), 'entries': rows})

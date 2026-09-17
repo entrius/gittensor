@@ -1,5 +1,9 @@
 default_install_hook_types: [pre-commit, pre-push]
 
+# Signed files: the signature covers the exact bytes (canonical JSON, no trailing newline). A fixer that touches them
+# breaks the signature and the controller then refuses the entry (9/17: end-of-file-fixer on a blessed entry).
+exclude: ^(docker/controller/registry/|docker/agent/channel/stable\.json)
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0

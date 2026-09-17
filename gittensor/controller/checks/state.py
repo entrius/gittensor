@@ -112,6 +112,9 @@ class BoxState:
     # `gitt controller release`: {'at', 'reason'}. An operator field (merged from disk beside a running controller);
     # ``release_from_bench`` honours it for a bench that began before it.
     release_request: Dict[str, object] = field(default_factory=dict)
+    # The hotkey's UID on the subnet, as discovery last read it off the metagraph (any box, whoever admitted it); None
+    # when the hotkey is not registered, or discovery has not run. Only shown (status, the public document).
+    uid: Optional[int] = None
 
     def as_dict(self) -> dict:
         return asdict(self)

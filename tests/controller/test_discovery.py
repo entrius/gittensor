@@ -30,8 +30,8 @@ PUB_A, PUB_A2, PUB_B = '44.10.0.1', '44.10.0.2', '52.20.0.3'
 
 
 def metagraph(*rows):
-    """``(hotkey, ip, port, marker)`` rows as ``ChainEndpoint`` s, the way ``ChainReader.read`` returns them."""
-    return [ChainEndpoint(hotkey, ip, port, marker) for hotkey, ip, port, marker in rows]
+    """``(hotkey, ip, port, marker)`` rows (the row's index is its UID) as ``ChainEndpoint`` s, the way ``ChainReader.read`` returns them."""
+    return [ChainEndpoint(hotkey, ip, port, marker, uid) for uid, (hotkey, ip, port, marker) in enumerate(rows)]
 
 
 class Keys:
@@ -86,6 +86,26 @@ def test_a_registered_compute_endpoint_is_scanned_pinned_and_admitted(root):
     # the next read: nothing to scan, nothing to change
     again = discovery(root, keys).run_pass(metagraph((HK_A, PUB_A, 2200, True)))
     assert again.actions == [] and keys.calls == [(PUB_A, 2200)]
+
+
+def test_every_box_records_the_uid_the_metagraph_gives_its_hotkey(root):
+    keys = Keys(**{f'{PUB_A}:2200': KEY_1})
+    store = StateStore(root / 'boxes.json')
+    store.put(BoxState(HK_B, source='operator', host=PUB_B, port=2200))  # an operator's box: left alone, but named
+    d = discovery(root, keys)
+    report = d.run_pass(
+        metagraph(('5Other', '0.0.0.0', 0, False), (HK_A, PUB_A, 2200, True), (HK_B, PUB_B, 8091, False))
+    )
+    assert [(a.kind, a.hotkey) for a in report.actions] == [('admit', HK_A)]  # a UID is not an action
+    store = StateStore(root / 'boxes.json')
+    assert (store.get(HK_A).uid, store.get(HK_B).uid) == (1, 2)  # the box admitted this pass has it at once
+    assert (store.get(HK_B).source, store.get(HK_B).host, store.get(HK_B).port) == ('operator', PUB_B, 2200)
+
+    # the hotkey re-registered under another UID; the operator's hotkey left the metagraph: no UID, the box stays
+    d.run_pass(metagraph((HK_A, PUB_A, 2200, True)))
+    store = StateStore(root / 'boxes.json')
+    assert (store.get(HK_A).uid, store.get(HK_B).uid) == (0, None)
+    assert BoxState.from_dict({'box_id': HK_A}).uid is None  # a file from before the field
 
 
 def test_a_box_that_does_not_answer_is_not_created(root):
@@ -267,5 +287,6 @@ def test_the_marker_gitt_up_publishes_is_the_one_discovery_reads():
         placeholder2=COMPUTE_AXON_SCHEMA,
     )
     assert ChainEndpoint.from_axon(axon) == ChainEndpoint(HK_A, PUB_A, 2200, True)
+    assert ChainEndpoint.from_axon(axon, 7).uid == 7
     assert not is_compute_axon(4, 0, 0)  # a phase-0 miner axon
     assert all(0 <= v <= 255 for v in (COMPUTE_AXON_PROTOCOL, COMPUTE_AXON_MARKER, COMPUTE_AXON_SCHEMA))  # u8 on chain

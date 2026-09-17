@@ -48,11 +48,12 @@ class ChainEndpoint:
     ip: str
     port: int
     compute: bool  # carries the compute-box marker
+    uid: int | None = None
 
     @classmethod
-    def from_axon(cls, axon) -> ChainEndpoint:
+    def from_axon(cls, axon, uid: int | None = None) -> ChainEndpoint:
         marker = (int(axon.protocol), int(axon.placeholder1), int(axon.placeholder2))
-        return cls(str(axon.hotkey), str(axon.ip), int(axon.port), is_compute_axon(*marker))
+        return cls(str(axon.hotkey), str(axon.ip), int(axon.port), is_compute_axon(*marker), uid)
 
 
 def address_problem(ip: str, port: int) -> str:
@@ -87,7 +88,7 @@ class ChainReader:
         except Exception:
             self._subtensor = None
             raise
-        return [ChainEndpoint.from_axon(axon) for axon in metagraph.axons]
+        return [ChainEndpoint.from_axon(axon, int(uid)) for uid, axon in zip(metagraph.uids, metagraph.axons)]
 
 
 @dataclass
@@ -174,7 +175,18 @@ class Discovery:
                     report.actions.append(
                         DiscoverAction('endpoint_restored', hotkey, True, f'chain publishes {e.ip}:{e.port} again')
                     )
+            self._record_uids({e.hotkey: e.uid for e in endpoints})
         return report
+
+    def _record_uids(self, uids: dict[str, int | None]) -> None:
+        """Every box's UID as this read has it, an operator's box too; None for a hotkey not on the metagraph. Under
+        the lock. Not an action: a UID is only shown, nothing is decided from it."""
+        for hotkey, box in sorted(self.boxes.boxes.items()):
+            uid = uids.get(hotkey)
+            if box.uid != uid:
+                new = BoxState.from_dict(box.as_dict())
+                new.uid = uid
+                self.boxes.put(new)
 
     # -- one hotkey (under the lock) ------------------------------------------------------------------------------------
 

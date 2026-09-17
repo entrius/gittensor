@@ -240,7 +240,7 @@ def build_fleet(
         rows.append(
             {
                 'hotkey': box.box_id,
-                'uid': None,  # the controller reads no UIDs off the chain; the API may fill it from its own data
+                'uid': box.uid,  # as discovery last read it; None for a hotkey not on the metagraph
                 'status': box.status,
                 'standing': standing(box.standing_events, now),
                 'gpu_type': gpu_type_of(box.card_name) if box.card_name else None,

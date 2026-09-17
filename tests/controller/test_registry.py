@@ -235,3 +235,16 @@ def test_a_deployment_can_be_pinned_to_a_box_and_unpinned(tmp_path):
     assert DeploymentStore(tmp_path / 'deployments.json').get('e@1').box == 'hk-ours'
     assert store.set('e@1', replicas=2).box == 'hk-ours'  # untouched when not passed
     assert store.set('e@1', box='').box == ''
+
+
+def test_every_committed_registry_entry_verifies_against_the_compiled_release_key():
+    """The public record in docker/controller/registry/ must stay byte-exact: a formatter that appends a newline
+    breaks the signature and the controller refuses the entry (9/17: end-of-file-fixer on qwen3.8-27b-nvfp4@6)."""
+    from gittensor.controller.registry import load_release_pubkey
+
+    committed = Path(__file__).resolve().parents[2] / 'docker' / 'controller' / 'registry'
+    registry = Registry(committed, load_release_pubkey(None))
+    entries = sorted(p.name[: -len('.json')] for p in committed.glob('*@*.json'))
+    assert entries, 'no blessed entries committed'
+    for entry_id in entries:
+        assert registry.read(entry_id).entry_id == entry_id

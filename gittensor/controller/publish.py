@@ -43,6 +43,7 @@ _ENTRY = re.compile(r'^[a-z0-9][a-z0-9._-]{0,127}@[0-9]{1,9}$')  # a registry en
 _IMAGE = re.compile(
     r'^[a-z0-9][a-z0-9._/-]{0,199}(:[A-Za-z0-9_][A-Za-z0-9._-]{0,127})?$'
 )  # repo[:tag], no registry port
+_HOTKEY = re.compile(r'^[1-9A-HJ-NP-Za-km-z]{47,48}$')  # ss58: a box under anything else is not published
 _GPU = re.compile(r'^[A-Za-z0-9_-]{1,32}$')  # a GPU type, e.g. RTX5090
 _BENCH_KINDS = (HARD | SOFT) - {RELEASED}
 
@@ -215,6 +216,8 @@ def build_fleet(
     by_state: dict[str, int] = {}
     rows = []
     for box in sorted(boxes.values(), key=lambda b: b.box_id):
+        if not _HOTKEY.match(box.box_id):
+            continue
         cards = []
         for uuid, card in sorted(box.cards.items(), key=lambda item: card_hash(item[0])):
             record = instances.get(card.instance_id) if card.instance_id else None
@@ -306,8 +309,8 @@ def write_fleet(root: Path, doc: dict) -> Path:
 
 
 class Publisher:
-    """The running controller's writer. The watch tick asks ``due()`` and writes every ``interval_s``, so a card that
-    changed state shows within one interval and ``generated_at`` tells a reader the controller is alive; the
+    """The running controller's writer. Its loop writes every ``interval_s``, so a card that changed state shows
+    within one interval and ``generated_at`` tells a reader the controller is alive; the
     scorecard tick writes at once (``force``), so the hash on the page is never an interval behind."""
 
     def __init__(self, root: Path, interval_s: float = cfg.PUBLISH_INTERVAL_S, wall: Callable[[], float] = time.time):

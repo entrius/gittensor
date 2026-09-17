@@ -8,6 +8,7 @@ writing it on the scorecard tick and on its own interval."""
 import json
 import os
 import stat
+import time
 from typing import Any, cast
 
 import pytest
@@ -187,6 +188,9 @@ def test_a_card_is_named_by_a_hash_and_an_image_by_repo_and_tag(tmp_path):
     assert card_hash(UUID_A) == card_hash(UUID_A) != card_hash(UUID_B) and len(card_hash(UUID_A)) == 12
     assert public_image(IMAGE) == 'entrius/qwen3.8-27b-nvfp4:6'
     assert public_image('10.0.0.5:5000/private/model:1') is None and public_image(None) is None
+    # a box whose id is not an ss58 hotkey is not published at all
+    odd = {'203.0.113.9:22 <x>': BoxState('203.0.113.9:22 <x>', status=ADMIT)}
+    assert build_fleet(tmp_path, odd, {}, {}, False, NOW)['totals']['boxes'] == 0
     # an instance record that is not this card's (a stale id) is not shown on it
     boxes, instances = fleet()
     instances['i-1'].uuid = UUID_C
@@ -222,10 +226,10 @@ def test_the_publisher_writes_on_its_interval_and_at_once_when_forced(tmp_path):
     assert publisher.due()
 
 
-def test_the_running_controller_publishes_with_the_scorecard_and_on_the_watch_tick(tmp_path):
+def test_the_running_controller_publishes_with_the_scorecard_and_on_its_own_loop(tmp_path):
     root = tmp_path / 'state'
     root.mkdir()
-    now = __import__('time').time()
+    now = time.time()
     StateStore(root / 'boxes.json').put(
         BoxState(HK_A, status=IDLE, pinned_uuids=[UUID_A, UUID_B], card_name='NVIDIA GeForce RTX 5090',
                  last_check_at=now - 60, host=PRIVATE['host'], port=2200,
@@ -256,7 +260,15 @@ def test_the_running_controller_publishes_with_the_scorecard_and_on_the_watch_ti
     assert controller.publish_once() is False  # inside the interval
     controller.publisher.last_at = now - cfg.PUBLISH_INTERVAL_S - 1
     assert controller.publish_once() is True
-    controller.shutdown(grace_s=0)
+    fleet_path(root).unlink()
+    controller.start()  # the publish loop is its own thread: it writes at once, whatever the watch is doing
+    assert any(t.name == 'controller-publish' for t in controller._threads)
+    for _ in range(200):
+        if fleet_path(root).exists():
+            break
+        time.sleep(0.01)
+    assert fleet_path(root).exists()
+    controller.shutdown(grace_s=5)
     assert json.loads(fleet_path(root).read_text())['controller']['running'] is False
 
 

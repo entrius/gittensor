@@ -22,7 +22,7 @@ changes under one short lock and saves at once:
   re-proved: it waits out the bench. Then the pay ledger's settlement tick (``pay/ledger.py``) whenever one is due;
 * **the scorecard** every ``SCORECARD_INTERVAL_S``: the trailing window settled at the oracle's price and written as
   ``scorecard/latest.json`` + ``latest.sha256`` for the validator (``pay/scorecard.py``). With it, and every
-  ``PUBLISH_INTERVAL_S`` from the watch tick, the sanitized ``public/fleet.json`` the website shows (``publish.py``).
+  ``PUBLISH_INTERVAL_S`` on a loop of its own, the sanitized ``public/fleet.json`` the website shows (``publish.py``).
 * **discovery** (``--discover``) every ``DISCOVER_INTERVAL_S``: the metagraph, read-only, settles which boxes exist
   (``discovery.py``). One pass runs before round 1, so a box already published on chain is in round 1 and does not
   wait a discovery interval at ADMIT; a box found later is proved at the next watch tick.
@@ -429,7 +429,6 @@ class Controller:
             )
             self.reporter.watch(report)
         self.reprove_once()
-        self.publish_once()
         return report
 
     def _pending_cards(self) -> dict[str, set[str]]:
@@ -605,6 +604,8 @@ class Controller:
             ('reconcile', self.reconcile_once, self.intervals.reconcile_s, None),
             ('watch', self.watch_once, self.intervals.watch_tick_s, None),
             ('scorecard', self.scorecard_once, self.intervals.scorecard_s, None),
+            # Its own loop, not the watch tick: a watch pass held up by SSH timeouts must not make the page say stale.
+            ('publish', lambda: self.publish_once(force=True), cfg.PUBLISH_INTERVAL_S, None),
         )
         first_wait = {}
         if self.read_chain is not None:

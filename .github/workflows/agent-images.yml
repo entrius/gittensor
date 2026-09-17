@@ -6,7 +6,7 @@ name: agent images
 #   entrius/gt-agent-runner   the self-updater; trusts the release public key baked in (GT_RELEASE_PUB variable)
 #   entrius/gt-proof          the empty base image the sealed GPU proof runs in (no binary, no secret)
 # A push touching these paths only builds (dry run). Publishing is workflow_dispatch only: nothing reaches Docker
-# Hub or the channel by accident. The signed channel is committed to the branch the run was started from; the
+# Hub or the channel by accident. The signed channel is opened as a PR against the branch the run was started from; the
 # runners follow the copy on `main` (gittensor/agent/config.py AGENT_CHANNEL_URL), so it goes live on merge.
 # Keys: vault 27 (the ceremony). GT_RELEASE_KEY is the release private key (repo secret); the public halves are
 # repo variables. The controller's CA private key is never here.
@@ -18,7 +18,7 @@ on:
         description: "Release version for the channel and the image tags (e.g. 5.1.0)."
         required: true
       commit_channel:
-        description: "Commit the signed stable.json + .sig to this branch after publishing."
+        description: "Open a PR with the signed stable.json + .sig against this branch after publishing."
         type: boolean
         default: true
   push:
@@ -29,6 +29,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   images:
@@ -136,11 +137,21 @@ jobs:
             docker/agent/channel/stable.json
             docker/agent/channel/stable.json.sig
 
-      - name: Commit the signed channel to this branch
+      - name: Open a PR with the signed channel
         if: github.event_name == 'workflow_dispatch' && inputs.commit_channel
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          # `test` and `main` take changes through pull requests only (a direct push is refused, 9/17): push a
+          # release branch and open the PR; merging it is what makes the channel live on that branch.
+          BRANCH="release/agent-channel-${{ steps.tag.outputs.version }}"
+          TITLE="agent: release channel ${{ steps.tag.outputs.version }} (gt-agent@${{ steps.agent.outputs.digest }})"
           git config user.name "gittensor-release"
           git config user.email "release@gittensor.io"
+          git checkout -b "$BRANCH"
           git add docker/agent/channel/stable.json docker/agent/channel/stable.json.sig
-          git commit -m "agent: release channel ${{ steps.tag.outputs.version }} (gt-agent@${{ steps.agent.outputs.digest }})"
-          git push origin HEAD:${{ github.ref_name }}
+          git commit -m "$TITLE"
+          git push --force origin "HEAD:$BRANCH"
+          gh pr create --base "${{ github.ref_name }}" --head "$BRANCH" --title "$TITLE" \
+            --body "Signed by the agent-images workflow (run ${{ github.run_id }}). Merge to make the channel live on \`${{ github.ref_name }}\`; runners and \`gitt up\` follow the copy on \`main\`." \
+            || echo "::warning::could not open the PR (Actions may not be allowed to create pull requests): open it from https://github.com/${{ github.repository }}/compare/${{ github.ref_name }}...$BRANCH"

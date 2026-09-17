@@ -336,10 +336,13 @@ def run_prereqs(
     skip_reachability: bool = False,
     workload_ports: range = WORKLOAD_PORTS,
     reclaim: bool = False,
+    agent_only: bool = False,
 ) -> PrereqReport:
     """``no_chain`` is for our own dev boxes only: no registration lookup, nothing published (so no public IP or
     reachability rows), and no hotkey needed on disk. ``public_ip`` overrides detection. ``reclaim``: a workload
-    container of ours left behind will be removed, so a port it holds passes."""
+    container of ours left behind will be removed, so a port it holds passes. ``agent_only`` is the box half of
+    ``--publish-only``: the wallet lives on another machine, so no hotkey is needed here and nothing is looked up or
+    published, but the public IP and reachability rows still run (they are what the wallet machine publishes)."""
     report = PrereqReport()
     report.results.extend(check_driver(probe))
     docker = check_docker(probe)
@@ -360,8 +363,15 @@ def run_prereqs(
     hotkey_result, report.hotkey_ss58 = check_hotkey(probe, wallet, hotkey)
     if no_chain and not hotkey_result.ok:
         hotkey_result = CheckResult(hotkey_result.name, None, 'none on disk (--no-chain dev box)')
+    if agent_only:
+        hotkey_result = CheckResult(hotkey_result.name, None, 'not needed here (--agent-only: the wallet is elsewhere)')
+        report.hotkey_ss58 = None
     report.results.append(hotkey_result)
-    if no_chain:
+    if agent_only:
+        report.results.append(
+            CheckResult(f'Registered on netuid {netuid}', None, 'skipped (--agent-only: checked by --publish-only)')
+        )
+    elif no_chain:
         report.results.append(
             CheckResult(
                 f'Registered on netuid {netuid}', None, 'skipped (--no-chain: a dev box, NOT a registered miner)'

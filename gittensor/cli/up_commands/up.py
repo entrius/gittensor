@@ -127,6 +127,13 @@ def publish_endpoint(
     help='Dev boxes only (with --no-update): no registration lookup, nothing published on chain, no hotkey needed.',
 )
 @click.option(
+    '--agent-only',
+    is_flag=True,
+    default=False,
+    help='Only the box step, for a GPU box that does not hold the wallet: start the agent, no hotkey needed here, '
+    'nothing published. Publish from the wallet machine with --publish-only.',
+)
+@click.option(
     '--publish-only',
     is_flag=True,
     default=False,
@@ -157,6 +164,7 @@ def up_command(
     no_update,
     allow_dev_keys,
     no_chain,
+    agent_only,
     publish_only,
     reclaim,
     dry_run,
@@ -181,6 +189,8 @@ def up_command(
     Examples:
         gitt up --wallet alice --hotkey default
         gitt up --dry-run
+        gitt up --agent-only                                (on the GPU box; the wallet is on another machine)
+        gitt up --publish-only --ip 203.0.113.7             (on the wallet machine, for that box)
         gitt up --no-update --allow-dev-keys --no-chain --image entrius/gt-agent:dev   (a locally built dev box)
     """
     wallet_name = wallet_name or _load_config_value('wallet') or 'default'
@@ -191,6 +201,9 @@ def up_command(
         sys.exit(2)
     if no_chain and not no_update:
         _error('--no-chain only applies to --no-update (a dev box running a local build).', json_mode)
+        sys.exit(2)
+    if agent_only and (no_chain or publish_only):
+        _error('--agent-only is the box half of --publish-only: drop --no-chain / --publish-only.', json_mode)
         sys.exit(2)
     if publish_only:
         if no_update or no_chain:
@@ -222,6 +235,7 @@ def up_command(
         ssh_port=ssh_port,
         skip_chain=dry_run,
         no_chain=no_chain,
+        agent_only=agent_only,
         public_ip=public_ip,
         skip_reachability=skip_reachability,
         reclaim=reclaim,
@@ -242,6 +256,15 @@ def up_command(
     published = 'skipped'
     if no_chain:
         report.results.append(CheckResult(ENDPOINT_CHECK, None, 'skipped (--no-chain: nothing published)'))
+    elif agent_only:
+        where = (
+            f'--ip {report.public_ip} --ssh-port {ssh_port}' if report.public_ip else '--ip <this box> --ssh-port ...'
+        )
+        report.results.append(
+            CheckResult(
+                ENDPOINT_CHECK, None, f'not from here: on the wallet machine run `gitt up --publish-only {where}`'
+            )
+        )
     elif dry_run:
         detail = f'would publish {report.public_ip}:{ssh_port} on netuid {netuid}' if report.public_ip else 'no IP'
         report.results.append(CheckResult(ENDPOINT_CHECK, None, detail))
@@ -290,6 +313,7 @@ def up_command(
                 'success': report.ok or dry_run,
                 'dry_run': dry_run,
                 'no_chain': no_chain,
+                'agent_only': agent_only,
                 'already_up': report.already_up,
                 'hotkey_ss58': report.hotkey_ss58,
                 'endpoint': {

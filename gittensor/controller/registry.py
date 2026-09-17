@@ -7,6 +7,9 @@ and registry", ``23`` §6, §8, ``26`` §3-4).
 A **registry entry** is ``{name, version, image, manifest, blessed_at}``: the digest-pinned image and its
 author-owned manifest, verbatim, signed together by the release key (an OpenSSH signature over the entry's canonical
 JSON bytes, namespace ``gt-registry``). Entries live in ``<state-dir>/registry/<name>@<version>.json`` + ``.sig``.
+An entry blessed from an author's published image also carries ``source_image``: the author's own reference, kept as
+provenance, while ``image`` is our digest-preserving copy under ``entrius/`` (the one boxes pull, so an author
+deleting or retagging their package breaks nothing). Same digest or the entry is refused.
 An entry may also carry ``qualified``: **our** measurements from qualifying the image on our own card (``25``
 "Blessing"), signed with the rest but kept beside the author's manifest, never inside it. It is optional (an entry
 without it has exactly the bytes it always had) and nothing reads it yet.
@@ -35,7 +38,10 @@ from gittensor.controller.manifest import Manifest, ManifestError, parse_manifes
 
 REGISTRY_NAMESPACE = 'gt-registry'  # `ssh-keygen -Y sign -n`; a channel signature does not verify as an entry
 ENTRY_FIELDS = ('blessed_at', 'image', 'manifest', 'name', 'version')
-QUALIFIED = 'qualified'  # the one optional entry field
+QUALIFIED = 'qualified'  # optional: our measurements
+SOURCE_IMAGE = 'source_image'  # optional: the author's reference `image` was copied from, same digest
+OPTIONAL_FIELDS = (QUALIFIED, SOURCE_IMAGE)
+_DIGEST = re.compile(r'@(sha256:[0-9a-f]{64})$')
 _ENTRY_ID = re.compile(r'^[a-z0-9][a-z0-9._-]{1,63}@[1-9][0-9]*$')
 # The qualification block: field -> type. `box` is the hotkey of the box it was measured on, or "local".
 QUALIFIED_REQUIRED = {
@@ -88,6 +94,16 @@ def parse_qualified(block: Any) -> dict[str, Any]:
     return copy.deepcopy(block)
 
 
+def parse_source_image(source_image: Any, image: str) -> str:
+    """The ``source_image`` field, checked: digest-pinned, and the same digest as ``image`` (a copy, not a rebuild)."""
+    if not isinstance(source_image, str) or not (source := _DIGEST.search(source_image)):
+        raise RegistryError(f'{SOURCE_IMAGE}: expected repo[:tag]@sha256:<64 hex>')
+    pinned = _DIGEST.search(image)
+    if pinned is None or pinned.group(1) != source.group(1):
+        raise RegistryError(f'{SOURCE_IMAGE}: its digest is not the digest of image ({image})')
+    return source_image
+
+
 @dataclass(frozen=True)
 class RegistryEntry:
     name: str
@@ -96,6 +112,7 @@ class RegistryEntry:
     manifest: dict[str, Any]
     blessed_at: int
     qualified: dict[str, Any] | None = None  # our measurements, beside the manifest; None on entries blessed without
+    source_image: str | None = None  # the author's reference `image` was copied from; None when `image` is the source
 
     @property
     def entry_id(self) -> str:
@@ -111,6 +128,8 @@ class RegistryEntry:
         }
         if self.qualified is not None:
             out[QUALIFIED] = self.qualified
+        if self.source_image is not None:
+            out[SOURCE_IMAGE] = self.source_image
         return out
 
     def canonical_bytes(self) -> bytes:
@@ -134,17 +153,20 @@ def make_entry(
     image: str | None = None,
     now: float | None = None,
     qualified: dict[str, Any] | None = None,
+    source_image: str | None = None,
 ) -> VerifiedEntry:
     """An unsigned entry from a manifest document, with ``image`` (``repo@sha256:...``) pinned over the manifest's own
     and, optionally, our ``qualified`` measurements beside it. The manifest must pass the schema and the consistency
-    checks, placeholder digest refused; a malformed ``qualified`` block raises ``RegistryError``."""
+    checks, placeholder digest refused; a malformed ``qualified`` block, or a ``source_image`` whose digest is not
+    the image's, raises ``RegistryError``."""
     doc = copy.deepcopy(document)
     if image:
         doc['image'] = image
     manifest = parse_manifest(doc)
     block = parse_qualified(qualified) if qualified is not None else None
+    source = parse_source_image(source_image, manifest.image) if source_image is not None else None
     entry = RegistryEntry(
-        manifest.name, manifest.version, manifest.image, doc, int(time.time() if now is None else now), block
+        manifest.name, manifest.version, manifest.image, doc, int(time.time() if now is None else now), block, source
     )
     return VerifiedEntry(entry, manifest)
 
@@ -222,9 +244,9 @@ class Registry:
             doc = json.loads(payload)
         except ValueError as e:
             raise RegistryError(f'{entry_id}: not JSON: {e}') from e
-        if not isinstance(doc, dict) or sorted(set(doc) - {QUALIFIED}) != list(ENTRY_FIELDS):
+        if not isinstance(doc, dict) or sorted(set(doc) - set(OPTIONAL_FIELDS)) != list(ENTRY_FIELDS):
             raise RegistryError(
-                f'{entry_id}: an entry has exactly the fields {", ".join(ENTRY_FIELDS)}, and optionally {QUALIFIED}'
+                f'{entry_id}: an entry has exactly the fields {", ".join(ENTRY_FIELDS)}, and optionally {", ".join(OPTIONAL_FIELDS)}'
             )
         if canonical_json(doc) != payload:
             raise RegistryError(f'{entry_id}: not in canonical form')
@@ -236,6 +258,7 @@ class Registry:
                 dict(doc['manifest']),
                 int(doc['blessed_at']),
                 parse_qualified(doc[QUALIFIED]) if QUALIFIED in doc else None,
+                parse_source_image(doc[SOURCE_IMAGE], str(doc['image'])) if SOURCE_IMAGE in doc else None,
             )
             manifest = parse_manifest(entry.manifest)
         except (TypeError, ValueError, ManifestError, RegistryError) as e:

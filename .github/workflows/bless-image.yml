@@ -6,7 +6,10 @@ name: bless image
 #
 # Two ways in (Kimbo 9/15): the author publishes an image and we bless its DIGEST (the normal path: read the source,
 # pull that digest onto our own 5090, qualify, sign; a new push is a new digest and stays unblessed until we choose
-# it), or, when there is no published image yet, `source_repo` + `source_ref` (+ `dockerfile`) has this workflow
+# it). That digest is COPIED under entrius/ first (Kimbo 9/16: "copy it over to our Docker Hub, no mirror"): the
+# entry pins our copy, same digest, and keeps the author's reference as `source_image`, so an author deleting or
+# retagging their package never breaks a placement. One copy per bless, no sync. A stopgap until blessing is
+# reworked after mainnet. Or, when there is no published image yet, `source_repo` + `source_ref` (+ `dockerfile`) has this workflow
 # build the pinned commit and push it under entrius/ first. Either way only the signed digest ever runs, so
 # nothing auto-updates.
 #
@@ -99,7 +102,6 @@ jobs:
           docker system prune -af >/dev/null
 
       - name: Log in to Docker Hub
-        if: inputs.source_repo != ''
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
@@ -122,6 +124,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Install crane
+        if: inputs.source_repo == ''
+        uses: imjasonh/setup-crane@v0.4
+
       - name: Resolve the digest to bless
         id: digest
         run: |
@@ -129,7 +135,20 @@ jobs:
             echo "image=${{ steps.name.outputs.tag }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
             echo "built ${{ steps.name.outputs.tag }}@${{ steps.build.outputs.digest }} from ${{ inputs.source_repo }}@${{ inputs.source_ref }}"
           else
-            echo "image=${{ inputs.image }}" >> "$GITHUB_OUTPUT"
+            # The author's published digest, copied under entrius/ byte for byte (all platforms, digest preserved).
+            SRC="${{ inputs.image }}"
+            DIGEST="${SRC##*@}"
+            case "$SRC" in entrius/*|docker.io/entrius/*|index.docker.io/entrius/*) OURS=1 ;; *) OURS=0 ;; esac
+            if [ "$OURS" = 1 ]; then
+              echo "image=$SRC" >> "$GITHUB_OUTPUT"
+            else
+              crane copy "$SRC" "${{ steps.name.outputs.tag }}"
+              COPIED="$(crane digest "${{ steps.name.outputs.tag }}")"
+              test "$COPIED" = "$DIGEST" || { echo "the copy's digest $COPIED is not $DIGEST"; exit 1; }
+              echo "image=${{ steps.name.outputs.tag }}@$DIGEST" >> "$GITHUB_OUTPUT"
+              echo "source_image=$SRC" >> "$GITHUB_OUTPUT"
+              echo "copied $SRC -> ${{ steps.name.outputs.tag }}@$DIGEST"
+            fi
           fi
 
       - name: Bless with the release key
@@ -145,6 +164,7 @@ jobs:
           cp docker/controller/registry/*.json docker/controller/registry/*.sig "$STATE/registry/" 2>/dev/null || true
           Q=""
           if [ -n "${{ inputs.qualified }}" ]; then Q="--qualified ${{ inputs.qualified }}"; fi
+          if [ -n "${{ steps.digest.outputs.source_image }}" ]; then Q="$Q --source-image ${{ steps.digest.outputs.source_image }}"; fi
           uv run gitt controller bless "${{ inputs.manifest }}" --image "${{ steps.digest.outputs.image }}" \
             --sign-key "$KEY" $Q --state-dir "$STATE" --json | tee bless.json
           shred -u "$KEY"
@@ -161,5 +181,5 @@ jobs:
           git config user.name "gittensor-release"
           git config user.email "release@gittensor.io"
           git add docker/controller/registry/
-          git commit -m "registry: bless ${{ env.entry }} (${{ steps.digest.outputs.image }})$( [ -n "${{ inputs.source_repo }}" ] && echo " built from ${{ inputs.source_repo }}@${{ inputs.source_ref }}" )"
+          git commit -m "registry: bless ${{ env.entry }} (${{ steps.digest.outputs.image }})$( [ -n "${{ inputs.source_repo }}" ] && echo " built from ${{ inputs.source_repo }}@${{ inputs.source_ref }}" )$( [ -n "${{ steps.digest.outputs.source_image }}" ] && echo " copied from ${{ steps.digest.outputs.source_image }}" )"
           git push origin HEAD:${{ github.ref_name }}

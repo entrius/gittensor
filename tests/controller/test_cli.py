@@ -250,6 +250,26 @@ def test_force_checks_a_benched_box_without_touching_the_bench(state):
     assert after.status == BENCHED and after.bench_until == 9e12 and after.last_failed == ['gpu_proof']
 
 
+def test_remove_forgets_a_box_and_its_host_key_but_not_one_that_carries_an_instance(state):
+    from gittensor.controller.reconcile import InstanceRecord, InstanceStore
+    from gittensor.controller.ssh import pinned_host_key
+
+    assert invoke('remove', HK_A, '--state-dir', state).exit_code != 0  # not admitted
+    admit(state)
+    assert pinned_host_key(state / 'known_hosts', '10.0.0.1', 2200) == KEY_1
+    InstanceStore(state / 'instances.json').put(InstanceRecord('i-1', 'e@1', HK_A, UUID_5090))
+    refused = invoke('remove', HK_A, '--state-dir', state)
+    assert refused.exit_code == 1 and 'drain it first' in refused.output
+    assert HK_A in store(state).boxes
+    InstanceStore(state / 'instances.json').remove('i-1')
+    result = invoke('remove', HK_A, '--reason', 'pod returned', '--state-dir', state, '--json')
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == {'success': True, 'hotkey': HK_A, 'reason': 'pod returned', 'removed': True, 'pending': False}  # fmt: skip
+    assert HK_A not in store(state).boxes
+    assert not pinned_host_key(state / 'known_hosts', '10.0.0.1', 2200)
+    assert invoke('remove', HK_A, '--state-dir', state).exit_code != 0  # gone: not admitted any more
+
+
 def test_release_ends_a_bench_early_and_refuses_a_box_that_is_not_benched(state):
     admit(state)
     refused = invoke('release', HK_A, '--state-dir', state)

@@ -112,6 +112,9 @@ class BoxState:
     # `gitt controller release`: {'at', 'reason'}. An operator field (merged from disk beside a running controller);
     # ``release_from_bench`` honours it for a bench that began before it.
     release_request: Dict[str, object] = field(default_factory=dict)
+    # `gitt controller remove`: {'at', 'reason'}. An operator field like the release request; the controller drops the
+    # box on its next pass once nothing runs on it (``remove_requested``), the one-shot at once.
+    remove_request: Dict[str, object] = field(default_factory=dict)
     # The hotkey's UID on the subnet, as discovery last read it off the metagraph (any box, whoever admitted it); None
     # when the hotkey is not registered, or discovery has not run. Only shown (status, the public document).
     uid: Optional[int] = None
@@ -250,6 +253,17 @@ def release_requested(state: BoxState) -> bool:
     """A BENCHED box an operator released after its bench began (a request from an earlier bench does not count)."""
     at = state.release_request.get('at')
     return state.status == BENCHED and isinstance(at, (int, float)) and at >= (state.benched_at or 0.0)
+
+
+def request_remove(state: BoxState, now: float, reason: str) -> BoxState:
+    """``gitt controller remove``: ask for this box to be forgotten. Pure; whoever holds the state applies it."""
+    new = BoxState.from_dict(state.as_dict())
+    new.remove_request = {'at': now, 'reason': reason}
+    return new
+
+
+def remove_requested(state: BoxState) -> bool:
+    return isinstance(state.remove_request.get('at'), (int, float))
 
 
 def release_from_bench(state: BoxState, now: float) -> BoxState:
@@ -413,6 +427,7 @@ OPERATOR_FIELDS = (
     'host_key',
     'port_map',
     'release_request',
+    'remove_request',
     'workload_ports',
     'source',
     'endpoint_changed',

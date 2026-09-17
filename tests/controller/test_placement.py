@@ -906,7 +906,7 @@ def test_the_committed_27b_manifest_agrees_with_itself_and_with_the_release_cont
     # 9/17 soak: min_vram_gb 32 sat above our 5090 spec floor (31.25 GB) and the entry could never place
     assert manifest.placement.min_vram_gb <= RTX_5090.vram_total_mib_min / 1024
     assert spec.network == 'gt-noegress' and manifest.image.startswith(
-        'ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:0.5.9@sha256:afb4a553'
+        'ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:0.5.10@sha256:d519d6ed'
     )
 
 

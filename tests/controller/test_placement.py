@@ -903,7 +903,7 @@ def test_the_committed_27b_manifest_agrees_with_itself_and_with_the_release_cont
     assert all(c.spec['body']['temperature'] == 0 for c in manifest.entry_canary)
     assert spec.volumes == (('/var/lib/gt-models/qwen3.8-27b-nvfp4/models', '/models', True),)
     assert spec.network == 'gt-noegress' and manifest.image.startswith(
-        'ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:v0.5.8@'
+        'ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:0.5.9@sha256:afb4a553'
     )
 
 

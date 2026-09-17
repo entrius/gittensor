@@ -5,7 +5,7 @@
 #
 # What changed from v5 (entrius/sparkinfer v0.5.7 — do not bless: it predates sparkinfer#1088, so past 16K tokens the
 # decode attended only the sink and the last 4K and an agent lost its own context):
-#   * image: their v0.5.8 (b1ed168; drain exits at once when idle, SPARKINFER_DRAIN_GRACE_S, 429 bodies with
+#   * image: their v0.5.9 (adbdb5f = v0.5.8 b1ed168 + the compute-pool entrypoint and manifest, sparkinfer#1098; drain exits at once when idle, SPARKINFER_DRAIN_GRACE_S, 429 bodies with
 #     type/code, SPARKINFER_NO_DOWNLOAD, the #1088 fix). Their entrypoint execs the server, so SIGTERM lands.
 #   * the DSpark drafter (speculative decoding) is on: a second 1.4 GB artifact, SPARKINFER_MODE=serve-dspark.
 #   * CTX 65536 (the product caps context at 64K; 131072 with the drafter peaks ~31.4 GB on a 31.8 GB card).
@@ -15,13 +15,13 @@
 #   * SPARKINFER_MAX_QUEUE_DEPTH = front_door.concurrency and SPARKINFER_ADMISSION_WAIT_S=0: refuse, never queue.
 #   * canaries at temperature 0 (omitted sampling now follows generation_config.json).
 #   * no tokenizer.json / .tokenizer_repo artifacts: the server reads MODEL_DIR/tokenizer.json.
-#   * TODO before bless (qualification on our own card, `deploy --box`): the digest, max_load_s, min_vram_gb at
+#   * TODO before bless (qualification on our own card, `deploy --box`): min_vram_gb at
 #     65536 with the drafter, profile, concurrency (upstream fixed the serialised 4 × 8k case).
 name: qwen3.8-27b-nvfp4
 version: 6
-description: Qwen3.8-27B (NVFP4) chat with the DSpark drafter on sparkinfer v0.5.8's release container, one RTX 5090 per instance
+description: Qwen3.8-27B (NVFP4) chat with the DSpark drafter on sparkinfer v0.5.9's release container, one RTX 5090 per instance
 runtime: sparkinfer
-image: ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:v0.5.8@sha256:0000000000000000000000000000000000000000000000000000000000000000  # TODO tag + digest: NOT v0.5.8 (18fbc2a2…, built before sparkinfer#1098: its entrypoint takes serve-dspark as an argument, ignores SPARKINFER_MODE, verifies nothing); the next tag bakes gittensor-entrypoint.sh (asked 9/17)
+image: ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:0.5.9@sha256:afb4a553ba380cdbaa88db96e9ccd02d21b005030bab981b368fb9be1890d712  # tag v0.5.9 (adbdb5f, 9/17): v0.5.8 + sparkinfer#1098 baked (gittensor-entrypoint.sh, /manifest.yaml); bless copies it under entrius/
 placement:
   gpu_types: {include: [RTX5090]}
   cards_per_instance: 1

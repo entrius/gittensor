@@ -7,7 +7,7 @@
       "min_valid_merged_prs": 0,
       "min_valid_solved_issues": 0
     },
-    "emission_share": 0.4,
+    "emission_share": 0.3,
     "fixed_base_score": 1.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {
@@ -26,5 +26,8 @@
       "maintainer_issue_multiplier": 1.0
     },
     "trusted_label_pipeline": true
+  },
+  "gittensor-model-hub/spark-hermes": {
+    "emission_share": 0.1
   }
 }

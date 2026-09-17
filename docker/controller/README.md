@@ -83,7 +83,7 @@ read it.
 | `rates.<gpu_type>` | `idle_usd_per_card_hour`, `leased_usd_per_card_hour`, `source` (`scorecard`: what the last one implied; `table`: `fleet_pay.json` targets) |
 | `oracle` | `tao_usd`, `alpha_tao`, `held` |
 | `totals` | `boxes`, `cards`, `cards_by_state` |
-| `boxes[]` | `hotkey`, `uid` (null: the controller reads no UIDs), `status`, `standing`, `gpu_type`, `card_count`, `last_check_at`, `last_failed[]` (check names), `bench_until`, `benched_reason`, `pay{weight, idle_h, leased_h, usd_window}`, `last_event{at, kind}` |
+| `boxes[]` | `hotkey`, `uid` (as discovery last read the metagraph; null for a hotkey not registered, or without `--discover`), `status`, `standing`, `gpu_type`, `card_count`, `last_check_at`, `last_failed[]` (check names), `bench_until`, `benched_reason`, `pay{weight, idle_h, leased_h, usd_window}`, `last_event{at, kind}` |
 | `boxes[].cards[]` | `card` (first 12 hex of sha256 of the GPU UUID), `state`, `since`; with an instance on it: `workload`, `image` (repo:tag), `leased_at`, `uptime_s`, `healthy`, `draining`, `heartbeat_misses`, `last_heartbeat_at` |
 
 Never in it: a host, IP or port, a port map, container or image ids, raw GPU UUIDs, host keys, the NVML md5, file

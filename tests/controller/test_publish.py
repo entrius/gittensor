@@ -75,7 +75,7 @@ def fleet(now: float = NOW) -> tuple[dict[str, BoxState], dict[str, InstanceReco
             HK_A, status=IDLE, pinned_uuids=[UUID_A, UUID_B], card_name='NVIDIA GeForce RTX 5090',
             last_check_at=now - 300, host=PRIVATE['host'], port=PRIVATE['ssh_port'], host_key=PRIVATE['host_key'],
             port_map={'8080': PRIVATE['mapped_port']}, workload_ports=[PRIVATE['host_port'], PRIVATE['host_port'] + 9],
-            source='chain', identity={'nvml_md5': PRIVATE['nvml_md5'], 'power_limits': {UUID_A: 575}},
+            source='chain', uid=61, identity={'nvml_md5': PRIVATE['nvml_md5'], 'power_limits': {UUID_A: 575}},
             endpoint_changed={'host': PRIVATE['moved_host'], 'port': 2222, 'host_key': PRIVATE['host_key'], 'at': now},
             cards={UUID_A: CardState(LEASED, 'i-1', now - 2_400), UUID_B: CardState(DRAINING, 'i-2', now - 30)},
             last_failed=['gpu_uuid_pin', PRIVATE['transport']],
@@ -145,8 +145,9 @@ def test_the_contract(tmp_path):
         'bench_until', 'benched_reason', 'pay', 'last_event', 'cards',
     }  # fmt: skip
     assert (a['status'], a['standing'], a['gpu_type'], a['card_count'], a['uid']) == (
-        IDLE, 'probation', 'RTX5090', 2, None,
+        IDLE, 'probation', 'RTX5090', 2, 61,
     )  # fmt: skip
+    assert b['uid'] is None  # a hotkey discovery has not seen on the metagraph
     assert a['last_event'] == {'at': NOW - 5_000, 'kind': CLEAN_LEASE} and a['benched_reason'] is None
     leased = next(x for x in a['cards'] if x['state'] == LEASED)
     assert leased == {

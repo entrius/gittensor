@@ -2301,6 +2301,7 @@ def status_command(state_dir, json_mode):
         boxes.append(
             {
                 'hotkey': box.box_id,
+                'uid': box.uid,
                 'host': _host_field(box.host, box.port),
                 'status': box.status,
                 'standing': standing(box.standing_events, now),

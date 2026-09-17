@@ -21,7 +21,8 @@ changes under one short lock and saves at once:
   next fleet round (Kimbo 9/16). The fleet-wide round is unchanged. A benched box has no cards, so nothing benched is
   re-proved: it waits out the bench. Then the pay ledger's settlement tick (``pay/ledger.py``) whenever one is due;
 * **the scorecard** every ``SCORECARD_INTERVAL_S``: the trailing window settled at the oracle's price and written as
-  ``scorecard/latest.json`` + ``latest.sha256`` for the validator (``pay/scorecard.py``).
+  ``scorecard/latest.json`` + ``latest.sha256`` for the validator (``pay/scorecard.py``). With it, and every
+  ``PUBLISH_INTERVAL_S`` on a loop of its own, the sanitized ``public/fleet.json`` the website shows (``publish.py``).
 * **discovery** (``--discover``) every ``DISCOVER_INTERVAL_S``: the metagraph, read-only, settles which boxes exist
   (``discovery.py``). One pass runs before round 1, so a box already published on chain is in round 1 and does not
   wait a discovery interval at ADMIT; a box found later is proved at the next watch tick.
@@ -54,6 +55,7 @@ from gittensor.controller.pay.ledger import Ledger, settle_window
 from gittensor.controller.pay.oracle import FailSafeOracle, StaticOracle
 from gittensor.controller.pay.rates import GpuRate, load_rates
 from gittensor.controller.pay.scorecard import build_scorecard, write_scorecard
+from gittensor.controller.publish import Publisher, build_fleet
 from gittensor.controller.reconcile import InstanceStore, Reconciler, ReconcileReport
 from gittensor.controller.registry import DeploymentStore, Registry
 from gittensor.controller.runspec import BoxHttp, HttpClient, PullToken
@@ -138,8 +140,14 @@ class Controller:
         read_chain: Callable[[], list[ChainEndpoint]] | None = None,
         scan_host_key: Callable[[str, int], str] | None = None,
         wall: Callable[[], float] = time.time,
+        network: str | None = None,
+        netuid: int | None = None,
     ):
         self.state = state
+        self.registry = registry
+        self.network, self.netuid = network, netuid
+        self.publisher = Publisher(state.root)
+        self._images: dict[str, str | None] = {}  # entry id -> image reference, for the public document
         self.wall = wall
         self.oracle = oracle or FailSafeOracle(StaticOracle())
         self.rates = rates if rates is not None else load_rates()
@@ -369,7 +377,42 @@ class Controller:
             f'scorecard {sha[:12]}: {paying} hotkey(s) paid, recycle {doc["recycle_share"] * 100:.1f}%, '
             f'idle/leased per card-hour {rates}' + (' (oracle held)' if quote.held else ''),
         )
+        self.publish_once(force=True)
         return doc
+
+    def _image_of(self, entry_id: str) -> str | None:
+        if entry_id not in self._images:
+            try:
+                self._images[entry_id] = self.registry.read(entry_id).entry.image
+            except Exception:
+                return None  # not cached: an entry blessed later is found on a later write
+        return self._images[entry_id]
+
+    def publish_once(self, force: bool = False, running: bool = True) -> bool:
+        """Write ``public/fleet.json`` (``publish.py``) when it is due. Never raises: the page is not worth a loop."""
+        if not self.publisher.due(force):
+            return False
+        try:
+            with self.write_lock:
+                boxes, instances = dict(self.boxes.boxes), dict(self.instances.instances)
+                status = dict(self.status)
+            doc = build_fleet(
+                self.state.root,
+                boxes,
+                instances,
+                status,
+                running,
+                time.time(),
+                self._image_of,
+                self.network,
+                self.netuid,
+            )
+            self.publisher.write(doc)
+        except Exception as e:
+            self.publisher.last_at = self.publisher.wall()  # a failing write is retried on the interval, not every tick
+            self.reporter.note('publish', f'{type(e).__name__}: {e}')
+            return False
+        return True
 
     def watch_once(self) -> WatchReport:
         report = self.watch.run_pass()
@@ -561,6 +604,8 @@ class Controller:
             ('reconcile', self.reconcile_once, self.intervals.reconcile_s, None),
             ('watch', self.watch_once, self.intervals.watch_tick_s, None),
             ('scorecard', self.scorecard_once, self.intervals.scorecard_s, None),
+            # Its own loop, not the watch tick: a watch pass held up by SSH timeouts must not make the page say stale.
+            ('publish', lambda: self.publish_once(force=True), cfg.PUBLISH_INTERVAL_S, None),
         )
         first_wait = {}
         if self.read_chain is not None:
@@ -595,6 +640,7 @@ class Controller:
             self.instances.save()
             self.status['stopped_at'] = time.time()
         self._write_status()
+        self.publish_once(force=True, running=False)
         return clean
 
     def serve(self, max_seconds: float | None = None, install_signals: bool = True) -> bool:

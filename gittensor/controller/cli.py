@@ -107,10 +107,8 @@ from gittensor.controller.discovery import ChainReader, DiscoverReport, Discover
 from gittensor.controller.heartbeat import WatchReport
 from gittensor.controller.locks import BoxLocks
 from gittensor.controller.manifest import ManifestError
-from gittensor.controller.pay.ledger import Ledger, is_withheld
 from gittensor.controller.pay.oracle import CoinGeckoChainOracle, FailSafeOracle, MetagraphedOracle, StaticOracle
 from gittensor.controller.pay.rates import RatesError, load_rates
-from gittensor.controller.pay.scorecard import LATEST, ScorecardError, read_scorecard
 from gittensor.controller.proof.slot import (
     GpuProof,
     ProbeResult,
@@ -121,6 +119,7 @@ from gittensor.controller.proof.slot import (
     image_ref,
     stage_box,
 )
+from gittensor.controller.publish import build_fleet, live_pay, pay_entry, scorecard_view, write_fleet
 from gittensor.controller.reconcile import InstanceStore, Reconciler, ReconcileReport
 from gittensor.controller.registry import (
     DeploymentStore,
@@ -2223,6 +2222,8 @@ def run_command(
                 rates=rates,
                 read_chain=reader.read if reader is not None else None,
                 scan_host_key=_scan_host_key,
+                network=network,
+                netuid=netuid,
             )
             discovering = (
                 f', discover every {discover_interval:.0f} s ({reader.endpoint} netuid {reader.netuid})'
@@ -2249,23 +2250,6 @@ def _heartbeat_cell(row: dict, now: float) -> str:
     return f'{mark} {_age(row.get("last_heartbeat_at"), now)}'
 
 
-def _scorecard_view(state: StateDir, now: float) -> dict:
-    """The last scorecard, checked the way the validator checks it: ``{}`` when none was written yet."""
-    path = state.root / 'scorecard' / LATEST
-    if not path.exists():
-        return {}
-    try:
-        doc, sha = read_scorecard(path, now)
-        view = {'valid': True, 'error': '', 'sha256': sha}
-    except ScorecardError as e:
-        try:
-            doc = json.loads(path.read_text())
-        except (OSError, ValueError):
-            return {'valid': False, 'error': str(e), 'path': str(path)}
-        view = {'valid': False, 'error': str(e), 'sha256': None}
-    return {**view, 'path': str(path), 'scorecard': doc}
-
-
 def _pay_line(view: dict, now: float) -> str:
     if not view:
         return '[dim]pay: no scorecard yet[/dim]'
@@ -2285,56 +2269,6 @@ def _pay_line(view: dict, now: float) -> str:
     )
 
 
-def _live_pay(state: StateDir, boxes: dict[str, BoxState], view: dict, now: float) -> dict[str, dict]:
-    """Per hotkey, what the ledger has settled since the last scorecard (or over the trailing window when there is
-    none): idle / leased / withheld seconds and the USD they imply at the scorecard's implied per-card-hour rates
-    (the table's target rates for a GPU type the scorecard did not price). A card LEASED since the scorecard shows
-    its seconds here, not 0 (Kimbo 9/16)."""
-    doc = view.get('scorecard') or {}
-    since = float(doc['issued_at']) if doc.get('issued_at') is not None else now - cfg.SETTLEMENT_WINDOW_S
-    implied = (doc.get('pool') or {}).get('implied_usd_per_card_hour') or {}
-    try:
-        table = load_rates()
-    except RatesError:
-        table = {}
-
-    def rate(gpu: str) -> tuple[float, float]:
-        if gpu in implied:
-            return float(implied[gpu]['idle']), float(implied[gpu]['leased'])
-        row = table.get(gpu)
-        return (row.idle_usd_per_hr, row.leased_usd_per_hr) if row else (0.0, 0.0)
-
-    out: dict[str, dict] = {}
-    for row in Ledger(state.root / 'ledger').rows(since, now):
-        live = out.setdefault(
-            row.hotkey, {'since': since, 'idle_s': 0.0, 'leased_s': 0.0, 'withheld_s': 0.0, 'usd': 0.0}
-        )
-        withheld = row.withheld or (row.leased_s > 0 and is_withheld(boxes.get(row.hotkey), row.t1))
-        leased = 0.0 if withheld else row.leased_s
-        idle_rate, leased_rate = rate(row.gpu)
-        live['idle_s'] += row.idle_s
-        live['leased_s'] += leased
-        live['withheld_s'] += row.leased_s - leased
-        live['usd'] += (row.idle_s * idle_rate + leased * leased_rate) / 3600.0
-    for live in out.values():
-        for key in ('idle_s', 'leased_s', 'withheld_s'):
-            live[key] = round(live[key], 3)
-        live['usd'] = round(live['usd'], 6)
-    return out
-
-
-def _pay_entry(scored: dict, live: dict | None, age_s: float | None) -> dict:
-    """A box's pay as `status` shows it: the last scorecard's window, the ledger since it, and the two summed."""
-    entry = {k: scored.get(k) for k in ('weight', 'usd', 'idle_s', 'leased_s', 'withheld_s')}
-    entry['scorecard_age_s'] = age_s
-    entry['live'] = live or {}
-    entry['total'] = {
-        k: round(float(scored.get(k) or 0.0) + float((live or {}).get(k) or 0.0), 6 if k == 'usd' else 3)
-        for k in ('usd', 'idle_s', 'leased_s', 'withheld_s')
-    }
-    return entry
-
-
 @controller_group.command('status')
 @_state_options
 def status_command(state_dir, json_mode):
@@ -2350,12 +2284,12 @@ def status_command(state_dir, json_mode):
         info = json.loads(status_path.read_text()) if status_path.exists() else {}
     except (OSError, ValueError):
         info = {}
-    pay_view = _scorecard_view(state, now)
+    pay_view = scorecard_view(state.root, now)
     paid = {h['hotkey']: h for h in (pay_view.get('scorecard') or {}).get('hotkeys', [])}
     issued_at = (pay_view.get('scorecard') or {}).get('issued_at')
     age_s = round(now - float(issued_at), 1) if issued_at is not None else None
     store = state.store()
-    live_pay = _live_pay(state, store.boxes, pay_view, now)
+    since_scorecard = live_pay(state.root, store.boxes, pay_view, now)
     boxes = []
     for box in sorted(store.boxes.values(), key=lambda b: b.box_id):
         cards = [
@@ -2363,7 +2297,7 @@ def status_command(state_dir, json_mode):
             for u, c in sorted(box.cards.items())
         ]
         entry = paid.get(box.box_id) or {}
-        live = live_pay.get(box.box_id)
+        live = since_scorecard.get(box.box_id)
         boxes.append(
             {
                 'hotkey': box.box_id,
@@ -2379,7 +2313,7 @@ def status_command(state_dir, json_mode):
                 'source': box.source,
                 'endpoint_changed': box.endpoint_changed,
                 'standing_events': box.standing_events[-5:],
-                'pay': _pay_entry(entry, live, age_s) if entry or live else {},
+                'pay': pay_entry(entry, live, age_s) if entry or live else {},
             }
         )
     instances = _instance_rows(InstanceStore(state.instances), store)
@@ -2490,6 +2424,47 @@ def status_command(state_dir, json_mode):
     console.print(table)
 
 
+@controller_group.command('publish')
+@_registry_options
+@_state_options
+def publish_command(release_pubkey, allow_dev_keys, state_dir, json_mode):
+    """Write ``public/fleet.json`` once: the sanitized fleet document the website shows (no address, port, container
+    or image id, raw GPU UUID or error text; see publish.py). `run` writes it on its own; this is for a look at the
+    document or a host where `run` is down. Read-only on every other state file; safe beside `run`."""
+    state = StateDir(Path(state_dir).expanduser())
+    if not state.root.is_dir():
+        _fail(f'{state.root}: no controller state directory', json_mode, EXIT_NO_VERDICT)
+    registry = _open_registry(state, release_pubkey, allow_dev_keys, json_mode)
+
+    def image_of(entry_id: str) -> str | None:
+        try:
+            return registry.read(entry_id).entry.image
+        except RegistryError:
+            return None
+
+    status_path = state.root / STATUS_FILE
+    try:
+        info = json.loads(status_path.read_text()) if status_path.exists() else {}
+    except (OSError, ValueError):
+        info = {}
+    doc = build_fleet(
+        state.root,
+        state.store().boxes,
+        InstanceStore(state.instances).instances,
+        info,
+        state.daemon_running(),
+        time.time(),
+        image_of,
+    )
+    path = write_fleet(state.root, doc)
+    if json_mode:
+        emit_json({'success': True, 'path': str(path), 'fleet': doc})
+        return
+    totals = doc['totals']
+    states = ', '.join(f'{n} {s}' for s, n in sorted(totals['cards_by_state'].items())) or 'no cards'
+    console.print(f'wrote {escape(str(path))}: {totals["boxes"]} box(es), {totals["cards"]} card(s) ({states})')
+
+
 @controller_group.command('scorecard')
 @_state_options
 def scorecard_command(state_dir, json_mode):
@@ -2498,7 +2473,7 @@ def scorecard_command(state_dir, json_mode):
     validator would use it, 1 when it would refuse it (the compute share recycles), 2 when there is none."""
     state = StateDir(Path(state_dir).expanduser())
     now = time.time()
-    view = _scorecard_view(state, now)
+    view = scorecard_view(state.root, now)
     if not view:
         _fail(
             f'no scorecard in {state.root / "scorecard"} yet: `gitt controller run` writes one',

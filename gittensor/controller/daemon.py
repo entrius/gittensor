@@ -47,7 +47,7 @@ from typing import Any, Protocol
 
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import HostRunner
-from gittensor.controller.checks.state import ADMIT, CHECKING, IDLE, BoxState, StateStore
+from gittensor.controller.checks.state import ADMIT, CHECKING, IDLE, BoxState, StateStore, remove_requested
 from gittensor.controller.discovery import ChainEndpoint, DiscoverReport, Discovery
 from gittensor.controller.heartbeat import Watch, WatchReport
 from gittensor.controller.locks import BoxLocks
@@ -59,6 +59,7 @@ from gittensor.controller.publish import Publisher, build_fleet
 from gittensor.controller.reconcile import InstanceStore, Reconciler, ReconcileReport
 from gittensor.controller.registry import DeploymentStore, Registry
 from gittensor.controller.runspec import BoxHttp, HttpClient, PullToken
+from gittensor.controller.ssh import write_host_key
 
 STATUS_FILE = 'controller.json'
 
@@ -316,7 +317,8 @@ class Controller:
         self.counts['reconcile'] += 1
         n = self.counts['reconcile']
         with self.write_lock:
-            self.boxes.merge_from_disk()  # boxes an operator admitted beside us
+            self.boxes.merge_from_disk()  # boxes an operator admitted (or asked to remove) beside us
+            self.remove_requested_boxes()
         self.reconciler.deployments = DeploymentStore(self.state.deployments)  # operator-owned: read fresh each pass
         report = self.reconciler.run_pass()
         self._set_status(
@@ -336,6 +338,21 @@ class Controller:
         )
         self.reporter.reconcile(report, n)
         return report
+
+    def remove_requested_boxes(self) -> list[str]:
+        """Drop every box an operator asked to remove (`gitt controller remove` beside us) once nothing runs on it:
+        the record and its pinned host key. A box still carrying an instance waits for the reconciler to drain it.
+        Under the write lock. Returns the boxes removed."""
+        removed = []
+        for box_id, box in sorted(self.boxes.boxes.items()):
+            if not remove_requested(box) or self.instances.on_box(box_id):
+                continue
+            self.boxes.remove(box_id)
+            if box.host:
+                write_host_key(self.state.known_hosts, box.host, box.port, None)
+            removed.append(box_id)
+            self.reporter.note('reconcile', f'{box_id[:16]}: removed ({box.remove_request.get("reason") or "no reason given"})')  # fmt: skip
+        return removed
 
     def settle_once(self, now: float | None = None) -> int | None:
         """The ledger's settlement tick, when one is due: the rows written, or None."""

@@ -63,7 +63,8 @@ docker run --rm -v ~/.gittensor/controller:/state --entrypoint gitt entrius/gt-c
     controller admit <hotkey> --host <ip> --port <port> --state-dir /state
 ```
 
-`admit <hotkey> --host <ip> --port <port>` and `allowlist add <hotkey>` come first; see `gitt controller --help`. A
+`admit <hotkey> --host <ip> --port <port>` and `allowlist add <hotkey>` come first; `remove <hotkey>` forgets a box
+that is gone for good (its record and pinned host key; refuses one that still carries an instance); see `gitt controller --help`. A
 per-round proof build needs the private build pipeline, which this image deliberately does not carry: run it where
 that lives and point `--build-cmd` at it, or rebuild outside and let each round re-read the mounted `dist`.
 

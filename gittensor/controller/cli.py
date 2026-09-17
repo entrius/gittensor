@@ -99,7 +99,9 @@ from gittensor.controller.checks.state import (
     provable_uuids,
     release_from_bench,
     release_requested,
+    remove_requested,
     request_release,
+    request_remove,
 )
 from gittensor.controller.checks.verdict import CheckResult, CheckVerdict
 from gittensor.controller.daemon import STATUS_FILE, Controller, Intervals
@@ -1438,7 +1440,53 @@ def _print_round(report: RoundReport, n: int, json_mode: bool) -> None:
     console.print(f'[dim]{_timings_text(report.timings_ms) or "no boxes to probe"}[/dim]')
 
 
-# ---------------------------------------------------------------- release ------------------------------------------
+# ---------------------------------------------------------------- release / remove ---------------------------------
+
+
+@controller_group.command('remove')
+@click.argument('hotkey')
+@click.option('--reason', default='', help='Why the box is forgotten: logged by the controller when it drops it.')
+@_state_options
+def remove_command(hotkey, reason, state_dir, json_mode):
+    """Forget a box: its record and its pinned host key are dropped. For a box that is gone for good (a rented pod
+    returned, a machine retired); a benched box would otherwise wait out its bench and be probed forever. Refuses a
+    box that still carries an instance (exit 1): drain it first (`deploy --replicas 0`, or `release` and wait).
+
+    
+    Beside `gitt controller run` the request is recorded in boxes.json and the controller drops the box on its next
+    reconcile pass; without one it is dropped at once. A box discovery admitted from the chain comes back on the next
+    discovery pass while its hotkey still publishes a compute endpoint.
+    """
+    state = StateDir(Path(state_dir).expanduser())
+    store = state.store()
+    box = store.boxes.get(hotkey)
+    if box is None:
+        _fail(f'{hotkey} is not admitted', json_mode, EXIT_NO_VERDICT)
+    live = InstanceStore(state.instances).on_box(hotkey)
+    if live:
+        _fail(f'{hotkey} still carries {len(live)} instance(s): drain it first', json_mode, EXIT_BENCH)
+    store.put(request_remove(box, time.time(), reason))
+    removed = False
+    if not state.daemon_running():
+        try:
+            with state.lock():
+                store = state.store()
+                if hotkey in store.boxes and not InstanceStore(state.instances).on_box(hotkey):
+                    store.remove(hotkey)
+                    if box.host:
+                        write_host_key(state.known_hosts, box.host, box.port, None)
+                    removed = True
+        except ControllerRunning:
+            removed = False  # `run` started meanwhile: it applies the request on its next pass
+    if json_mode:
+        emit_json({'success': True, 'hotkey': hotkey, 'reason': reason, 'removed': removed, 'pending': not removed})
+        return
+    if removed:
+        console.print(f'{escape(hotkey)} removed')
+    else:
+        console.print(
+            f'{escape(hotkey)}: removal requested; the running controller drops it on its next reconcile pass'
+        )
 
 
 @controller_group.command('release')
@@ -2311,6 +2359,7 @@ def status_command(state_dir, json_mode):
                 'bench_until': box.bench_until,
                 'withheld_from': box.withheld_from,
                 'release_requested': release_requested(box),
+                'remove_requested': remove_requested(box),
                 'source': box.source,
                 'endpoint_changed': box.endpoint_changed,
                 'standing_events': box.standing_events[-5:],
@@ -2364,6 +2413,8 @@ def status_command(state_dir, json_mode):
         bench = f'until {_when(b["bench_until"])}' if b['status'] == BENCHED else ''
         if b['release_requested']:
             bench += ' · release requested'
+        if b['remove_requested']:
+            bench += f'{" · " if bench else ""}removal requested'
         if b['withheld_from']:
             bench += f'{" · " if bench else ""}pay withheld from {_when(b["withheld_from"])}'
         event = b['standing_events'][-1] if b['standing_events'] else None

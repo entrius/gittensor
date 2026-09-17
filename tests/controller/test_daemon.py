@@ -529,6 +529,37 @@ def test_release_beside_run_is_applied_by_the_daemons_next_round(state, tmp_path
         assert StateStore(state / 'boxes.json').get(HK_A).status == IDLE
 
 
+def test_remove_beside_run_is_applied_by_the_daemons_next_reconcile_pass_once_nothing_runs_there(state, tmp_path):
+    from gittensor.controller.reconcile import InstanceRecord
+    from gittensor.controller.ssh import pinned_host_key
+
+    admit(state)
+    with ctl.StateDir(state).run_lock():
+        notes = Notes()
+        controller = Controller(
+            ctl.StateDir(state),
+            Registry(tmp_path / 'registry'),
+            make_runner=lambda box, purpose: box_runner(),
+            run_round=lambda proof, **shared: None,
+            load_proof=FakeProof,
+            reporter=notes,
+        )
+        controller.instances.put(InstanceRecord('i-1', 'e@1', HK_A, UUID_5090, healthy=True))
+        assert invoke('remove', HK_A, '--state-dir', state).exit_code == 1  # still carries an instance
+        controller.instances.remove('i-1')
+        result = invoke('remove', HK_A, '--reason', 'pod returned', '--state-dir', state, '--json')
+        assert result.exit_code == 0 and json.loads(result.stdout)['pending'] is True
+        assert HK_A in StateStore(state / 'boxes.json').boxes  # recorded, not applied: the daemon owns it
+        assert 'removal requested' in invoke('status', '--state-dir', state).output
+
+        with controller.write_lock:
+            controller.boxes.merge_from_disk()
+            assert controller.remove_requested_boxes() == [HK_A]
+        assert HK_A not in controller.boxes.boxes and HK_A not in StateStore(state / 'boxes.json').boxes
+        assert not pinned_host_key(state / 'known_hosts', '10.0.0.1', 2200)
+        assert any('removed (pod returned)' in m for _, m in notes.notes)
+
+
 def test_run_serves_its_loops_stops_on_sigterm_and_status_reads_what_it_did(state, tmp_path):
     keypair(tmp_path)
     admit(state)

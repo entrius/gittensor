@@ -263,6 +263,24 @@ class TestUpCommand:
         assert 'WARNING: --no-chain' in result.output and 'NOT a registered miner' in result.output
         assert probe.chain_calls == 0 and len(docker_calls) == 1 and 'GT_AGENT_MINER_HOTKEY=' in docker_calls[0]
 
+    def test_agent_only_starts_the_published_agent_with_no_wallet_on_the_box(self, runner, docker_calls, probe):
+        probe.ss58 = None  # the wallet lives on another machine: `gitt up --publish-only` runs there
+        result = runner.invoke(cli, [*UP, '--agent-only', '--json'])
+        assert result.exit_code == 0, result.output
+        doc = json.loads(result.stdout)
+        assert doc['success'] and doc['agent_only'] and not doc['no_chain']
+        assert probe.chain_calls == 0 and len(docker_calls) == 1  # nothing looked up or published; the agent starts
+        rows = {c['name']: c for c in doc['checks']}
+        assert rows['Wallet hotkey']['status'] == 'skip' and '--agent-only' in rows['Wallet hotkey']['detail']
+        assert rows['Public IP']['status'] == 'pass'  # still checked: it is what the wallet machine publishes
+        published = next(c for c in doc['checks'] if 'wallet machine run' in c['detail'])
+        assert published['status'] == 'skip' and 'gitt up --publish-only --ip' in published['detail']
+
+    def test_agent_only_excludes_the_other_chain_modes(self, runner, docker_calls, probe):
+        for extra in (['--publish-only', '--ip', '203.0.113.7'], ['--no-update', '--no-chain']):
+            result = runner.invoke(cli, [*UP, '--agent-only', *extra])
+            assert result.exit_code == 2 and 'box half of --publish-only' in result.output and docker_calls == []
+
     def test_no_chain_requires_no_update(self, runner, docker_calls, probe):
         result = runner.invoke(cli, [*UP, '--no-chain'])
         assert result.exit_code == 2 and 'only applies to --no-update' in result.output and docker_calls == []

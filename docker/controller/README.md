@@ -66,3 +66,26 @@ docker run --rm -v ~/.gittensor/controller:/state --entrypoint gitt entrius/gt-c
 `admit <hotkey> --host <ip> --port <port>` and `allowlist add <hotkey>` come first; see `gitt controller --help`. A
 per-round proof build needs the private build pipeline, which this image deliberately does not carry: run it where
 that lives and point `--build-cmd` at it, or rebuild outside and let each round re-read the mounted `dist`.
+
+## The public fleet document
+
+`run` writes `<state-dir>/public/fleet.json` every 30 s and with every scorecard (tmp + rename; `gitt controller
+publish` writes it once). It is the only file meant to leave the state directory: das-gittensor serves it as
+`GET /compute/fleet` through a **read-only bind mount of `public/` alone**, never of the state directory (the CA key
+and every box's address live beside it). `public/` is 0755 and the file 0644 for that reader. The validator does not
+read it.
+
+| Field (`"schema": 1`) | What |
+|---|---|
+| `generated_at`, `network`, `netuid` | when it was written; a reader calls it stale after 3 x `controller.publish_interval_s` |
+| `controller` | `running`, `round_n`, `last_round_at`, `round_interval_s`, `publish_interval_s` |
+| `scorecard` | `sha256`, `issued_at`, `valid_until`, `valid`, `recycle_share` (null before the first scorecard) |
+| `rates.<gpu_type>` | `idle_usd_per_card_hour`, `leased_usd_per_card_hour`, `source` (`scorecard`: what the last one implied; `table`: `fleet_pay.json` targets) |
+| `oracle` | `tao_usd`, `alpha_tao`, `held` |
+| `totals` | `boxes`, `cards`, `cards_by_state` |
+| `boxes[]` | `hotkey`, `uid` (null: the controller reads no UIDs), `status`, `standing`, `gpu_type`, `card_count`, `last_check_at`, `last_failed[]` (check names), `bench_until`, `benched_reason`, `pay{weight, idle_h, leased_h, usd_window}`, `last_event{at, kind}` |
+| `boxes[].cards[]` | `card` (first 12 hex of sha256 of the GPU UUID), `state`, `since`; with an instance on it: `workload`, `image` (repo:tag), `leased_at`, `uptime_s`, `healthy`, `draining`, `heartbeat_misses`, `last_heartbeat_at` |
+
+Never in it: a host, IP or port, a port map, container or image ids, raw GPU UUIDs, host keys, the NVML md5, file
+paths, proof provider or version ids, error text. `publish.py` names every field it copies;
+`tests/controller/test_publish.py` sets all of those on a fixture and asserts none reaches the output.

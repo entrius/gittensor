@@ -174,3 +174,7 @@ NETUID = 74
 # SCORECARD_TTL_INTERVALS x the interval. A validator refuses it after that, and the compute share recycles.
 SCORECARD_INTERVAL_S = 1_200.0
 SCORECARD_TTL_INTERVALS = 2
+
+# The public fleet document (publish.py): rewritten this often while the controller runs, and on every scorecard.
+# A reader calls it stale after three of these.
+PUBLISH_INTERVAL_S = 30.0

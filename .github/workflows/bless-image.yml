@@ -2,7 +2,7 @@ name: bless image
 
 # Blesses a workload: BUILDS it from source we can read, pushes it under entrius/, then signs the digest our build
 # produced + the manifest (+ our qualification measurements) into the public registry (docker/controller/registry/)
-# with the release key, and commits the entry to the branch the run was started from. Manual only.
+# with the release key, and opens a PR with the entry against the branch the run was started from. Manual only.
 #
 # Two ways in (Kimbo 9/15): the author publishes an image and we bless its DIGEST (the normal path: read the source,
 # pull that digest onto our own 5090, qualify, sign; a new push is a new digest and stays unblessed until we choose
@@ -49,6 +49,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   bless:
@@ -176,10 +177,30 @@ jobs:
           import json,sys; doc=json.load(sys.stdin); e=[x for x in doc['entries'] if x['entry']=='$ENTRY']
           assert e and e[0]['verified'], doc; print('verified', e[0]['entry'], e[0].get('image'))"
 
-      - name: Commit the entry
+      - name: Open a PR with the entry
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          # `test` and `main` take changes through pull requests only: push a branch and open the PR. The entry is
+          # signed already; merging it is only the public record (the controller copies entries into its state dir).
+          BRANCH="release/bless-$(echo "${{ env.entry }}" | tr '@' '-')"
+          TITLE="registry: bless ${{ env.entry }} (${{ steps.digest.outputs.image }})"
+          if [ -n "${{ inputs.source_repo }}" ]; then TITLE="$TITLE built from ${{ inputs.source_repo }}@${{ inputs.source_ref }}"; fi
+          if [ -n "${{ steps.digest.outputs.source_image }}" ]; then TITLE="$TITLE copied from ${{ steps.digest.outputs.source_image }}"; fi
           git config user.name "gittensor-release"
           git config user.email "release@gittensor.io"
+          git checkout -b "$BRANCH"
           git add docker/controller/registry/
-          git commit -m "registry: bless ${{ env.entry }} (${{ steps.digest.outputs.image }})$( [ -n "${{ inputs.source_repo }}" ] && echo " built from ${{ inputs.source_repo }}@${{ inputs.source_ref }}" )$( [ -n "${{ steps.digest.outputs.source_image }}" ] && echo " copied from ${{ steps.digest.outputs.source_image }}" )"
-          git push origin HEAD:${{ github.ref_name }}
+          git commit -m "$TITLE"
+          git push --force origin "HEAD:$BRANCH"
+          gh pr create --base "${{ github.ref_name }}" --head "$BRANCH" --title "$TITLE" \
+            --body "Signed by the bless-image workflow (run ${{ github.run_id }})." \
+            || echo "::warning::could not open the PR: open it from https://github.com/${{ github.repository }}/compare/${{ github.ref_name }}...$BRANCH"
+
+      - name: Upload the signed entry
+        uses: actions/upload-artifact@v4
+        with:
+          name: registry-${{ env.entry }}
+          path: |
+            docker/controller/registry/${{ env.entry }}.json
+            docker/controller/registry/${{ env.entry }}.json.sig

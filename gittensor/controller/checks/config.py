@@ -43,11 +43,11 @@ PROOF_FILL_FLOOR_RATIO = 0.85
 # give up waiting for an answer at all, kept above the verdict limit so a late answer is judged, not lost.
 PROOF_JOB_TIMEOUT_S = 60.0
 # The proof image (docker/proof/Dockerfile): our own small signed base, `entrius/gt-proof`, with NO binary and NO
-# secret inside; the sealed binary is copied in over SSH at check time. Unpublished for now: build locally and run
-# by tag, then pin the pushed digest here. With a digest set the controller runs `repo@sha256:...`.
+# secret inside; the sealed binary is copied in over SSH at check time. With a digest set the controller runs
+# `repo@sha256:...` (a miner box pulls it from Docker Hub); empty = a locally built `repo:tag` (dev boxes).
 PROOF_IMAGE_REPO = 'entrius/gt-proof'
 PROOF_IMAGE_TAG = 'dev'
-PROOF_IMAGE_DIGEST = ''
+PROOF_IMAGE_DIGEST = 'sha256:e6be400329973f954459e2f0e760a66b27a423777c5de0bf1f667bf497cbb9fb'  # published with agent release 5.1.0 (9/17)
 
 # Identity and resources.
 AGENT_CONTAINER_NAME = 'gt-agent'  # the container `gitt up` starts (gittensor/agent/config.py AGENT_CONTAINER_NAME)

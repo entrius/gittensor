@@ -18,7 +18,7 @@
 #   * TODO before bless (qualification on our own card, `deploy --box`): min_vram_gb at
 #     65536 with the drafter, profile, concurrency (upstream fixed the serialised 4 × 8k case).
 name: qwen3.8-27b-nvfp4
-version: 6
+version: 7
 description: Qwen3.8-27B (NVFP4) chat with the DSpark drafter on sparkinfer v0.5.10's release container, one RTX 5090 per instance
 runtime: sparkinfer
 image: ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:0.5.10@sha256:d519d6ed995cf24f4a00c224733082166cfcb56ebaefe45ff94f80e9f518bbe1  # tag v0.5.10 (ab936d9, 9/17): v0.5.9 (#1098 baked) + assistant messages accept every field the server emits (0.5.9 rejected its own `reasoning` on turn 2) (gittensor-entrypoint.sh, /manifest.yaml); bless copies it under entrius/
@@ -35,7 +35,7 @@ run:
     DRAFT_DIR: /models/qwen38-dspark
     MODEL_NAME: qwen3.8-27b           # the id the gateway republishes; the container's default is qwen38-nvfp4
     CTX: '65536'
-    SPARKINFER_MAX_QUEUE_DEPTH: '1'   # keep equal to front_door.concurrency
+    SPARKINFER_MAX_QUEUE_DEPTH: '2'   # keep equal to front_door.concurrency
     SPARKINFER_ADMISSION_WAIT_S: '0'
     SPARKINFER_DRAIN_GRACE_S: '0'
     SPARKINFER_DETERMINISTIC: '0'     # no output audits; on costs TTFT
@@ -88,13 +88,13 @@ entry_canary:                # one picked at random each start; sent at front_do
     pass: {status: 200, regex: '(?=[\s\S]*"finish_reason":\s*"tool_calls")(?=[\s\S]*"name":\s*"get_weather")(?=[\s\S]*\\"city\\":\s*\\"Paris)'}
 profile:                     # health and standing only, never pay. Qualified 9/17 on 0.5.9 with the drafter (rented 5090, 595.84)
   decode_tps_single: 92      # 9/17: 111 tok/s on an 800-token essay, 92 over a 7000-token reasoning stream (v5 no drafter: 94)
-  decode_tps_aggregate: 338
+  decode_tps_aggregate: 100  # 9/18: flat at 91-100 tok/s for 1, 2 and 4 concurrent streams (the old 338 was never this runtime)
   prefill_tps: [9600, 10600]  # 9/17: 32.8K tokens in 3.10 s, 49.8K in 5.16 s (runtime ttft_ms)
   vram_gb: 30                # upstream 9/16: 30,057 MiB idle / 30,835 MiB peak at 65536 with the drafter (v5 no-drafter: 25)
 front_door:
   type: gateway-openai
   port: 8080
-  concurrency: 1             # launch value; re-measuring > 1 needs a version bump (queue depth is in the signed env). 9/17: 2nd-4th concurrent → 429 in ≤ 10 ms
+  concurrency: 2             # v7 (9/18). The server interleaves concurrent decodes, it does not batch them: a card gives ~100 tok/s in total however many share it (measured at 1, 4 and 6). 2 = ~50 tok/s each and half the 429s; 4 = ~27 tok/s each and a 16K output would outlast das's 330 s timeout
   routes:
     - {path: /v1/chat/completions, method: POST, stream: true}
     - {path: /v1/models, method: GET}

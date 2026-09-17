@@ -5,7 +5,7 @@
 #
 # What changed from v5 (entrius/sparkinfer v0.5.7 — do not bless: it predates sparkinfer#1088, so past 16K tokens the
 # decode attended only the sink and the last 4K and an agent lost its own context):
-#   * image: their v0.5.8 (b1ed168; drain exits at once when idle, SPARKINFER_DRAIN_GRACE_S, 429 bodies with
+#   * image: their v0.5.9 (40fb1f7 = v0.5.8 b1ed168 + the compute-pool entrypoint and manifest, sparkinfer#1098; drain exits at once when idle, SPARKINFER_DRAIN_GRACE_S, 429 bodies with
 #     type/code, SPARKINFER_NO_DOWNLOAD, the #1088 fix). Their entrypoint execs the server, so SIGTERM lands.
 #   * the DSpark drafter (speculative decoding) is on: a second 1.4 GB artifact, SPARKINFER_MODE=serve-dspark.
 #   * CTX 65536 (the product caps context at 64K; 131072 with the drafter peaks ~31.4 GB on a 31.8 GB card).
@@ -15,17 +15,17 @@
 #   * SPARKINFER_MAX_QUEUE_DEPTH = front_door.concurrency and SPARKINFER_ADMISSION_WAIT_S=0: refuse, never queue.
 #   * canaries at temperature 0 (omitted sampling now follows generation_config.json).
 #   * no tokenizer.json / .tokenizer_repo artifacts: the server reads MODEL_DIR/tokenizer.json.
-#   * TODO before bless (qualification on our own card, `deploy --box`): the digest, max_load_s, min_vram_gb at
+#   * TODO before bless (qualification on our own card, `deploy --box`): min_vram_gb at
 #     65536 with the drafter, profile, concurrency (upstream fixed the serialised 4 × 8k case).
 name: qwen3.8-27b-nvfp4
 version: 6
-description: Qwen3.8-27B (NVFP4) chat with the DSpark drafter on sparkinfer v0.5.8's release container, one RTX 5090 per instance
+description: Qwen3.8-27B (NVFP4) chat with the DSpark drafter on sparkinfer v0.5.9's release container, one RTX 5090 per instance
 runtime: sparkinfer
-image: ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:v0.5.8@sha256:0000000000000000000000000000000000000000000000000000000000000000  # TODO tag + digest: NOT v0.5.8 (18fbc2a2…, built before sparkinfer#1098: its entrypoint takes serve-dspark as an argument, ignores SPARKINFER_MODE, verifies nothing); the next tag bakes gittensor-entrypoint.sh (asked 9/17)
+image: ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:0.5.9@sha256:afb4a553ba380cdbaa88db96e9ccd02d21b005030bab981b368fb9be1890d712  # tag v0.5.9 (40fb1f7, 9/17): v0.5.8 + sparkinfer#1098 baked (gittensor-entrypoint.sh, /manifest.yaml); bless copies it under entrius/
 placement:
   gpu_types: {include: [RTX5090]}
   cards_per_instance: 1
-  min_vram_gb: 32            # upstream 9/16: 30.1 GB peak at CTX 65536 with the drafter (30,835 MiB under 4 × 16K prompts); 30 is too tight
+  min_vram_gb: 31            # upstream: 30.8 GB peak of 32.1 at CTX 65536 with the drafter. NOT 32: placement compares against our 5090 spec floor (32000 MiB = 31.25 GB), so 32 never places (9/17 soak)
   max_load_s: 180            # upstream 9/17 on their 5090: ~37 s warm (hash 18 s + start 19 s); cold page cache is disk-bound twice over 18 GB
 run:
   env:
@@ -35,7 +35,7 @@ run:
     DRAFT_DIR: /models/qwen38-dspark
     MODEL_NAME: qwen3.8-27b           # the id the gateway republishes; the container's default is qwen38-nvfp4
     CTX: '65536'
-    SPARKINFER_MAX_QUEUE_DEPTH: '1'   # keep equal to front_door.concurrency (TODO after re-measuring)
+    SPARKINFER_MAX_QUEUE_DEPTH: '1'   # keep equal to front_door.concurrency
     SPARKINFER_ADMISSION_WAIT_S: '0'
     SPARKINFER_DRAIN_GRACE_S: '0'
     SPARKINFER_DETERMINISTIC: '0'     # no output audits; on costs TTFT
@@ -86,15 +86,15 @@ entry_canary:                # one picked at random each start; sent at front_do
             name: get_weather
             parameters: {type: object, properties: {city: {type: string}}, required: [city]}
     pass: {status: 200, regex: '(?=[\s\S]*"finish_reason":\s*"tool_calls")(?=[\s\S]*"name":\s*"get_weather")(?=[\s\S]*\\"city\\":\s*\\"Paris)'}
-profile:                     # health and standing only, never pay. TODO re-qualify on the new tag with the drafter;
-  decode_tps_single: 94      # v5 (no drafter, 9/15): 94 tok/s single, 13k tok/s prefill, 25 GB resident
+profile:                     # health and standing only, never pay. Qualified 9/17 on 0.5.9 with the drafter (rented 5090, 595.84)
+  decode_tps_single: 92      # 9/17: 111 tok/s on an 800-token essay, 92 over a 7000-token reasoning stream (v5 no drafter: 94)
   decode_tps_aggregate: 338
-  prefill_tps: [12500, 13000]
+  prefill_tps: [9600, 10600]  # 9/17: 32.8K tokens in 3.10 s, 49.8K in 5.16 s (runtime ttft_ms)
   vram_gb: 30                # upstream 9/16: 30,057 MiB idle / 30,835 MiB peak at 65536 with the drafter (v5 no-drafter: 25)
 front_door:
   type: gateway-openai
   port: 8080
-  concurrency: 1             # TODO re-measure at agent-sized prompts: upstream fixed the case where 4 × 8k prompts were served in turn
+  concurrency: 1             # launch value; re-measuring > 1 needs a version bump (queue depth is in the signed env). 9/17: 2nd-4th concurrent → 429 in ≤ 10 ms
   routes:
     - {path: /v1/chat/completions, method: POST, stream: true}
     - {path: /v1/models, method: GET}

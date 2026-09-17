@@ -1,0 +1,12 @@
+{
+  "at": 1789673409.33,
+  "box": "Lium brave-wolf-fe (swift-orbit-39, FR), 1x RTX 5090 32607 MiB, DinD docker 27.3.1",
+  "driver": "595.84",
+  "load_s": 22.8,
+  "health_ok": true,
+  "canary_ok": true,
+  "vram_gb": 25.8,
+  "decode_tps_single": 92,
+  "prefill_tps": 10600,
+  "notes": "ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:0.5.9@sha256:afb4a553ba38... (v0.5.9, 40fb1f7), manifest v6 (DSpark drafter, CTX 65536, determinism off), placed by gitt controller run on testnet 422 from test@60d8cf0. Entrypoint: both artifacts sha256 OK, 'DSpark draft (block 7, draft context 16384)'. Load docker run -> /v1/models 200: 22.8 s first start, 19.9 s and ~20 s on two warm re-places (pre-stage hash 14.9 s). Canary tool call pass. Decode (runtime usage): 111.5 tok/s over 800 tokens after a 64-token prompt; 91.9 tok/s over a 7000-token streamed completion (past the old 4096 cap, finish=length). Prefill (runtime ttft_ms): 32,842 tok in 3.10 s = 10.6k tok/s; 49,782 in 5.16 s = 9.6k; 60,682 in 6.80 s = 8.9k. Needle recall at 32.8K and 49.8K prompt tokens: found (the #1088 fix holds). 66K+ tokens: clean 400 context_length_exceeded. VRAM 26,374 MiB resident at concurrency 1 after the 60K prompt (upstream's 30.8 GB peak is 4 x 16K). Concurrency 1: 4 concurrent -> 1x 200 + 3x 429 in <= 10 ms. Tool loop (2 tools, 4 calls, 3 turns) correct. Drain: 6000-token request in flight finished 200, drained 30.5 s. KNOWN ISSUE: responses carry message.reasoning but the runtime rejects that field on input (400 'unsupported field reasoning'), so a client that echoes the assistant message verbatim fails on turn 2; reasoning_content is accepted."
+}

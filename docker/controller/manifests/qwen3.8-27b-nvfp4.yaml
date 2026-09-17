@@ -35,7 +35,7 @@ run:
     DRAFT_DIR: /models/qwen38-dspark
     MODEL_NAME: qwen3.8-27b           # the id the gateway republishes; the container's default is qwen38-nvfp4
     CTX: '65536'
-    SPARKINFER_MAX_QUEUE_DEPTH: '1'   # keep equal to front_door.concurrency (TODO after re-measuring)
+    SPARKINFER_MAX_QUEUE_DEPTH: '1'   # keep equal to front_door.concurrency
     SPARKINFER_ADMISSION_WAIT_S: '0'
     SPARKINFER_DRAIN_GRACE_S: '0'
     SPARKINFER_DETERMINISTIC: '0'     # no output audits; on costs TTFT
@@ -86,15 +86,15 @@ entry_canary:                # one picked at random each start; sent at front_do
             name: get_weather
             parameters: {type: object, properties: {city: {type: string}}, required: [city]}
     pass: {status: 200, regex: '(?=[\s\S]*"finish_reason":\s*"tool_calls")(?=[\s\S]*"name":\s*"get_weather")(?=[\s\S]*\\"city\\":\s*\\"Paris)'}
-profile:                     # health and standing only, never pay. TODO re-qualify on the new tag with the drafter;
-  decode_tps_single: 94      # v5 (no drafter, 9/15): 94 tok/s single, 13k tok/s prefill, 25 GB resident
+profile:                     # health and standing only, never pay. Qualified 9/17 on 0.5.9 with the drafter (rented 5090, 595.84)
+  decode_tps_single: 92      # 9/17: 111 tok/s on an 800-token essay, 92 over a 7000-token reasoning stream (v5 no drafter: 94)
   decode_tps_aggregate: 338
-  prefill_tps: [12500, 13000]
+  prefill_tps: [9600, 10600]  # 9/17: 32.8K tokens in 3.10 s, 49.8K in 5.16 s (runtime ttft_ms)
   vram_gb: 30                # upstream 9/16: 30,057 MiB idle / 30,835 MiB peak at 65536 with the drafter (v5 no-drafter: 25)
 front_door:
   type: gateway-openai
   port: 8080
-  concurrency: 1             # TODO re-measure at agent-sized prompts: upstream fixed the case where 4 × 8k prompts were served in turn
+  concurrency: 1             # launch value; re-measuring > 1 needs a version bump (queue depth is in the signed env). 9/17: 2nd-4th concurrent → 429 in ≤ 10 ms
   routes:
     - {path: /v1/chat/completions, method: POST, stream: true}
     - {path: /v1/models, method: GET}

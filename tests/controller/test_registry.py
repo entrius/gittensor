@@ -171,6 +171,35 @@ def test_bless_qualified_and_registry_show_print_it(tmp_path, release, monkeypat
     assert refused.exit_code == 1 and 'qualified: at missing' in refused.output
 
 
+def test_source_image_is_signed_as_provenance_and_must_carry_the_same_digest(tmp_path, release, monkeypatch):
+    from tests.controller.test_cli import invoke  # loads the CLI package first (circular import)
+
+    key, pub = release
+    source = 'ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:v0.5.8@sha256:' + 'ab' * 32
+    document = yaml.safe_load(FIXTURE.read_text())
+    registry = Registry(tmp_path / 'registry', pub)
+    verified = make_entry(document, IMAGE, now=1_757_000_000, source_image=source)
+    registry.write(verified, sign_bytes(verified.entry.canonical_bytes(), key))
+    read = registry.read('qwen3.8-27b-nvfp4@1').entry
+    assert read.image == IMAGE and read.source_image == source  # boxes pull ours; the author's is the record
+    assert 'source_image' not in read.manifest
+    for bad in ('ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:v0.5.8', source[:-64] + 'cd' * 32, 7):
+        with pytest.raises(RegistryError, match='source_image'):
+            make_entry(document, IMAGE, source_image=bad)  # pyright: ignore[reportArgumentType]
+
+    manifest = tmp_path / 'manifest.yaml'
+    manifest.write_text(FIXTURE.read_text())
+    common = ['--release-pubkey', tmp_path / 'release.pub', '--state-dir', tmp_path / 'state']
+    bless = ['bless', manifest, '--image', IMAGE, '--sign-key', key]
+    refused = invoke(*bless, '--source-image', source[:-64] + 'cd' * 32, *common)
+    assert refused.exit_code == 1 and 'source_image' in refused.output
+    assert invoke(*bless, '--source-image', source, *common).exit_code == 0
+    (row,) = json.loads(invoke('registry', 'show', *common, '--json').stdout)['entries']
+    assert row['verified'] and row['image'] == IMAGE and row['source_image'] == source
+    # the same entry without its provenance is different content
+    assert 'already blessed with different content' in invoke(*bless, *common).output
+
+
 def test_bless_refuses_a_placeholder_digest_or_an_unpinned_image():
     document = yaml.safe_load(FIXTURE.read_text())
     with pytest.raises(ManifestError, match='placeholder'):

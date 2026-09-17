@@ -21,12 +21,12 @@ name: qwen3.8-27b-nvfp4
 version: 6
 description: Qwen3.8-27B (NVFP4) chat with the DSpark drafter on sparkinfer v0.5.8's release container, one RTX 5090 per instance
 runtime: sparkinfer
-image: ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:v0.5.8@sha256:0000000000000000000000000000000000000000000000000000000000000000  # TODO the digest once ghcr has the tag (building 9/16)
+image: ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:v0.5.8@sha256:0000000000000000000000000000000000000000000000000000000000000000  # TODO tag + digest: NOT v0.5.8 (18fbc2a2…, built before sparkinfer#1098: its entrypoint takes serve-dspark as an argument, ignores SPARKINFER_MODE, verifies nothing); the next tag bakes gittensor-entrypoint.sh (asked 9/17)
 placement:
   gpu_types: {include: [RTX5090]}
   cards_per_instance: 1
   min_vram_gb: 32            # upstream 9/16: 30.1 GB peak at CTX 65536 with the drafter (30,835 MiB under 4 × 16K prompts); 30 is too tight
-  max_load_s: 90             # TODO measure: v5 loaded in 11–17 s warm; the drafter is a second load
+  max_load_s: 180            # upstream 9/17 on their 5090: ~37 s warm (hash 18 s + start 19 s); cold page cache is disk-bound twice over 18 GB
 run:
   env:
     SPARKINFER_NO_DOWNLOAD: '1'       # pre-staged weights, no egress: a missing checkpoint fails loudly instead of downloading

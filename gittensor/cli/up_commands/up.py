@@ -23,6 +23,7 @@ from gittensor.agent.launch import agent_run_command, render, runner_run_command
 from gittensor.cli.helpers import NETWORK_CHOICE, console, err_console
 from gittensor.cli.json_output import emit_json
 from gittensor.cli.miner_commands.helpers import NETUID_DEFAULT, _error, _load_config_value, _resolve_endpoint
+from gittensor.controller.proof.slot import image_ref as proof_image_ref
 
 from . import docker_exec
 from .prereqs import CheckResult, HostProbe, PrereqReport, render_table, run_prereqs, run_publish_prereqs
@@ -329,6 +330,7 @@ def up_command(
                 'reclaimed': [w.name for w in report.workloads] if reclaim and not report.already_up else [],
                 'commands': [render(c) for c in plan],
                 'agent_command': render(agent_line),
+                'proof_image': proof_image_ref(),
             }
         )
     else:
@@ -347,6 +349,8 @@ def up_command(
                 if not no_update:
                     console.print('\n[bold]The runner then keeps this agent container running:[/bold]')
                     click.echo(f'  {render(agent_line)}')
+                console.print('\n[bold]Then pulls the GPU proof image, once (~2 GB), if it is not here yet:[/bold]')
+                click.echo(f'  docker pull {proof_image_ref()}')
             else:
                 console.print('\n[yellow]No channel: nothing to run.[/yellow]')
         return
@@ -371,11 +375,29 @@ def up_command(
         err_console.print(
             '[dim]Nothing else to do: the controller takes it from here. `gitt down` stops the agent.[/dim]'
         )
+    _prepull_proof_image(json_mode)
 
 
 up_command.help = (up_command.help or '').format(
     ssh=AGENT_SSH_PORT, low=WORKLOAD_PORT_RANGE[0], high=WORKLOAD_PORT_RANGE[1]
 )
+
+
+def _prepull_proof_image(json_mode: bool) -> None:
+    """Fetch the GPU proof image now, so the box's first full check finds it (~2 GB, once). The agent uses this
+    host's docker, so a pull here is the pull the controller needs. Never fatal: a box without the image is not
+    failed, the controller starts the pull itself and proves the box a round later."""
+    ref = proof_image_ref()
+    if docker_exec.run_docker(['docker', 'image', 'inspect', ref]).returncode == 0:
+        return
+    if not json_mode:
+        err_console.print(f'[dim]Pulling the GPU proof image, once (~2 GB): {ref}[/dim]')
+    proc = docker_exec.run_docker(['docker', 'pull', '-q', ref])
+    if proc.returncode != 0 and not json_mode:
+        err_console.print(
+            '[yellow]Could not pull the proof image now[/yellow] '
+            f'({(proc.stderr or proc.stdout).strip()[:160]}). Not fatal: the controller pulls it before its first proof.'
+        )
 
 
 def _publish_only(wallet, hotkey, netuid, endpoint, ip, ssh_port, skip_reachability, dry_run, json_mode):

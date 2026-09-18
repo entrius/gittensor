@@ -32,12 +32,23 @@ from gittensor.agent.config import (
     is_compute_axon,
 )
 from gittensor.agent.launch import Workload, parse_workloads, workload_list_command
+from gittensor.controller.checks.scrape import (
+    KERNEL_DRIVER_COMMAND,
+    NVML_MD5_COMMAND,
+    parse_kernel_driver,
+    parse_md5,
+)
 
 BLESSED_GPU_MARKER = '5090'  # the only card the pool blesses today (vault 24 §5: multi-type is later)
 DEFAULT_WALLET_PATH = Path.home() / '.bittensor' / 'wallets'
 PUBLIC_IP_SERVICES = ('https://checkip.amazonaws.com', 'https://api.ipify.org')  # each answers the caller's IP, plain
 PUBLIC_IP_TIMEOUT_S = 5.0
 REACHABILITY_TIMEOUT_S = 3.0
+# The vetted drivers, as the controller's full check judges them (``nvml_digest``): driver version -> the md5s of a
+# genuine libnvidia-ml.so.1. Published with the code so a miner sees the answer here, before joining, and not as a bench.
+NVML_ALLOWLIST_URL = 'https://raw.githubusercontent.com/entrius/gittensor/main/docker/controller/nvml_allowlist.json'
+NVML_ALLOWLIST_TIMEOUT_S = 8.0
+DRIVER_VETTED_CHECK = 'Driver vetted'
 WORKLOAD_PORTS = range(WORKLOAD_PORT_RANGE[0], WORKLOAD_PORT_RANGE[1] + 1)
 
 
@@ -169,6 +180,27 @@ class HostProbe:
         )
         return '' if response.success else str(response.message or 'serve_axon failed')
 
+    def nvml_allowlist(self, url: str = NVML_ALLOWLIST_URL) -> dict[str, list[str]] | None:
+        """The published driver allowlist, or None when it cannot be fetched (the check is then skipped, not failed)."""
+        try:
+            with urllib.request.urlopen(url, timeout=NVML_ALLOWLIST_TIMEOUT_S) as response:  # noqa: S310 (our own URL)
+                data = json.loads(response.read().decode())
+        except (OSError, ValueError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        return {str(k): ([v] if isinstance(v, str) else [str(m) for m in v]) for k, v in data.items()}
+
+    def nvml_md5(self) -> str:
+        """md5 of the host's libnvidia-ml.so.1, found and hashed exactly as the controller does; '' when not found."""
+        proc = self.run(['sh', '-c', NVML_MD5_COMMAND])
+        return parse_md5(proc.stdout) if proc.returncode == 0 else ''
+
+    def kernel_driver(self) -> str:
+        """The loaded kernel module's version (/proc/driver/nvidia/version); '' when it cannot be read."""
+        proc = self.run(['sh', '-c', KERNEL_DRIVER_COMMAND])
+        return parse_kernel_driver(proc.stdout) if proc.returncode == 0 else ''
+
     def container_state(self, name: str) -> str | None:
         proc = self.run(['docker', 'inspect', '--format', '{{.State.Status}}', name])
         return proc.stdout.strip() or None if proc.returncode == 0 else None
@@ -191,6 +223,7 @@ def check_driver(probe: HostProbe) -> list[CheckResult]:
     names = [r[0] for r in rows]
     driver = rows[0][1] if len(rows[0]) > 1 else '?'
     results = [CheckResult('NVIDIA driver', True, f'{driver}; {len(rows)} GPU(s): {", ".join(names)}')]
+    results.append(check_driver_vetted(probe, driver))
     if not all(BLESSED_GPU_MARKER in n for n in names):
         results.append(
             CheckResult(
@@ -201,6 +234,45 @@ def check_driver(probe: HostProbe) -> list[CheckResult]:
             )
         )
     return results
+
+
+def check_driver_vetted(probe: HostProbe, driver: str) -> CheckResult:
+    """The controller's ``nvml_digest`` check, run here first: an unknown driver, a driver upgraded without a reboot or
+    a library that is not NVIDIA's own build benches the box for an hour or more once it has joined."""
+    allowlist = probe.nvml_allowlist()
+    if allowlist is None:
+        return CheckResult(DRIVER_VETTED_CHECK, None, 'could not fetch the driver list; the controller checks it later')
+    kernel = probe.kernel_driver()
+    if kernel and kernel != driver:
+        return CheckResult(
+            DRIVER_VETTED_CHECK,
+            False,
+            f'nvidia-smi says {driver}, the loaded kernel module is {kernel}: reboot after a driver upgrade',
+        )
+    expected = allowlist.get(driver)
+    if expected is None:
+        newest = ', '.join(sorted(allowlist, key=_version_key)[-3:])
+        return CheckResult(
+            DRIVER_VETTED_CHECK,
+            False,
+            f'driver {driver} is not on the vetted list ({len(allowlist)} versions, newest {newest}): install a '
+            'listed one, or ask in the Discord to have yours vetted. Joining with it gets the box benched',
+        )
+    md5 = probe.nvml_md5()
+    if not md5:
+        return CheckResult(DRIVER_VETTED_CHECK, False, 'libnvidia-ml.so.1 not found under /usr or /lib', required=False)
+    if md5 not in {m.lower() for m in expected}:
+        return CheckResult(
+            DRIVER_VETTED_CHECK,
+            False,
+            f"libnvidia-ml.so.1 ({md5}) is not NVIDIA's build for driver {driver}: reinstall the driver from NVIDIA's "
+            'package',
+        )
+    return CheckResult(DRIVER_VETTED_CHECK, True, f'{driver}: library matches the vetted build')
+
+
+def _version_key(version: str) -> list[int]:
+    return [int(part) if part.isdigit() else 0 for part in version.split('.')]
 
 
 def check_docker(probe: HostProbe) -> CheckResult:

@@ -44,6 +44,7 @@ docker run -d --name gt-controller --restart unless-stopped --stop-timeout 150 \
 | `--reconcile-interval` | 30 s | desired replicas vs running; starts and drains run on their own threads |
 | `--heartbeat-interval` | 60 s | same card / our container running / card ours alone, per box with a LEASED card |
 | `--pull-token-file` | none | installed for each image pull and removed after |
+| `--workload-bind` | `private` | where a new workload's port is published (below); `reconcile` takes it too |
 | `--release-pubkey`, `--allow-dev-keys` | compiled release key | what registry entries must verify against |
 | every `check` / `round` flag | | `--proof`, `--proof-args`, `--agent-image-digest`, `--agent-image-id`, `--proof-image`, `--allowlist`, `--network-target`, `--disk-min-gb`, `--ca-key` |
 | `--json` | off | one JSON object per event on stdout instead of log lines on stderr |
@@ -51,6 +52,19 @@ docker run -d --name gt-controller --restart unless-stopped --stop-timeout 150 \
 The manifest health probe runs per instance on the manifest's own `health.interval_s`. `docker stop` sends SIGTERM: the
 loops finish the SSH visit in flight (up to 120 s, hence `--stop-timeout 150`), state is written, and the process exits;
 a start still loading is picked up by the next process through its container label.
+
+## Where a workload's port is published
+
+With `--workload-bind private` (the default) a start publishes the workload's port on the box's docker bridge gateway
+address only, `-p <bridge gateway>:<host port>:<port>` (from `docker network inspect bridge`, looked up once per box
+visit): the agent container and the host are its only callers, and the controller's health probes and canaries already
+reach it there. `public` is the previous publish form, `-p <host port>:<port>`.
+
+The setting applies to new starts only; running instances keep theirs, so a fleet changes over one card at a time as
+leases cycle. Each instance carries it twice: `bind` (`private` | `public`) on its record in `instances.json` (a
+record from before the field reads `public`), and the `io.gittensor.bind` label on its container, which is what a
+restarted controller re-adopts it with. A box whose bridge network names no gateway fails the start with that reason.
+`bind` is not in the public fleet document.
 
 `run` holds the state directory for its whole life. Beside it, `check`, `round` and `reconcile` refuse ("controller
 running, use `gitt controller status`"); `status`, `instances`, `registry show`, `admit` and `deploy` work (the daemon

@@ -133,7 +133,7 @@ from gittensor.controller.registry import (
     make_entry,
     sign_bytes,
 )
-from gittensor.controller.runspec import PullToken
+from gittensor.controller.runspec import BIND_PRIVATE, WORKLOAD_BINDS, PullToken
 from gittensor.controller.ssh import (
     CertificateAuthority,
     SshRunner,
@@ -1886,6 +1886,17 @@ def _qualified_text(q: dict | None) -> str:
     return ' · '.join(parts)
 
 
+def _workload_bind_option(fn):
+    return click.option(
+        '--workload-bind',
+        type=click.Choice(WORKLOAD_BINDS),
+        default=BIND_PRIVATE,
+        show_default=True,
+        help="Where a new workload's port is published: private, the box's docker bridge address; public, the "
+        'previous publish form. Applies to new starts; running instances keep theirs.',
+    )(fn)
+
+
 @controller_group.command('reconcile')
 @click.option('--loop', is_flag=True, default=False, help='Repeat every --interval seconds.')
 @click.option('--interval', type=float, default=cfg.RECONCILE_INTERVAL_S, show_default=True)
@@ -1895,12 +1906,22 @@ def _qualified_text(q: dict | None) -> str:
     default=None,
     help='Read-only registry token, one line "username:token"; installed for each pull and removed after.',
 )
+@_workload_bind_option
 @click.option('--max-passes', type=int, default=0, hidden=True)
 @_registry_options
 @_ca_key_option
 @_state_options
 def reconcile_command(
-    loop, interval, pull_token_file, max_passes, release_pubkey, allow_dev_keys, ca_key, state_dir, json_mode
+    loop,
+    interval,
+    pull_token_file,
+    workload_bind,
+    max_passes,
+    release_pubkey,
+    allow_dev_keys,
+    ca_key,
+    state_dir,
+    json_mode,
 ):
     """Make running instances match every enabled deployment × replicas: start on IDLE cards that fit, drain what is
     over, disabled or unverifiable, and re-adopt our labelled containers after a restart.
@@ -1925,6 +1946,7 @@ def reconcile_command(
                 registry=registry,
                 make_runner=lambda box: _make_runner(state, box, ca_key, 'reconcile'),
                 pull_token=token,
+                workload_bind=workload_bind,
                 sleep=_sleep,
                 visit_all=n == 1,
             )
@@ -2161,6 +2183,7 @@ class _DaemonPrinter:
     default=None,
     help='Read-only registry token, one line "username:token"; installed for each pull and removed after.',
 )
+@_workload_bind_option
 @click.option(
     '--scorecard-interval',
     type=float,
@@ -2217,6 +2240,7 @@ def run_command(
     reconcile_interval,
     heartbeat_interval,
     pull_token_file,
+    workload_bind,
     scorecard_interval,
     price_source,
     metagraphed_url,
@@ -2286,6 +2310,7 @@ def run_command(
                 build=_run_build,
                 build_cmd=build_cmd,
                 pull_token=token,
+                workload_bind=workload_bind,
                 gateway_state=gateway_healthz(gateway_url) if gateway_url else None,
                 intervals=Intervals(
                     round_s=round_interval,

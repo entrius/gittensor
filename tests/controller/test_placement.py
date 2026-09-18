@@ -45,7 +45,7 @@ from gittensor.controller.checks.state import (
 from gittensor.controller.checks.verdict import CheckResult, CheckVerdict
 from gittensor.controller.heartbeat import DEVICE_HOLDERS_COMMAND
 from gittensor.controller.manifest import load_manifest, parse_manifest
-from gittensor.controller.reconcile import InstanceStore, Reconciler
+from gittensor.controller.reconcile import InstanceRecord, InstanceStore, Reconciler
 from gittensor.controller.registry import DeploymentStore, Registry, make_entry, sign_bytes
 from gittensor.controller.runspec import (
     ArtifactError,
@@ -55,7 +55,10 @@ from gittensor.controller.runspec import (
     PullToken,
     artifact_fetch_command,
     artifact_sha256,
+    bridge_gateway,
     build_run_spec,
+    list_containers_command,
+    parse_containers,
     parse_curl_response,
     prestage,
     run_command,
@@ -198,7 +201,7 @@ def test_the_exact_docker_line_for_the_27b_example():
         'docker run -d --name gt-i-0123456789ab '
         '--label io.gittensor.instance=i-0123456789ab --label io.gittensor.entry=qwen3.8-27b-nvfp4@1 '
         f'--label io.gittensor.uuid={UUID_5090} --label io.gittensor.port=8080 --label io.gittensor.drain_max_s=60 '
-        f'--gpus "device={UUID_5090}" -p 8080:8080 --restart no '
+        f'--label io.gittensor.bind=public --gpus "device={UUID_5090}" -p 8080:8080 --restart no '
         '-v /var/lib/gt-models/qwen3.8-27b-nvfp4/models:/models:ro '
         '-v /var/lib/gt-models/qwen3.8-27b-nvfp4/manifest.qwen3.8-27b-nvfp4@1.yaml:/manifest.yaml:ro '
         '--network gt-noegress '
@@ -213,6 +216,30 @@ def test_the_exact_docker_line_for_the_27b_example():
     doc['placement']['cards_per_instance'] = 2
     with pytest.raises(PlacementError, match='cards_per_instance'):
         build_run_spec('qwen3.8-27b-nvfp4@1', parse_manifest(doc), UUID_5090, 'i-0123456789ab')
+
+
+def test_the_publish_form_follows_the_bind_address():
+    manifest = load_manifest(FIXTURE_27B)
+    private = build_run_spec('qwen3.8-27b-nvfp4@1', manifest, UUID_5090, 'i-0123456789ab', 20003, '172.17.0.1')
+    line = run_command(private)
+    assert private.bind == 'private' and ' -p 172.17.0.1:20003:8080 ' in line
+    assert '--label io.gittensor.drain_max_s=60 --label io.gittensor.bind=private --gpus ' in line
+    public = build_run_spec('qwen3.8-27b-nvfp4@1', manifest, UUID_5090, 'i-0123456789ab', 20003)
+    assert public.bind == 'public' and ' -p 20003:8080 ' in run_command(public)
+    assert '--label io.gittensor.bind=public ' in run_command(public)
+
+
+def test_the_bridge_gateway_lookup_and_the_bind_label_on_docker_ps():
+    assert bridge_gateway(FakeDocker().runner) == '172.17.0.1'
+    for answer in ('', 'fd00::1', '172.17.0.1fd00::1'):
+        with pytest.raises(PlacementError, match='no docker bridge gateway'):
+            bridge_gateway(FakeDocker(bridge=answer).runner)
+    assert 'io.gittensor.bind' in list_containers_command()
+    cid = 'a' * 64
+    rows = [
+        f'{cid}\trunning\ti-000000000001\t{ENTRY}\t{UUID_5090}\t20000\t{bind}' for bind in ('private', 'public', '')
+    ]
+    assert [c.bind for c in parse_containers('\n'.join(rows))] == ['private', 'public', 'public']  # no label: public
 
 
 def test_artifact_sha256_matches_the_template_entrypoint_scheme(tmp_path):
@@ -271,8 +298,10 @@ class FakeDocker:
         stop_exit=0,
         gpus=(UUID_5090, UUID_5090_B),
         hold=None,
+        bridge='172.17.0.1',
     ):
         self.containers: dict[str, dict] = {}
+        self.bridge = bridge  # the bridge network's gateway; '': docker names none
         self.healthy, self.image_present = healthy, image_present
         self.artifact_sha, self.fetch_gives = artifact_sha, fetch_gives
         self.stop_exit = stop_exit  # 137: the workload ignored SIGTERM and docker stop killed it at drain.max_s
@@ -392,7 +421,9 @@ class FakeDocker:
             m = re.search(r'label=io\.gittensor\.instance=([\w-]+)', command)
             rows = [c for c in self.containers.values() if not m or c['instance'] == m.group(1)]
             return ''.join(
-                f'{c["id"]}\t{c["state"]}\t{c["instance"]}\t{c["entry"]}\t{c["uuid"]}\t{c["port"]}\n' for c in rows
+                '\t'.join((c['id'], c['state'], c['instance'], c['entry'], c['uuid'], c['port'], c.get('bind', '')))
+                + '\n'
+                for c in rows
             )
         if command.startswith('docker network inspect gt-noegress'):
             return ''
@@ -400,7 +431,7 @@ class FakeDocker:
             self.manifest_written = self.runner.stdins.get(command, b'')
             return ''
         if command.startswith('docker network inspect bridge'):
-            return '172.17.0.1\n'
+            return f'{self.bridge}\n' if self.bridge else CommandResult(1, '', 'Error: network bridge not found')
         if command.startswith('docker image inspect'):
             return 'sha256:' + 'e' * 64 + '\n' if self.image_present else CommandResult(1, '', 'No such image')
         if 'docker pull' in command:
@@ -424,6 +455,7 @@ class FakeDocker:
                 'entry': labels['entry'],
                 'uuid': labels['uuid'],
                 'port': labels.get('port', ''),
+                'bind': labels.get('bind', ''),
                 'started_at': f'2026-09-15T12:00:{self._starts:02d}.000000000Z',
                 'image_id': 'sha256:' + 'e' * 64,
             }
@@ -609,7 +641,10 @@ def test_zero_to_two_replicas_starts_two_instances_on_two_idle_cards(world):
     assert all((r.host, r.healthy, r.draining) == ('10.0.0.1', True, False) for r in records.values())
     # two instances of one image on one box: two host ports from the workload range, each mapped to the manifest's 8080
     assert sorted((r.host_port or 0, r.port or 0) for r in records.values()) == [(20000, 20000), (20001, 20001)]
-    assert sorted(re.findall(r' -p (\d+:\d+) ', r)[0] for r in runs) == ['20000:8080', '20001:8080']
+    assert sorted(re.findall(r' -p (\S+) ', r)[0] for r in runs) == ['172.17.0.1:20000:8080', '172.17.0.1:20001:8080']
+    assert all('--label io.gittensor.bind=private ' in r for r in runs)
+    assert {r.bind for r in records.values()} == {'private'}
+    assert len(box.commands('docker network inspect bridge')) == 1  # one lookup for the visit, starts and probes
     assert {c['port'] for c in box.containers.values()} == {'20000', '20001'}  # the port label is the host port
     cards = StateStore(root / 'boxes.json').get('hk1').cards
     assert {c.state for c in cards.values()} == {LEASED} and {c.instance_id for c in cards.values()} == set(records)
@@ -692,9 +727,10 @@ def test_a_restarted_controller_re_adopts_running_containers_by_label(world):
     report = reconciler(root, registry, {'hk1': box}, visit_all=True).run_pass()
     assert report.ok and sorted(a.kind for a in report.actions) == ['adopt', 'adopt']
     after = InstanceStore(root / 'instances.json').instances
-    assert {k: (r.container_id, r.uuid, r.port, r.healthy) for k, r in after.items()} == {
-        k: (r.container_id, r.uuid, r.port, r.healthy) for k, r in before.items()
+    assert {k: (r.container_id, r.uuid, r.port, r.healthy, r.bind) for k, r in after.items()} == {
+        k: (r.container_id, r.uuid, r.port, r.healthy, r.bind) for k, r in before.items()
     }
+    assert {r.bind for r in after.values()} == {'private'}  # from the container's label
     assert len(box.commands('docker run -d')) == 2  # nothing restarted
 
     # a container that vanished under a LEASED card is a heartbeat failure, not a restart (Kimbo 9/15): the box is
@@ -884,6 +920,30 @@ def test_bless_deploy_registry_reconcile_instances_commands(state, tmp_path):
     assert 'LEASED → DRAINING → CHECKING' in drained.output and box.containers == {}
 
 
+def test_reconcile_takes_the_workload_bind_switch(state, tmp_path):
+    key, _ = keypair(tmp_path)
+    manifest = tmp_path / 'manifest.yaml'
+    manifest.write_text(yaml.safe_dump(placeholder_doc()))
+    common = ['--release-pubkey', tmp_path / 'release.pub', '--state-dir', state]
+    assert invoke('bless', manifest, '--image', PLACEHOLDER_IMAGE, '--sign-key', key, *common).exit_code == 0
+    assert invoke('deploy', ENTRY, '--enabled', '--replicas', 1, *common).exit_code == 0
+    two_card_box(state, [IDLE, IDLE])
+    box = FakeDocker()
+    assert invoke('reconcile', *common, '--workload-bind', 'everywhere').exit_code == 2
+    with patch.object(ctl, '_make_runner', side_effect=lambda st, b, ca, purpose: box.runner):
+        result = invoke('reconcile', *common, '--workload-bind', 'public', '--json')
+    assert result.exit_code == 0, result.output
+    (row,) = json.loads(result.stdout)['instances']
+    assert row['bind'] == 'public' and ' -p 20000:8080 ' in box.commands('docker run -d')[0]
+
+    DeploymentStore(state / 'deployments.json').set(ENTRY, True, 2)
+    with patch.object(ctl, '_make_runner', side_effect=lambda st, b, ca, purpose: box.runner):
+        result = invoke('reconcile', *common, '--json')  # the default
+    assert result.exit_code == 0, result.output
+    assert sorted(r['bind'] for r in json.loads(result.stdout)['instances']) == ['private', 'public']
+    assert ' -p 172.17.0.1:20001:8080 ' in box.commands('docker run -d')[1]
+
+
 def test_the_committed_27b_manifest_agrees_with_itself_and_with_the_release_container():
     """v6 (9/16): sparkinfer's own release container. Its entrypoint reads MODEL_DIR / DRAFT_DIR, so both must be
     pre-staged artifacts; refuse-never-queue means the runtime's queue depth equals our front door's concurrency; the
@@ -939,7 +999,7 @@ def test_a_freed_host_port_is_given_out_again_and_an_exhausted_range_skips_the_b
     (start,) = reconciler(root, registry, {'hk1': box}).run_pass().actions
     assert start.ok and start.uuid == UUID_C
     assert InstanceStore(root / 'instances.json').instances[start.instance].host_port == freed
-    assert f' -p {freed}:8080 ' in box.commands('docker run -d')[-1]
+    assert f' -p 172.17.0.1:{freed}:8080 ' in box.commands('docker run -d')[-1]
 
 
 def test_health_probes_and_the_canary_go_to_the_host_port(world):
@@ -951,6 +1011,61 @@ def test_health_probes_and_the_canary_go_to_the_host_port(world):
     assert curls and all(c.endswith('http://172.17.0.1:20000/v1/models') for c in curls)
 
 
+def test_the_bind_setting_reaches_new_starts_and_leaves_running_instances_alone(world):
+    root, registry = world
+    seed(root, idle_box(), replicas=1)
+    box = FakeDocker()
+    assert reconciler(root, registry, {'hk1': box}, workload_bind='public').run_pass().ok
+    (first,) = InstanceStore(root / 'instances.json').instances.values()
+    assert first.bind == 'public' and ' -p 20000:8080 ' in box.commands('docker run -d')[0]
+    assert '--label io.gittensor.bind=public ' in box.commands('docker run -d')[0]
+
+    # switched to private: the running instance is not touched, the next start is published on the bridge address
+    DeploymentStore(root / 'deployments.json').set(ENTRY, True, 2)
+    report = reconciler(root, registry, {'hk1': box}).run_pass()
+    assert report.ok and [a.kind for a in report.actions] == ['start']
+    records = InstanceStore(root / 'instances.json').instances
+    assert records[first.id] == first and records[report.actions[0].instance].bind == 'private'
+    assert len(box.commands('docker run -d')) == 2 and ' -p 172.17.0.1:20001:8080 ' in box.commands('docker run -d')[1]
+
+    # a controller restart re-adopts each with the bind its label carries
+    (root / 'instances.json').unlink()
+    readopt = reconciler(root, registry, {'hk1': box}, visit_all=True).run_pass()
+    assert sorted(a.kind for a in readopt.actions) == ['adopt', 'adopt']
+    after = InstanceStore(root / 'instances.json').instances
+    assert {k: r.bind for k, r in after.items()} == {k: r.bind for k, r in records.items()}
+
+    with pytest.raises(ValueError, match='workload_bind'):
+        reconciler(root, registry, {'hk1': box}, workload_bind='everywhere')
+
+
+def test_no_bridge_gateway_is_a_failed_start_with_the_reason(world):
+    root, registry = world
+    seed(root, idle_box(uuids=(UUID_5090,)), replicas=1)
+    box = FakeDocker(bridge='')
+    (start,) = reconciler(root, registry, {'hk1': box}).run_pass().actions
+    assert not start.ok and 'failed start: no docker bridge gateway on the box' in start.detail
+    assert start.states == [IDLE, STARTING, CHECKING] and box.commands('docker run -d') == []
+    after = StateStore(root / 'boxes.json').get('hk1')
+    assert after.failed_starts == 1 and InstanceStore(root / 'instances.json').instances == {}
+
+
+def test_the_bind_field_survives_save_and_load_and_an_older_file_loads_as_public(tmp_path):
+    path = tmp_path / 'instances.json'
+    s = InstanceStore(path)
+    s.put(InstanceRecord('i-000000000001', ENTRY, 'hk1', UUID_5090, host_port=20000, bind='private'))
+    s.put(InstanceRecord('i-000000000002', ENTRY, 'hk1', UUID_5090_B, host_port=20001))
+    assert {k: r.bind for k, r in InstanceStore(path).instances.items()} == {
+        'i-000000000001': 'private',
+        'i-000000000002': 'public',
+    }
+    raw = json.loads(path.read_text())
+    for row in raw.values():
+        del row['bind']  # a file written before the field existed
+    path.write_text(json.dumps(raw))
+    assert {r.bind for r in InstanceStore(path).instances.values()} == {'public'}
+
+
 def test_a_dev_box_with_its_own_port_range_and_a_port_map(world, state):
     root, registry = world
     box_state = idle_box(uuids=(UUID_5090,))  # port_map {'8080': 20135}: a Lium pod exposing 8080 on 20135
@@ -959,7 +1074,8 @@ def test_a_dev_box_with_its_own_port_range_and_a_port_map(world, state):
     box = FakeDocker()
     assert reconciler(root, registry, {'hk1': box}).run_pass().ok
     (record,) = InstanceStore(root / 'instances.json').instances.values()
-    assert (record.host_port, record.port) == (8080, 20135) and ' -p 8080:8080 ' in box.commands('docker run -d')[0]
+    assert (record.host_port, record.port) == (8080, 20135)
+    assert ' -p 172.17.0.1:8080:8080 ' in box.commands('docker run -d')[0]
 
     result = admit(state, extra=['--workload-ports', '8080-8080', '--port-map', '8080=20135', '--json'])
     assert result.exit_code == 0, result.output

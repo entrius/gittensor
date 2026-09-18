@@ -35,6 +35,11 @@ One pass, one SSH visit per box:
   it moves. A normal drain of a LEASED card records a ``clean_lease`` standing event with its leased seconds, a late
   one ``drain_failed``.
 
+A start publishes the workload's port on the box's docker bridge gateway address (``workload_bind`` private, the
+default; looked up once per box visit) and records ``bind`` on the instance and on the container's label, so a
+re-adopted instance keeps it. The setting applies to new starts only: running instances keep theirs, and a fleet
+changes over one card at a time as leases cycle.
+
 Every step is saved before the next begins and every docker operation is idempotent, so a pass killed anywhere is
 finished by the next one. Not here: the gateway (it reads ``instances.json``), the in-lease heartbeat and health watch
 (WS-D, which keeps each instance's pay span), pay (WS-F, ``pay/ledger.py``).
@@ -80,12 +85,16 @@ from gittensor.controller.locks import BoxLocks
 from gittensor.controller.manifest import Drain, Manifest, gpu_type_of
 from gittensor.controller.registry import DeploymentStore, Registry, RegistryError, VerifiedEntry
 from gittensor.controller.runspec import (
+    BIND_PRIVATE,
+    BIND_PUBLIC,
+    WORKLOAD_BINDS,
     BoxContainer,
     BoxHttp,
     HttpClient,
     PlacementError,
     PrestageReport,
     PullToken,
+    bridge_gateway,
     build_run_spec,
     deploy,
     host_port_client,
@@ -121,6 +130,7 @@ class InstanceRecord:
     host: str = ''
     port: int | None = None  # the port the outside reaches (the box's port map applied)
     host_port: int | None = None  # the box's port the instance is published on, from its workload range
+    bind: str = BIND_PUBLIC  # private: published on the box's docker bridge address; public: the previous form
     healthy: bool = False
     draining: bool = False
     started_at: float | None = None  # docker run returned
@@ -270,6 +280,7 @@ class Reconciler:
     make_runner: Callable[[BoxState], HostRunner]
     http_for: Callable[[HostRunner, BoxState], HttpClient] = lambda runner, box: BoxHttp(runner)
     pull_token: PullToken | None = None
+    workload_bind: str = BIND_PRIVATE  # where new starts publish their port (WORKLOAD_BINDS); running ones keep theirs
     # The gateway's /healthz as a dict ({'refreshed_at': …, 'in_flight': {instance: n}}), or None when it cannot be
     # read. None here: no gateway to ask, a drain takes the fixed grace only.
     gateway_state: Callable[[], dict | None] | None = None
@@ -286,6 +297,10 @@ class Reconciler:
     on_background: Callable[[ReconcileReport], None] | None = None
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
     _in_flight: dict[str, threading.Thread] = field(default_factory=dict, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.workload_bind not in WORKLOAD_BINDS:
+            raise ValueError(f'workload_bind {self.workload_bind!r}: one of {", ".join(WORKLOAD_BINDS)}')
 
     # -- state writes (single writer; every change saved before the next step) -----------------------------------
 
@@ -508,6 +523,7 @@ class Reconciler:
             host=box.host,
             port=box.public_port(container.port) if container.port else None,
             host_port=container.port,  # the port label carries the host port
+            bind=container.bind,
             drain_type=drain.type,
             drain_max_s=drain.max_s,
         )
@@ -746,13 +762,21 @@ class Reconciler:
         when there are box locks, so no proof round lands on a card mid-start."""
         box = self._box(box_id)
         runner = self._runner(box, runners)
+        found: list[str] = []
+
+        def bind_address() -> str:
+            """The box's bridge gateway, looked up at the first start of this visit."""
+            if not found:
+                found.append(bridge_gateway(runner))
+            return found[0]
+
         with self.box_locks.hold(box_id) if self.box_locks is not None else nullcontext():
             for op in sorted(box_ops, key=lambda o: o[0] != 'drain'):
                 if op[0] == 'drain':
                     action = self._drain(box_id, runner, op[1])
                 else:
                     entry_id, uuid, replaces, host_port = op[1]
-                    action = self._start(box_id, runner, entries[entry_id], uuid, replaces, host_port)
+                    action = self._start(box_id, runner, entries[entry_id], uuid, replaces, host_port, bind_address)
                 with self._lock:
                     report.actions.append(action)
                 if action.detail.startswith('transport:'):
@@ -848,6 +872,7 @@ class Reconciler:
         uuid: str,
         replaces: str = '',
         host_port: int | None = None,
+        bind_address: Callable[[], str] | None = None,
     ) -> Action:
         manifest = verified.manifest
         instance_id = new_instance_id()
@@ -869,15 +894,22 @@ class Reconciler:
             host=box.host,
             port=box.public_port(host_port) if host_port else None,
             host_port=host_port,
+            bind=self.workload_bind,
             drain_type=manifest.drain.type,
             drain_max_s=manifest.drain.max_s,
             replaces=replaces,
         )
         self._put_record(record)
-        client = host_port_client(self.http_for(runner, box), manifest, host_port)
+        http = self.http_for(runner, box)
         staged = PrestageReport()
         try:
-            spec = build_run_spec(verified.entry_id, manifest, uuid, instance_id, host_port)
+            address = ''
+            if self.workload_bind == BIND_PRIVATE:
+                address = (bind_address or (lambda: bridge_gateway(runner)))()
+                if isinstance(http, BoxHttp) and not http._gateway:
+                    http._gateway = address  # the same lookup serves the probes
+            client = host_port_client(http, manifest, host_port)
+            spec = build_run_spec(verified.entry_id, manifest, uuid, instance_id, host_port, address)
             prestage(runner, spec, manifest, self.pull_token, self.clock, report=staged)
             marks.append(('prestage', self.clock()))
             record.container_id = deploy(runner, spec)

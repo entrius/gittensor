@@ -591,3 +591,22 @@ def test_run_serves_its_loops_stops_on_sigterm_and_status_reads_what_it_did(stat
     assert payload['running'] is False and payload['controller']['round']['n'] == 1
     (box,) = payload['boxes']
     assert box['hotkey'] == HK_A and box['status'] == IDLE and [c['state'] for c in box['cards']] == [IDLE]
+
+
+@pytest.mark.parametrize('args, bind', [([], 'private'), (['--workload-bind', 'public'], 'public')])
+def test_run_threads_the_workload_bind_switch_to_the_reconciler(state, tmp_path, args, bind):
+    keypair(tmp_path)
+    seen = {}
+
+    class Spy(Controller):
+        def serve(self, max_seconds=None):
+            seen['bind'] = self.reconciler.workload_bind
+            return True
+
+    with patch.object(ctl, 'Controller', Spy):
+        result = invoke(
+            'run', '--state-dir', state, '--proof', FAKE_PROOF, '--agent-image-digest', AGENT_DIGEST, *NET,
+            '--release-pubkey', tmp_path / 'release.pub', '--price-source', 'static', *args,
+        )  # fmt: skip
+    assert result.exit_code == 0, result.output
+    assert seen == {'bind': bind}

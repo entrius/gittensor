@@ -82,6 +82,49 @@ that is gone for good (its record and pinned host key; refuses one that still ca
 per-round proof build needs the private build pipeline, which this image deliberately does not carry: run it where
 that lives and point `--build-cmd` at it, or rebuild outside and let each round re-read the mounted `dist`.
 
+## gt-tunnels: the traffic path
+
+`gitt controller tunnels` keeps one SSH connection per box that carries an instance (the same certificate CA and
+pinned host keys as the controller, a fresh certificate on every connect) and, on it, one local forward per instance:
+`<listen host>:<local port>` to the box's docker bridge gateway at the instance's host port, where the workload
+answers. Forwards are added and cancelled on the live connection (`ssh -O forward` / `-O cancel`), so one card
+cycling leaves the other cards' streams on that box alone. It is its own process, not part of `run`: restarting the
+controller leaves the connections that carry traffic up. Run it from the same checkout and state directory as the
+controller, under pm2 beside `gt-controller`:
+
+```bash
+pm2 start gitt --name gt-tunnels --kill-timeout 45000 -- controller tunnels \
+    --state-dir ~/.gittensor/controller --ca-key /path/to/gt_ca --listen-host <gittensor_network gateway>
+pm2 logs gt-tunnels                                          # one JSON line per event
+gitt controller tunnels --status [--json]                     # what tunnels.json says now
+```
+
+| `tunnels` flag | Default | What |
+|---|---|---|
+| `--listen-host` | `127.0.0.1` | the address local ports listen on: the gateway container's docker network gateway (`gittensor_network`) |
+| `--port-range` | `21000-21999` | local ports handed to instances; an instance keeps its port for its whole life, across restarts |
+| `--interval` | 3 s | between passes: read `boxes.json` + `instances.json`, connect, add / cancel forwards, probe, write |
+| `--ca-key`, `--state-dir` | as `run` | |
+| `--status` | | print `tunnels.json` (a table, or `--json`) and exit |
+
+Every pass and every change it writes `<state-dir>/tunnels.json` (tmp + rename), what the gateway routes by:
+
+```json
+{"schema": 1, "written_at": 1789760000.0, "listen_host": "<listen host>",
+ "tunnels": {"<instance_id>": {"box": "<hotkey>", "host": "<listen host>", "port": 21003,
+                              "up": true, "since": 1789759000.0, "error": ""}}}
+```
+
+`up`: the box's connection is alive, the forward is registered and one request through the local port got an HTTP
+status line back (any status); `since`: when `up` last changed; `error`: why it is not up. Every instance in
+`instances.json` gets a tunnel, draining ones included (requests in flight finish through it) until its record is
+gone. Each box connects and probes on its own worker, so one slow or unreachable box holds up no other; a failed
+connect is retried after 1 s, doubling to at most 30 s. Events (`{"event": "tunnel", "kind": ...}`): `start`,
+`connect`, `connect_failed`, `forward`, `cancel`, `up`, `down`, `close`, `stop`. SIGTERM or SIGINT closes every
+connection, writes every tunnel down and exits 0; a pass in flight finishes first, hence the pm2 `--kill-timeout`.
+One keeper per state directory (`tunnels.lock`). A keeper that was killed outright leaves its connections behind;
+the next one closes each before connecting the box again.
+
 ## The public fleet document
 
 `run` writes `<state-dir>/public/fleet.json` every 30 s and with every scorecard (tmp + rename; `gitt controller

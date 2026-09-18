@@ -18,6 +18,7 @@ full check and box state (``controller.checks``), the GPU-proof slot (``controll
     gitt controller reconcile [--loop]                         desired replicas vs running instances, over SSH
     gitt controller instances                                  what runs where (what the gateway will read)
     gitt controller run                                        the controller as one process: round + reconcile + watch
+    gitt controller tunnels [--status]                         one SSH connection per box carrying its instances' traffic
     gitt controller status                                     boxes, cards, instances, last round / reconcile (read-only)
     gitt controller scorecard                                  the last signed scorecard, checked as the validator does
 
@@ -44,6 +45,7 @@ import importlib
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -65,6 +67,7 @@ from gittensor.cli.help import StyledGroup
 from gittensor.cli.helpers import NETWORK_CHOICE, console, err_console
 from gittensor.cli.json_output import emit_error_json, emit_json
 from gittensor.cli.miner_commands.helpers import NETUID_DEFAULT, _resolve_endpoint
+from gittensor.controller import tunnels
 from gittensor.controller.checks import checks as ck
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.full_check import (
@@ -1108,6 +1111,7 @@ def controller_group():
         reconcile  Place and drain instances until running matches desired (--loop: every 30 s)
         instances  List placement instances: entry, box, card, container, host:port, healthy
         run        The controller as one process: proof round, reconcile, heartbeat + health watch
+        tunnels    Keep one SSH connection per box forwarding its instances to local ports (--status)
         status     Boxes, cards, instances, last round / reconcile / watch (read-only, safe beside run)
     """
 
@@ -2036,6 +2040,96 @@ def instances_command(state_dir, json_mode):
             'yes' if r['draining'] else 'no',
         )
     console.print(table)
+
+
+# ---------------------------------------------------------------- tunnels: the traffic path, its own process --------
+
+
+@controller_group.command('tunnels')
+@click.option('--status', is_flag=True, default=False, help='Print tunnels.json and exit (read-only).')
+@click.option(
+    '--listen-host',
+    default=tunnels.DEFAULT_LISTEN_HOST,
+    show_default=True,
+    help='Address the local ports listen on: the docker network gateway the gateway container reaches this host at.',
+)
+@click.option(
+    '--port-range',
+    default=f'{tunnels.DEFAULT_PORT_RANGE[0]}-{tunnels.DEFAULT_PORT_RANGE[1]}',
+    show_default=True,
+    help='Local ports handed to instances; an instance keeps its port for its whole life.',
+)
+@click.option('--interval', type=float, default=tunnels.DEFAULT_INTERVAL_S, show_default=True, help='Seconds between passes.')  # fmt: skip
+@click.option('--max-passes', type=int, default=0, hidden=True)
+@_ca_key_option
+@_state_options
+def tunnels_command(status, listen_host, port_range, interval, max_passes, ca_key, state_dir, json_mode):
+    """Keep one SSH connection per box that carries an instance, with a local forward per instance to where the
+    workload answers on the box, and write <state-dir>/tunnels.json (what the gateway routes by) every pass.
+
+    \b
+    Its own long-running process (pm2: gt-tunnels), beside `run`: restarting the controller leaves the connections
+    that carry traffic up. Forwards are added and cancelled on the live connection, never by reconnecting. One JSON
+    line per event on stdout. SIGTERM closes every connection, writes every tunnel down and exits 0.
+    """
+    state = StateDir(Path(state_dir).expanduser())
+    if status:
+        _print_tunnels(state, json_mode)
+        return
+    try:
+        ports = tunnels.parse_port_range(port_range)
+    except ValueError as e:
+        _fail(str(e), json_mode, EXIT_NO_VERDICT)
+    state.ensure()
+    ca_key = Path(ca_key).expanduser() if ca_key else state.ca_key
+    _require_ca_key(ca_key, json_mode)
+    try:
+        with tunnels.keeper_lock(state.root):
+            keeper = _make_keeper(state, ca_key, listen_host, ports)
+            stop = keeper.stop_event
+            previous = {sig: signal.signal(sig, lambda *_: stop.set()) for sig in (signal.SIGTERM, signal.SIGINT)}
+            try:
+                keeper.serve(interval_s=interval, max_passes=max_passes)
+            finally:
+                for sig, handler in previous.items():
+                    signal.signal(sig, handler)
+    except tunnels.KeeperRunning as e:
+        _fail(str(e), json_mode, EXIT_NO_VERDICT)
+
+
+def _make_keeper(state: StateDir, ca_key: Path, listen_host: str, ports: tuple[int, int]) -> tunnels.TunnelKeeper:
+    make_runner = tunnels.ssh_runner_factory(ca_key, state.known_hosts)
+    return tunnels.TunnelKeeper(state.root, make_runner, listen_host=listen_host, port_range=ports)
+
+
+def _print_tunnels(state: StateDir, json_mode: bool) -> None:
+    path = state.root / tunnels.TUNNELS_FILE
+    doc = tunnels.read_tunnels(path)
+    if doc is None:
+        _fail(f'{path}: no tunnels written yet (is gt-tunnels running?)', json_mode, EXIT_NO_VERDICT)
+    if json_mode:
+        emit_json({'success': True, **doc})
+        return
+    now = time.time()
+    rows = doc.get('tunnels', {})
+    table = Table(
+        title=f'{escape(str(path))} · written {_age(doc.get("written_at"), now)} ago · listen {escape(str(doc.get("listen_host", "")))}',
+        show_header=True,
+    )
+    for column in ('Instance', 'Box', 'Local', 'Up', 'Since', 'Error'):
+        table.add_column(column, no_wrap=column != 'Error')
+    for instance, row in rows.items():
+        table.add_row(
+            escape(instance),
+            escape(str(row.get('box', ''))[:16]),
+            escape(f'{row.get("host")}:{row.get("port")}' if row.get('port') else '—'),
+            '[green]up[/green]' if row.get('up') else '[red]down[/red]',
+            _age(row.get('since'), now),
+            escape(str(row.get('error', ''))),
+        )
+    console.print(table)
+    if not rows:
+        err_console.print('[dim]no instances[/dim]')
 
 
 # ---------------------------------------------------------------- run: the controller as one process ----------------

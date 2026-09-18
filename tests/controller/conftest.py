@@ -227,6 +227,7 @@ def passing_runner(
     )
     for url in network_targets:
         runner.on(network_command(url), '200 4812345.000\n')
+    runner.on(regex(r'^if docker image inspect '), 'ready\n')  # the proof image is on the box (proof_image_ready)
     runner.on(regex(r'^docker (create|cp|start|rm) '), job or job_responder())
     return runner
 

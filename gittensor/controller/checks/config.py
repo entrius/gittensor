@@ -42,6 +42,8 @@ PROOF_FILL_FLOOR_RATIO = 0.85
 # 30 s on our stopwatch (trust-the-seal, no 5090 speed band; Kimbo 9/14); this is only the hard stop after which we
 # give up waiting for an answer at all, kept above the verdict limit so a late answer is judged, not lost.
 PROOF_JOB_TIMEOUT_S = 60.0
+# Asking the box whether it has the proof image (and starting its pull when it has not): a local docker call.
+PROOF_IMAGE_PROBE_TIMEOUT_S = 20.0
 # The proof image (docker/proof/Dockerfile): our own small signed base, `entrius/gt-proof`, with NO binary and NO
 # secret inside; the sealed binary is copied in over SSH at check time. With a digest set the controller runs
 # `repo@sha256:...` (a miner box pulls it from Docker Hub); empty = a locally built `repo:tag` (dev boxes).

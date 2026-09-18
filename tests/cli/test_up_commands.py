@@ -43,6 +43,24 @@ class FakeProbe:
         self.served: list[tuple] = []
         self.serve_error = ''
         self.workloads: list[Workload] = []  # the controller's gt-i-* containers present on the box
+        self.proof_calls: list[list[str]] = []
+        self.has_proof_image = True
+        self.pull_fails = False
+        self.allowlist: dict | None = {
+            '580.65.06': ['a' * 32],
+            '595.84': ['b' * 32],
+        }  # None: the list cannot be fetched
+        self.md5 = 'a' * 32
+        self.kernel = '580.65.06'
+
+    def nvml_allowlist(self, url=''):
+        return self.allowlist
+
+    def nvml_md5(self):
+        return self.md5
+
+    def kernel_driver(self):
+        return self.kernel
 
     def ps_output(self) -> str:
         """What `docker ps` prints for our workloads (the format `workload_list_command` asks for)."""
@@ -114,6 +132,10 @@ def docker_calls(probe):
     def _run(cmd):
         if cmd[:2] == ['docker', 'ps']:  # `gitt down` lists our workloads through the same seam
             return subprocess.CompletedProcess(cmd, 0, probe.ps_output(), '')
+        if cmd[:3] == ['docker', 'image', 'inspect'] or cmd[:2] == ['docker', 'pull']:  # the proof image pre-pull
+            probe.proof_calls.append(cmd)
+            failed = (not probe.has_proof_image) if cmd[1] == 'image' else probe.pull_fails
+            return subprocess.CompletedProcess(cmd, 1 if failed else 0, '', 'no such image' if failed else '')
         calls.append(cmd)
         return subprocess.CompletedProcess(cmd, 0, 'abc123\n', '')
 
@@ -137,8 +159,9 @@ class TestPrereqs:
     def test_all_pass(self, probe):
         report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
         assert report.ok and report.hotkey_ss58 == probe.ss58 and not report.already_up
-        assert [r.status for r in report.results] == ['pass'] * 9
-        assert [r.name for r in report.results][4:7] == ['Workload ports', 'Public IP', 'SSH port reachable']
+        assert [r.status for r in report.results] == ['pass'] * 10
+        assert [r.name for r in report.results][:2] == ['NVIDIA driver', 'Driver vetted']
+        assert [r.name for r in report.results][5:8] == ['Workload ports', 'Public IP', 'SSH port reachable']
         assert report.public_ip == probe.ip and probe.chain_calls == 1  # the registration lookup only
 
     def test_no_driver_fails(self, probe):
@@ -148,7 +171,7 @@ class TestPrereqs:
         assert report.results[0].name == 'NVIDIA driver' and report.results[0].status == 'fail'
 
     def test_wrong_gpu_is_a_warning_not_a_failure(self, probe):
-        probe.smi = subprocess.CompletedProcess([], 0, 'NVIDIA GeForce RTX 4090, 550.1, GPU-9\n', '')
+        probe.smi = subprocess.CompletedProcess([], 0, 'NVIDIA GeForce RTX 4090, 580.65.06, GPU-9\n', '')
         report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
         warn = [r for r in report.results if r.status == 'warn']
         assert report.ok and len(warn) == 1 and '5090' in warn[0].detail
@@ -216,6 +239,61 @@ class TestPrereqs:
             port = s.getsockname()[1]
             assert real.port_free(port) is False
         assert real.port_free(port) is True
+
+
+class TestDriverVetted:
+    """The controller's nvml_digest check, run before the box joins (mainnet 9/18: the first outside miner was benched
+    twice on it, with nothing here or in the docs to warn them)."""
+
+    def row(self, probe):
+        report = run_prereqs(probe, wallet='w', hotkey='h', netuid=74, endpoint='finney', ssh_port=2200)
+        return next(r for r in report.results if r.name == 'Driver vetted'), report
+
+    def test_a_vetted_driver_with_the_genuine_library_passes(self):
+        row, report = self.row(FakeProbe())
+        assert row.status == 'pass' and '580.65.06' in row.detail and report.ok
+
+    def test_an_unknown_driver_fails_and_names_the_way_out(self):
+        probe = FakeProbe()
+        probe.smi = subprocess.CompletedProcess([], 0, 'NVIDIA GeForce RTX 5090, 555.42.02, GPU-1111\n', '')
+        probe.kernel = '555.42.02'
+        row, report = self.row(probe)
+        assert row.status == 'fail' and not report.ok
+        assert 'not on the vetted list' in row.detail and '595.84' in row.detail and 'Discord' in row.detail
+
+    def test_a_driver_upgraded_without_a_reboot_fails(self):
+        probe = FakeProbe()
+        probe.kernel = '570.86.15'
+        row, report = self.row(probe)
+        assert row.status == 'fail' and 'reboot' in row.detail and not report.ok
+
+    def test_a_library_that_is_not_nvidias_build_fails(self):
+        probe = FakeProbe()
+        probe.md5 = 'c' * 32
+        row, report = self.row(probe)
+        assert row.status == 'fail' and "not NVIDIA's build" in row.detail and not report.ok
+
+    def test_a_list_that_cannot_be_fetched_skips_the_check_and_blocks_nothing(self):
+        probe = FakeProbe()
+        probe.allowlist = None
+        row, report = self.row(probe)
+        assert row.status == 'skip' and report.ok
+
+    def test_a_library_we_cannot_find_only_warns(self):
+        probe = FakeProbe()
+        probe.md5 = ''
+        row, report = self.row(probe)
+        assert row.status == 'warn' and report.ok
+
+
+def test_the_published_driver_list_is_what_the_controller_loads():
+    from gittensor.controller.checks.nvml_allowlist import NvmlAllowlist
+
+    path = Path(__file__).resolve().parents[2] / 'docker' / 'controller' / 'nvml_allowlist.json'
+    allowlist = NvmlAllowlist.from_file(path)
+    assert '595.84' in allowlist.drivers and len(allowlist.drivers) >= 40
+    assert all(len(m) == 32 for md5s in allowlist.by_driver.values() for m in md5s)
+    assert all(int(d.split('.')[0]) >= 570 for d in allowlist.drivers)  # Blackwell needs 570+
 
 
 class TestUpCommand:
@@ -393,6 +471,37 @@ class TestUpCommand:
 ORPHAN = Workload('a' * 64, 'gt-i-6f31220812a5', 'running', 20000, 240)  # the 27B the 9/16 `gitt down` left serving
 STOPPED = Workload('b' * 64, 'gt-i-0123456789ab', 'exited', 20001, 30)
 UNLABELLED = Workload('c' * 64, 'gt-i-before0label', 'running', 20002, None)  # started before the drain label existed
+
+
+class TestProofImagePrepull:
+    """`gitt up` fetches the ~2 GB GPU proof image so the first full check finds it (mainnet 9/18: the first outside
+    miner's first proof timed out on this pull and was judged a failed proof)."""
+
+    def test_a_box_that_has_the_image_pulls_nothing(self, runner, probe, docker_calls):
+        result = runner.invoke(cli, UP)
+        assert result.exit_code == 0, result.output
+        assert [c[:3] for c in probe.proof_calls] == [['docker', 'image', 'inspect']]
+
+    def test_a_new_box_pulls_it_after_the_agent_is_started(self, runner, probe, docker_calls):
+        probe.has_proof_image = False
+        result = runner.invoke(cli, UP)
+        assert result.exit_code == 0, result.output
+        assert docker_calls  # the agent / runner were started first
+        pull = probe.proof_calls[-1]
+        assert pull[:3] == ['docker', 'pull', '-q'] and pull[3].startswith('entrius/gt-proof@sha256:')
+        assert 'Pulling the GPU proof image' in result.output
+
+    def test_a_failed_pull_is_not_fatal(self, runner, probe, docker_calls):
+        probe.has_proof_image, probe.pull_fails = False, True
+        result = runner.invoke(cli, UP)
+        assert result.exit_code == 0 and 'Not fatal' in result.output
+
+    def test_failed_prerequisites_and_dry_run_pull_nothing(self, runner, probe, docker_calls):
+        probe.has_proof_image = False
+        assert runner.invoke(cli, [*UP, '--dry-run']).exit_code == 0
+        probe.kernel = '570.86.15'  # a driver upgraded without a reboot: Driver vetted fails
+        assert runner.invoke(cli, UP).exit_code == 1
+        assert probe.proof_calls == [] and docker_calls == []
 
 
 class TestDownCommand:

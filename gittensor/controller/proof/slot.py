@@ -169,6 +169,24 @@ class ProbeResult:
         return [f'{c["uuid"]}: {c["reason"]}' for c in self.cards if not c['passed']]
 
 
+def proof_image_ready(runner: HostRunner, image: str = '', timeout: float = cfg.PROOF_IMAGE_PROBE_TIMEOUT_S) -> bool:
+    """Whether the proof image is on the box; when it is not, its pull is started there, detached, and this returns
+    False at once. ``docker create`` pulls a missing image by itself, inside the proof's own 60 s command timeout: a
+    2 GB image does not arrive in that on most links, and the timeout was judged as a failed GPU proof (mainnet 9/18,
+    the first outside miner, benched 16 h for it). The pull is setup, not proof: a box without the image gets no
+    verdict, stays where it is (ADMIT: unpaid), and is proved on the first round that finds the image."""
+    ref = shlex.quote(image or image_ref())
+    result = runner.run(
+        f'if docker image inspect {ref} >/dev/null 2>&1; then echo ready; '
+        f'else (nohup docker pull -q {ref} >/dev/null 2>&1 </dev/null &) ; echo pulling; fi',
+        timeout=timeout,
+    )
+    return result.ok and result.stdout.strip().endswith('ready')
+
+
+PROOF_IMAGE_PULLING = 'proof image not on the box yet: its pull was started, proved on a later round'
+
+
 def stage_box(
     runner: HostRunner,
     gpus: Sequence[GpuInfo],

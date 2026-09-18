@@ -20,7 +20,7 @@ from click.testing import CliRunner
 from gittensor.cli.main import cli
 from gittensor.controller import cli as ctl
 from gittensor.controller.checks import checks as ck
-from gittensor.controller.checks.runner import FakeRunner
+from gittensor.controller.checks.runner import FakeRunner, regex
 from gittensor.controller.checks.state import ADMIT, BENCHED, IDLE, BoxState, StateStore, release_from_bench
 from gittensor.controller.proof.slot import ProbeResult, UnconfiguredProof
 from gittensor.controller.ssh import SshTransportError
@@ -405,6 +405,28 @@ def test_round_stages_every_box_before_firing_any(state):
     assert [b['verdict'] for b in payload['boxes']] == ['ADMIT', 'ADMIT'] and payload['provider'] == 'fake-1'
     assert {'connect_scrape', 'stage', 'fire', 'cleanup', 'total', 'fire_spread'} <= set(payload['timings_ms'])
     assert store(state).get(HK_A).pinned_uuids == [UUID_5090] and store(state).get(HK_B).pinned_uuids == [UUID_5090_B]
+
+
+def test_a_box_without_the_proof_image_gets_no_verdict_and_its_pull_is_started(state):
+    """The proof image is ~2 GB: `docker create` pulled it inside the proof's 60 s timeout and the timeout was judged
+    as a failed GPU proof (mainnet 9/18). A missing image is setup: no verdict, no bench, the pull started detached;
+    the box beside it is proved as usual, and this one on the first round that finds the image."""
+    events, by_box = two_boxes(state, fixture('nvidia_smi_5090.csv').replace(UUID_5090, UUID_5090_B))
+    by_box[HK_B].inner.on(regex(r'^if docker image inspect '), 'pulling\n')
+    with runners(by_box):
+        result = invoke(*round_args(state, '--json'))
+    rows = {b['hotkey']: b for b in json.loads(result.stdout)['boxes']}
+    assert rows[HK_A]['verdict'] == 'ADMIT' and rows[HK_B]['verdict'] is None
+    assert 'proof image not on the box yet' in rows[HK_B]['busy']
+    assert store(state).get(HK_B).status == ADMIT and not store(state).get(HK_B).standing_events  # not benched
+    on_b = [c for hk, c in events if hk == HK_B]
+    assert any('nohup docker pull -q' in c for c in on_b) and not any(c.startswith('docker create') for c in on_b)
+
+    by_box[HK_B].inner.on(regex(r'^if docker image inspect '), 'ready\n')  # the pull finished
+    with runners(by_box):
+        result = invoke(*round_args(state, '--json'))
+    rows = {b['hotkey']: b for b in json.loads(result.stdout)['boxes']}
+    assert rows[HK_B]['verdict'] == 'ADMIT' and store(state).get(HK_B).status == IDLE
 
 
 def test_round_benches_a_uuid_claimed_by_two_boxes(state):

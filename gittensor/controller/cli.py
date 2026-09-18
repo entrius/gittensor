@@ -112,6 +112,7 @@ from gittensor.controller.manifest import ManifestError
 from gittensor.controller.pay.oracle import CoinGeckoChainOracle, FailSafeOracle, MetagraphedOracle, StaticOracle
 from gittensor.controller.pay.rates import RatesError, load_rates
 from gittensor.controller.proof.slot import (
+    PROOF_IMAGE_PULLING,
     GpuProof,
     ProbeResult,
     ProofUnavailable,
@@ -119,6 +120,7 @@ from gittensor.controller.proof.slot import (
     UnconfiguredProof,
     fire_box,
     image_ref,
+    proof_image_ready,
     stage_box,
 )
 from gittensor.controller.publish import build_fleet, live_pay, pay_entry, scorecard_view, write_fleet
@@ -478,6 +480,8 @@ def check_box(
             return CheckOutcome(
                 None, busy='every card busy: ' + ', '.join(f'{u[:12]}… {s}' for u, s in skipped.items())
             )
+        if not proof_image_ready(runner, config.proof_image):
+            return CheckOutcome(None, busy=PROOF_IMAGE_PULLING)
         proved = [g.uuid for g in gpus]
         checks.append(ck.check_gpu_proof(runner, gpus, proof, config.proof_image, config.proof_timeout_s))
     else:
@@ -619,6 +623,14 @@ def run_round(
         r.skipped.update({u: f'{r.box.card(u).state} (instance pending)' for u in r.scrape.uuids if u in held})
         if not r.proved:
             return  # every card hosts our workload: nothing staged, nothing fired, no verdict
+        try:
+            ready = proof_image_ready(r.runner, config.proof_image)
+        except Exception as e:  # transport died asking
+            r.stage_error = f'staging failed: {type(e).__name__}: {e}'[:300]
+            return
+        if not ready:
+            r.busy = PROOF_IMAGE_PULLING  # setup, not proof: no verdict this round
+            return
         try:
             r.staged = stage_box(r.runner, r.proved, proof, config.proof_image, config.proof_timeout_s)
         except ProofUnavailable as e:
@@ -2059,6 +2071,10 @@ class _DaemonPrinter:
                     'busy': r.busy,
                     'transport_error': r.transport_error,
                     'failed': r.verdict.failed if r.verdict else [],
+                    # why each failed: the operator's log only (fleet.json publishes the names, never the detail)
+                    'why': {c.name: check_detail(c)[:300] for c in r.verdict.checks if not c.passed and not c.skipped}
+                    if r.verdict
+                    else {},
                 }
             )
         payload = {**head, 'provider': report.provider, 'exit_code': report.exit_code, 'boxes': rows}

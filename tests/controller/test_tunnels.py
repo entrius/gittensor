@@ -21,6 +21,7 @@ from gittensor.controller import cli as ctl
 from gittensor.controller import tunnels
 from gittensor.controller.checks.state import BoxState, StateStore
 from gittensor.controller.reconcile import InstanceRecord, InstanceStore
+from gittensor.controller.ssh import SshRunner
 from gittensor.controller.ssh.certs import VisitCredential
 from gittensor.controller.tunnels import TunnelKeeper, TunnelRunner, forward_spec, key_id_for
 
@@ -361,7 +362,8 @@ def test_a_dead_master_takes_its_instances_down_and_reconnects_with_a_new_certif
     keeper.shutdown()
 
 
-def test_two_failed_link_checks_in_a_row_reconnect_and_write_the_box_down_at_once(world):
+def test_two_failed_link_checks_in_a_row_reconnect_and_write_the_box_down_at_once(world, monkeypatch):
+    monkeypatch.setattr(tunnels, 'LINK_CHECK_EVERY_PASSES', 1)  # the backstop on every pass, for this test
     world.boxes(boxA='10.0.0.1', boxB='10.0.0.2')
     world.instances(('i1', 'boxA', 20000), ('i2', 'boxA', 20001), ('i3', 'boxB', 20000))
     keeper = world.keeper()
@@ -386,7 +388,8 @@ def test_two_failed_link_checks_in_a_row_reconnect_and_write_the_box_down_at_onc
     keeper.shutdown()
 
 
-def test_a_workload_that_stops_answering_never_costs_its_box_the_connection(world):
+def test_a_workload_that_stops_answering_never_costs_its_box_the_connection(world, monkeypatch):
+    monkeypatch.setattr(tunnels, 'LINK_CHECK_EVERY_PASSES', 1)
     world.boxes(boxA='10.0.0.1')
     world.instances(('i1', 'boxA', 20000), ('i2', 'boxA', 20001))
     keeper = world.keeper()
@@ -400,6 +403,39 @@ def test_a_workload_that_stops_answering_never_costs_its_box_the_connection(worl
     assert world.ssh.link_checks == ['10.0.0.1'] * 4 and not world.kinds('link_check')
     assert world.ssh.ops_for('10.0.0.1', 'cancel') == []  # i2's forward untouched throughout
     keeper.shutdown()
+
+
+def test_the_link_check_is_a_backstop_every_tenth_pass_and_every_pass_after_a_failure(world):
+    world.boxes(boxA='10.0.0.1')
+    world.instances(('i1', 'boxA', 20000))
+    keeper = world.keeper()
+    keeper.pass_once(wait_s=5)  # connects: a fresh connection is not checked
+    for _ in range(tunnels.LINK_CHECK_EVERY_PASSES - 1):
+        keeper.pass_once(wait_s=5)
+    assert world.ssh.link_checks == []
+    keeper.pass_once(wait_s=5)
+    assert world.ssh.link_checks == ['10.0.0.1']  # the tenth pass on the live connection
+    master = next(iter(world.ssh.masters.values()))
+
+    world.ssh.cut_link('10.0.0.1')
+    for _ in range(tunnels.LINK_CHECK_EVERY_PASSES):
+        keeper.pass_once(wait_s=5)
+    assert [e['failures'] for e in world.kinds('link_check')] == [1]  # one failure only counts
+    assert master.returncode is None
+    keeper.pass_once(wait_s=5)  # the pass right after: checked again, the second failure reconnects
+    assert master.terminated and len(world.ssh.connects) == 2
+    assert len(world.ssh.link_checks) == 3
+    keeper.shutdown()
+
+
+def test_the_keepers_connection_finds_a_dead_peer_itself_and_visits_keep_their_keepalive(world, tmp_path):
+    runner = TunnelRunner('10.0.0.1', 2200, world.ca, tmp_path / 'kh', 'tun-x', control=tmp_path / 'c')
+    argv = runner.master_argv()
+    assert argv.count('ServerAliveInterval=5') == 1 and 'ServerAliveCountMax=2' in argv
+    assert not [a for a in argv if a.startswith('ServerAliveInterval=') and a != 'ServerAliveInterval=5']
+    visit = SshRunner('10.0.0.1', 2200, world.ca, tmp_path / 'kh', 'visit', multiplex=False)
+    assert 'ServerAliveInterval=15' in visit.ssh_argv(visit.credential(), 'true')
+    visit.close()
 
 
 def test_link_check_argv_rides_the_master_only(world, tmp_path):
@@ -515,8 +551,8 @@ def test_master_argv_is_a_foreground_master_with_the_pinned_host_key(world, tmp_
         'BatchMode=yes',
         'StrictHostKeyChecking=yes',
         f'UserKnownHostsFile={tmp_path / "known_hosts"}',
-        'ServerAliveInterval=15',
-        'ServerAliveCountMax=3',
+        'ServerAliveInterval=5',
+        'ServerAliveCountMax=2',
         'ExitOnForwardFailure=yes',
         'IdentitiesOnly=yes',
     ):

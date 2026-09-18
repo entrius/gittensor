@@ -93,6 +93,8 @@ def scan_host_key(
 class SshRunner:
     """``HostRunner`` over OpenSSH. Use as a context manager so the visit credential is discarded on exit."""
 
+    server_alive_interval_s = 15  # ssh's keepalive to the box; a subclass holding a long-lived connection may lower it
+
     def __init__(
         self,
         host: str,
@@ -191,7 +193,7 @@ class SshRunner:
             '-o',
             f'ConnectTimeout={CONNECT_TIMEOUT_S}',
             '-o',
-            'ServerAliveInterval=15',
+            f'ServerAliveInterval={self.server_alive_interval_s}',
             *self._multiplex_options(),
             '-p',
             str(self.port),

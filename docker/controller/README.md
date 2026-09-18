@@ -120,9 +120,11 @@ status line back (any status); `since`: when `up` last changed; `error`: why it 
 `instances.json` gets a tunnel, draining ones included (requests in flight finish through it) until its record is
 gone. Each box connects and probes on its own worker, so one slow or unreachable box holds up no other, and the pass
 never waits on a box: `written_at` advances every pass (the gateway counts a file older than 10 s as no keeper). A
-failed connect is retried after 1 s, doubling to at most 30 s. Every pass also runs `true` on each box over its live
-connection (5 s timeout); two failures in a row stop that connection, write its tunnels down at once and reconnect.
-That check is on the connection, not a workload: a card starting or stopped never costs the box its connection.
+failed connect is retried after 1 s, doubling to at most 30 s. Each connection finds a dead peer itself: ssh's
+keepalive every 5 s, and the connection closes after 2 go unanswered, so the next pass reconnects the box. As a
+backstop, every 10th pass (and the pass after one that failed) runs `true` on each box over its live connection (5 s
+timeout); two failures in a row stop that connection, write its tunnels down at once and reconnect. That check is on
+the connection, not a workload: a card starting or stopped never costs the box its connection.
 Events (`{"event": "tunnel", "kind": ...}`): `start`, `connect`, `connect_failed`, `link_check`, `forward`, `cancel`,
 `up`, `down`, `close`, `stop`. SIGTERM or SIGINT closes every
 connection, writes every tunnel down and exits 0; a pass in flight finishes first, hence the pm2 `--kill-timeout`.

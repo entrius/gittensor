@@ -24,10 +24,12 @@ life, across keeper restarts (the ports are read back from ``tunnels.json``); th
 released. Each box connects, forwards and probes on its own worker, so a box that is slow or unreachable holds up no
 other; a failed connect is retried with backoff (1 s doubling, capped at 30 s).
 
-Every pass also runs ``true`` on the box over the live master (the link check, 5 s timeout): it tests the connection,
-not a workload, so a card that is starting or stopped never touches it. Two failures in a row stop the master, write
-the box's tunnels down at once and reconnect. The pass loop itself never waits on a box, so ``written_at`` advances
-every pass however slow one box is.
+The master finds a dead peer itself: ssh's keepalive every ``SERVER_ALIVE_INTERVAL_S`` (5 s), and the master exits
+after ``SERVER_ALIVE_COUNT_MAX`` (2) go unanswered, so the next pass sees it closed and reconnects. As a backstop,
+every ``LINK_CHECK_EVERY_PASSES`` passes (and on the pass after a failed one) the keeper runs ``true`` on the box over
+the live master (the link check, 5 s timeout): it tests the connection, not a workload, so a card that is starting or
+stopped never touches it. Two failures in a row stop the master, write the box's tunnels down at once and reconnect.
+The pass loop itself never waits on a box, so ``written_at`` advances every pass however slow one box is.
 """
 
 from __future__ import annotations
@@ -64,8 +66,10 @@ DEFAULT_LISTEN_HOST = '127.0.0.1'
 DEFAULT_PORT_RANGE = (21000, 21999)
 DEFAULT_INTERVAL_S = 3.0
 BACKOFF_CAP_S = 30.0
-SERVER_ALIVE_COUNT_MAX = 3  # with the runner's ServerAliveInterval=15: ssh itself gives up on a silent peer at ~45 s
-LINK_CHECK_TIMEOUT_S = 5.0  # one trivial command over the master, every pass: the keeper's own, faster look
+SERVER_ALIVE_INTERVAL_S = 5  # the master's keepalive: ssh itself gives up on a silent peer after ~10-15 s
+SERVER_ALIVE_COUNT_MAX = 2
+LINK_CHECK_TIMEOUT_S = 5.0  # one trivial command over the master: the keeper's own look, beside the keepalive
+LINK_CHECK_EVERY_PASSES = 10  # a backstop (~30 s at the default interval); every pass while one has failed
 LINK_CHECK_FAILURES = 2  # in a row: the master is stopped and the box reconnected
 MASTER_WAIT_S = CONNECT_TIMEOUT_S + 5  # login + the master's control socket appearing
 CONTROL_TIMEOUT_S = 10.0  # one `ssh -O` request to a local master
@@ -125,6 +129,8 @@ class TunnelRunner(SshRunner):
     at a fixed path per box. ``master_argv`` is the connection itself (a foreground ``-N`` master the keeper
     supervises); ``run`` (the bridge gateway lookup) and ``control`` (``-O check|forward|cancel|exit``) attach to it
     and never open a login of their own."""
+
+    server_alive_interval_s = SERVER_ALIVE_INTERVAL_S
 
     def __init__(self, *args, control: Path, **kwargs):
         super().__init__(*args, **kwargs)
@@ -268,6 +274,7 @@ class BoxLink:
         self._emit, self._clock, self._stop = emit, clock, stop
         self._report = report or (lambda results: None)
         self.link_failures, self.link_error = 0, ''
+        self.since_link_check = 0  # passes on the live master since its last link check
         self.runner: TunnelRunner | None = None
         self.proc: Any = None
         self.bridge_gw = ''
@@ -321,7 +328,7 @@ class BoxLink:
         runner.close()  # the login is done: the certificate is not needed again on this connection
         self.proc, self.runner = proc, runner
         self.forwards, self._forward_errors = {}, {}
-        self.link_failures = 0
+        self.link_failures, self.since_link_check = 0, 0
         self.connects += 1
 
     def _stderr_tail(self) -> str:
@@ -375,9 +382,14 @@ class BoxLink:
         return self._sync_forwards(targets)
 
     def _link_ok(self) -> bool:
-        """One link check on the live master. False once ``LINK_CHECK_FAILURES`` have failed in a row; a single
-        failure only counts (the pass goes on and the probes say what they find)."""
+        """One link check on the live master when one is due (every ``LINK_CHECK_EVERY_PASSES`` passes, or the pass
+        after a failed one). False once ``LINK_CHECK_FAILURES`` have failed in a row; a single failure only counts (the
+        pass goes on and the probes say what they find)."""
         assert self.runner is not None
+        self.since_link_check += 1
+        if self.since_link_check < LINK_CHECK_EVERY_PASSES and not self.link_failures:
+            return True
+        self.since_link_check = 0
         result = self.runner.link_check()
         if result.ok:
             self.link_failures = 0

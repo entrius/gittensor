@@ -98,7 +98,7 @@ def calculate_repo_emission_breakdown(
     miner_uids: set[int],
     maintainer_uids_by_repo: Optional[Dict[str, list[int]]] = None,
 ) -> Iterator[RepoEmissionAllocation]:
-    """Return per-repository reward allocation details without adding treasury/slack.
+    """Return per-repository reward allocation details without adding recycle slack.
 
     Two independent piles: the maintainer cut is paid at the repo's *base* rate
     (``maintainer_cut * emission_share * OSS``) and is never scaled, so a maintainer's

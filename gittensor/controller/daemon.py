@@ -208,6 +208,7 @@ class Controller:
             self.intervals.heartbeat_s,
             lock=self.write_lock,
             box_locks=self.box_locks,
+            gateway_state=gateway_state,
         )
         self.discovery = Discovery(
             self.boxes, self.instances, state.known_hosts, scan_host_key or _no_scan, lock=self.write_lock
@@ -438,7 +439,7 @@ class Controller:
     def watch_once(self) -> WatchReport:
         report = self.watch.run_pass()
         self.settle_once()
-        if report.visited:
+        if report.visited or report.usage:
             self._set_status(
                 'watch',
                 {

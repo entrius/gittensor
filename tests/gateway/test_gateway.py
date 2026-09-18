@@ -595,6 +595,8 @@ def test_healthz_keeps_in_flight_beside_the_tunnel_fields(world):
                     'refreshed_at',
                     'error',
                     'tunnels',
+                    'started_at',
+                    'served',
                 }
                 assert health['in_flight'] == {'i-a': 1} and health['tunnels']['up'] == 1
                 rt.hold.set()

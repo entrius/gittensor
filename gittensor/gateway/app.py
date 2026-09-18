@@ -6,7 +6,8 @@
     POST /v1/chat/completions, /v1/completions   gateway-openai entries, routed by ``model``
     GET  /v1/models                              each entry's runtime /v1/models under its manifest name + override
     ANY  /http/<name><route>                     http entries, declared routes only, passed through
-    GET  /healthz                                routable instances per entry, tunnels (the only route without the key)
+    GET  /healthz                                routable instances per entry, tunnels, per-instance totals (the only
+                                                 route without the key)
     GET  /metrics                                plain-text counters per entry and instance
 
 Every request but ``GET /healthz`` carries ``X-GT-Gateway-Key``: das sends it; user keys, quota and billing are das's.
@@ -19,6 +20,13 @@ judged by no one here.
 
 The gateway reaches an instance only through its tunnel (``table.py``): the keeper's SSH connection to the box, HTTP
 inside it. Every request, and the ``/v1/models`` fetch, goes to ``Instance.base_url``.
+
+Per instance, since the gateway started (``started_at``), ``/healthz`` carries what it served (``served``): requests,
+completion tokens as the runtime's ``usage`` gave them, and the requests whose completion tokens it did not learn (no
+``usage``, a client that left mid-stream, an upstream error) with what each could have made at most: its own
+``max_tokens``, else the runtime's output ceiling. The controller's lease accounting check compares these with the
+runtime's own counters (``controller/usage_check.py``). Beside them, the median decode rate over requests that ran
+alone on their instance, recorded as evidence.
 """
 
 from __future__ import annotations
@@ -29,16 +37,18 @@ import hmac
 import json
 import logging
 import time
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import AsyncIterator, Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import aiohttp
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 
+from gittensor.controller.checks import config as cfg
 from gittensor.controller.tunnels_file import TUNNELS_FILE
+from gittensor.controller.usage_check import median, output_ceiling, request_allowance
 from gittensor.gateway.limits import RequestRefused, enforce_openai_limits, parse_object
 from gittensor.gateway.table import Instance, InstanceTable
 
@@ -46,6 +56,7 @@ KEY_HEADER = 'X-GT-Gateway-Key'
 SSE_DONE = b'data: [DONE]\n\n'
 CLIENT_CLOSED = 499  # nginx's code for a client that left before the answer finished
 _HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+SERVED_KEEP_S = 3_600.0  # an instance's totals are kept this long after it left the table, then dropped
 
 log = logging.getLogger('gittensor.gateway')
 
@@ -78,6 +89,41 @@ class Usage:
     stream: bool = False
 
 
+@dataclass
+class ServedTotals:
+    """What the gateway sent one instance since it started. A request's completion tokens are the runtime's own
+    ``usage``; one whose count was not learned is *unaccounted* and adds the most it could have made."""
+
+    entry: str
+    requests: int = 0
+    completion_tokens: int = 0
+    unaccounted_requests: int = 0
+    unaccounted_allowance_tokens: int = 0
+    decode_tps_alone: deque = field(default_factory=lambda: deque(maxlen=cfg.DECODE_TPS_WINDOW))
+    last_at: float = 0.0
+
+    def count(self, completion_tokens: int | None, allowance: int, decode_tps_alone: float | None, now: float) -> None:
+        self.requests += 1
+        if completion_tokens is None:
+            self.unaccounted_requests += 1
+            self.unaccounted_allowance_tokens += allowance
+        else:
+            self.completion_tokens += completion_tokens
+        if decode_tps_alone is not None:
+            self.decode_tps_alone.append(decode_tps_alone)
+        self.last_at = now
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            'requests': self.requests,
+            'completion_tokens': self.completion_tokens,
+            'unaccounted_requests': self.unaccounted_requests,
+            'unaccounted_allowance_tokens': self.unaccounted_allowance_tokens,
+            'decode_tps_alone_p50': median(list(self.decode_tps_alone)),
+            'decode_tps_alone_n': len(self.decode_tps_alone),
+        }
+
+
 def _stdout(line: str) -> None:
     print(line, flush=True)
 
@@ -92,10 +138,15 @@ class Metrics:
         self.errors: Counter[tuple[str, str]] = Counter()
         self.capacity: Counter[str] = Counter()
 
-    def render(self, table: InstanceTable) -> str:
+    def render(self, table: InstanceTable, served: dict[str, ServedTotals] | None = None) -> str:
         lines = []
         for (entry, instance), n in sorted(self.requests.items()):
             lines.append(f'gt_gateway_requests_total{{entry="{entry}",instance="{instance}"}} {n}')
+        for instance, totals in sorted((served or {}).items(), key=lambda kv: (kv[1].entry, kv[0])):
+            lines.append(
+                f'gt_gateway_completion_tokens_total{{entry="{totals.entry}",instance="{instance}"}} '
+                f'{totals.completion_tokens}'
+            )
         for entry, n in sorted(self.capacity.items()):
             lines.append(f'gt_gateway_capacity_429_total{{entry="{entry}"}} {n}')
         for (entry, instance), n in sorted(self.errors.items()):
@@ -248,6 +299,9 @@ class Gateway:
         self.clock, self.wall = clock, wall
         self.session: aiohttp.ClientSession | None = None
         self._refresher: asyncio.Task | None = None
+        self.started_at = wall()
+        self.served: dict[str, ServedTotals] = {}  # instance id -> totals since started_at
+        self._running: dict[str, list[dict[str, bool]]] = {}  # instance id -> its requests in flight: ran alone so far?
 
     @property
     def client(self) -> aiohttp.ClientSession:
@@ -275,6 +329,7 @@ class Gateway:
         loaded = await asyncio.to_thread(self.table.read)
         tunnels_before = self.table.tunnels.error
         self.table.apply(loaded, self.wall())
+        self._prune_served()
         if loaded.error:
             log.warning('refresh: %s', loaded.error)
         if loaded.tunnels.error != tunnels_before:  # once per change: a missing keeper is logged, not every refresh
@@ -283,6 +338,14 @@ class Gateway:
             else:
                 log.info('refresh: %s read, %d tunnels up', TUNNELS_FILE, len(loaded.tunnels.up))
         await self._refresh_models()
+
+    def _prune_served(self) -> None:
+        """Drop the totals of an instance ``SERVED_KEEP_S`` after it left the table (a lease that ended long ago)."""
+        now = self.wall()
+        for instance_id, totals in list(self.served.items()):
+            gone = instance_id not in self.table.instances and not self.table.in_flight.get(instance_id)
+            if gone and now - totals.last_at > SERVED_KEEP_S:
+                del self.served[instance_id]
 
     async def _refresh_loop(self) -> None:
         while True:
@@ -358,7 +421,8 @@ class Gateway:
             body['model'] = runtime_model
         payload = raw if not runtime_model else json.dumps(body, ensure_ascii=False, separators=(',', ':')).encode()
         headers = {'Content-Type': 'application/json', 'Accept': request.headers.get('accept', '*/*')}
-        return await self._forward(instance, 'POST', path, payload, headers, usage, started, relay='sse')
+        allowance = request_allowance(body, output_ceiling(instance.manifest))
+        return await self._forward(instance, 'POST', path, payload, headers, usage, started, 'sse', allowance)
 
     async def http(self, request: Request, name: str, path: str) -> Response:
         started, route, method = self.clock(), '/' + path, request.method.upper()
@@ -381,8 +445,13 @@ class Gateway:
         usage.stream = streams
         target = route + (f'?{request.url.query}' if request.url.query else '')
         headers = {k: v for k, v in request.headers.items() if k.lower() in ('content-type', 'accept')}
+        try:
+            parsed = json.loads(raw) if raw else None
+        except ValueError:
+            parsed = None
+        allowance = request_allowance(parsed if isinstance(parsed, dict) else None, output_ceiling(instance.manifest))
         return await self._forward(
-            instance, method, target, raw or None, headers, usage, started, relay='raw' if streams else ''
+            instance, method, target, raw or None, headers, usage, started, 'raw' if streams else '', allowance
         )
 
     async def _forward(
@@ -395,11 +464,17 @@ class Gateway:
         usage: Usage,
         started: float,
         relay: str,  # 'sse': relay an event-stream answer and read it for usage; 'raw': relay bytes; '': whole
+        allowance: int = cfg.RUNTIME_OUTPUT_CEILING_TOKENS,  # the most this request can make, if its count is not learned
     ) -> Response:
         key = (instance.entry, instance.id)
         self.metrics.requests[key] += 1
         usage.instance, usage.entry = instance.id, instance.entry
         done = False
+        peers = self._running.setdefault(instance.id, [])
+        mine = {'alone': not peers}
+        for peer in peers:
+            peer['alone'] = False
+        peers.append(mine)
 
         def finish(status: int, failed: bool = False) -> None:
             nonlocal done
@@ -411,6 +486,7 @@ class Gateway:
             usage.total_ms = round((self.clock() - started) * 1000.0, 1)
             if failed or status >= 500:
                 self.metrics.errors[key] += 1
+            self._count(instance, usage, allowance, mine)
             self.emit(usage)
 
         try:
@@ -481,6 +557,16 @@ class Gateway:
         finish(upstream.status)
         return Response(content=data, status_code=upstream.status, headers=out_headers)
 
+    def _count(self, instance: Instance, usage: Usage, allowance: int, mine: dict[str, bool]) -> None:
+        running = self._running.get(instance.id, [])
+        if any(r is mine for r in running):
+            running.remove(next(r for r in running if r is mine))
+        if not running:
+            self._running.pop(instance.id, None)
+        totals = self.served.setdefault(instance.id, ServedTotals(instance.entry))
+        alone = usage.decode_tps if mine['alone'] else None
+        totals.count(usage.completion_tokens, allowance, alone, self.wall())
+
 
 def build_app(gateway: Gateway) -> FastAPI:
     @contextlib.asynccontextmanager
@@ -507,11 +593,15 @@ def build_app(gateway: Gateway) -> FastAPI:
             'refreshed_at': table.loaded_at,
             'error': table.last_error,
             'tunnels': table.tunnels.summary(),
+            # since started_at, per instance: what was sent and what each request whose count was not learned could
+            # have made at most (the controller's lease accounting check reads these)
+            'started_at': gateway.started_at,
+            'served': {i: t.as_dict() for i, t in sorted(gateway.served.items())},
         }
 
     @app.get('/metrics')
     async def metrics():
-        return PlainTextResponse(gateway.metrics.render(gateway.table))
+        return PlainTextResponse(gateway.metrics.render(gateway.table, gateway.served))
 
     @app.get('/v1/models')
     async def models():

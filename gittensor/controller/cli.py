@@ -2228,6 +2228,14 @@ class _DaemonPrinter:
     def watch(self, report: WatchReport) -> None:
         self._actions('watch', report.actions)
         self._problems('watch', [], report.unreachable)
+        for row in report.usage:  # the lease accounting check: every number, for the operator's audit
+            mark = '[red]✗[/red]' if row['kind'] in ('strike', 'detection') else '[dim]·[/dim]'
+            line = f'{mark} usage_check {row["kind"]} {escape(row["box"][:16])} {escape(row["instance"])}'
+            if 'surplus' in row:
+                line += f' surplus {row["surplus"]:.0f} / threshold {row["threshold"]:.0f}'
+            if row.get('detail'):
+                line += f' {escape(str(row["detail"]))}'
+            self._emit('usage_check', row, line)
 
     def discover(self, report: DiscoverReport) -> None:
         for a in report.actions:
@@ -2308,7 +2316,8 @@ class _DaemonPrinter:
     '--gateway-url',
     default='',
     help='The gateway (e.g. http://127.0.0.1:8791): a planned drain then waits until its /healthz shows no request '
-    'in flight on the instance before the container is stopped. Unset: a short fixed grace instead.',
+    'in flight on the instance before the container is stopped, and the lease accounting check reads its totals. '
+    'Unset: a short fixed grace instead, and no accounting check.',
 )
 @click.option(
     '--discover',

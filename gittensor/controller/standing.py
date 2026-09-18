@@ -10,7 +10,8 @@ number, the clean lease-seconds since the last reset, walked through the events 
 * A **hard** event resets to zero, i.e. probation: a failed heartbeat, a failed full check or GPU proof, an operator
   releasing the box from a bench.
 * A **soft** event drops one level: a health-probe replacement, a failed start (a missed ``max_load_s``, a missing
-  pre-staged image), a failed drain, an unreachable bench. Trusted falls to the start of standard, standard to zero.
+  pre-staged image), a failed drain, an unreachable bench, a lease ended by the lease accounting check
+  (``external_use``). Trusted falls to the start of standard, standard to zero.
 * ``folded`` is what ``add_event`` leaves when it trims the oldest events: their fold, as a clean-seconds value.
 * Neutral, recorded but not folded: ``instance_stopped`` (our container gone after the agent was unreachable: a
   clean leave or a reboot, Kimbo 9/16) and ``instance_unreachable`` (a lease ended by missed heartbeats).
@@ -39,10 +40,10 @@ CHECK_FAILED = 'check_failed'
 UNREACHABLE_BENCHED = 'unreachable_benched'
 RELEASED = 'released'
 FOLDED = 'folded'
-# Kinds written in checks/state.py (the heartbeat and the health replacement), named here only as strings: state.py
-# imports this module to fold trimmed events.
+# Kinds written in checks/state.py (the heartbeat, the health replacement, the lease accounting check), named here only
+# as strings: state.py imports this module to fold trimmed events.
 HARD = frozenset({'heartbeat_failed', CHECK_FAILED, RELEASED})
-SOFT = frozenset({'health_failed', START_FAILED, DRAIN_FAILED, UNREACHABLE_BENCHED})
+SOFT = frozenset({'health_failed', START_FAILED, DRAIN_FAILED, UNREACHABLE_BENCHED, 'external_use'})
 
 
 def level_of(clean_s: float, standard_after_s: float, trusted_after_s: float) -> str:

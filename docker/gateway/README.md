@@ -62,11 +62,30 @@ X-GT-Gateway-Key: <GT_GATEWAY_KEY>      # on every request; das never forwards u
   `max_output_tokens` capped at 4096, and `models_override.json` (`{"<name or name@version>": {...}}`) merged on top.
 - `ANY /http/<name><route>`: `http` front doors, declared routes only, bytes passed through.
 - `GET /healthz` (no key): routable instances per entry, `in_flight` per instance (the controller's drain waits on
-  it), and `tunnels: {"up", "down", "fresh", "written_at"}` from the last `tunnels.json` read (a stale file counts
-  every row down). `GET /metrics`: requests, 429s, errors, in-flight, `gt_gateway_tunnel_up{entry,instance}` (0|1)
-  and `gt_gateway_tunnels_fresh` (0|1).
+  it), `tunnels: {"up", "down", "fresh", "written_at"}` from the last `tunnels.json` read (a stale file counts every
+  row down), `started_at` (when this gateway process started) and `served` (below). `GET /metrics`: requests, 429s,
+  errors, in-flight, `gt_gateway_completion_tokens_total{entry,instance}`, `gt_gateway_tunnel_up{entry,instance}`
+  (0|1) and `gt_gateway_tunnels_fresh` (0|1).
 - Responses carry `X-GT-Instance` and `X-GT-Entry`, so das's usage row can name the instance.
 - A 429 is `{"error": {"type": "capacity", ...}}` with `Retry-After: 1`.
+
+`served` is per instance, cumulative since `started_at` (a restart starts it over; an instance's row is dropped an
+hour after it left `instances.json`), what the controller's lease accounting check compares with the runtime's own
+counters (`docker/controller/README.md`, "The lease accounting check"):
+
+```json
+"served": {"<instance_id>": {"requests": 120, "completion_tokens": 48211,
+                            "unaccounted_requests": 3, "unaccounted_allowance_tokens": 12288,
+                            "decode_tps_alone_p50": 91.4, "decode_tps_alone_n": 57}}
+```
+
+`completion_tokens` sums the runtime's own `usage`. A request whose completion tokens the gateway did not learn (no
+`usage`: a stream without `stream_options.include_usage`, a client that left mid-stream, an upstream error, an `http`
+front door) is counted in `unaccounted_requests` and adds to `unaccounted_allowance_tokens` the most it could have
+made: its `max_tokens` / `max_completion_tokens`, else the runtime's output ceiling (16384, or a higher limit the
+manifest names in `profile.max_output_tokens` or `SPARKINFER_MAX_OUTPUT_TOKENS`). `decode_tps_alone_p50` /
+`decode_tps_alone_n`: the median `decode_tps` over the last 100 streamed requests that had the instance to themselves
+for their whole life (null / 0 before the first). None of this changes what is relayed to the client.
 
 Each request writes one JSON line to stdout: `ts, instance, entry, model, prompt_tokens, completion_tokens, ttft_ms,
 total_ms, decode_tps, status, finish_reason, stream`. Tokens come from the runtime's `usage` or are `null`; for

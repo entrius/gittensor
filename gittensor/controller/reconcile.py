@@ -34,6 +34,9 @@ One pass, one SSH visit per box:
   no ``clean_lease``, probation for ever. Cycle time is unpaid by construction: neither card is LEASED-and-paid while
   it moves. A normal drain of a LEASED card records a ``clean_lease`` standing event with its leased seconds, a late
   one ``drain_failed``.
+* **Cooldown**: a box whose last ``external_use`` event (the lease accounting check, ``usage_check.py``) is under
+  ``EXTERNAL_USE_COOLDOWN_S`` old gets no new lease: its cards stay IDLE, proved and idle-paid, and are not placement
+  candidates until then.
 
 A start publishes the workload's port on the box's docker bridge gateway address (``workload_bind`` private, the
 default; looked up once per box visit) and records ``bind`` on the instance and on the container's label, so a
@@ -78,6 +81,7 @@ from gittensor.controller.checks.state import (
     add_event,
     apply_heartbeat_failure,
     apply_instance_stopped,
+    lease_cooldown_until,
     record_start,
     transition_card,
 )
@@ -157,6 +161,7 @@ class InstanceRecord:
     replaces: str = ''
     rotating: str = ''
     stopped_at: float | None = None  # when the controller marked it draining: pay never runs past it
+    ended_by: str = ''  # the check that ended the lease (external_use): its drain writes no clean_lease
     # Pay (WS-F): the current span in which the four pay conditions held at every check, [pay_from, pay_through].
     # The watch extends pay_through as checks pass, closes the span (pay_open False) on any failure or miss, and opens
     # a new one at the next fully passing check. The ledger pays each span once.
@@ -659,6 +664,7 @@ class Reconciler:
             and not box.endpoint_changed
             and box.box_id not in report.unreachable
             and box.box_id not in busy
+            and (lease_cooldown_until(box) or 0.0) <= now  # no new lease right after an external_use event
             for uuid in box.pinned_uuids
             if box.card(uuid).state == IDLE and (box.box_id, uuid) not in used
         ]
@@ -854,10 +860,11 @@ class Reconciler:
 
     def _lease_event(self, box_id: str, record: InstanceRecord, in_time: bool) -> None:
         """A drained lease's standing event: ``clean_lease`` with its leased seconds, or ``drain_failed``. A box benched
-        meanwhile gets neither (its bench wrote its own)."""
+        meanwhile gets neither (its bench wrote its own), and a lease the accounting check ended gets no
+        ``clean_lease`` (its ``external_use`` event stands for it)."""
         with self._lock:
             box = self._box(box_id)
-            if box.status != IDLE:
+            if box.status != IDLE or (in_time and record.ended_by):
                 return
             detail: dict = {'instance': record.id, 'uuid': record.uuid}
             if in_time:

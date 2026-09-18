@@ -45,6 +45,7 @@ docker run -d --name gt-controller --restart unless-stopped --stop-timeout 150 \
 | `--heartbeat-interval` | 60 s | same card / our container running / card ours alone, per box with a LEASED card |
 | `--pull-token-file` | none | installed for each image pull and removed after |
 | `--workload-bind` | `private` | where a new workload's port is published (below); `reconcile` takes it too |
+| `--gateway-url` | none | the gateway's base URL: a planned drain waits on its `/healthz` in-flight counts, and the lease accounting check (below) reads its totals there; unset, drains take a short fixed grace and the check makes no judgement |
 | `--release-pubkey`, `--allow-dev-keys` | compiled release key | what registry entries must verify against |
 | every `check` / `round` flag | | `--proof`, `--proof-args`, `--agent-image-digest`, `--agent-image-id`, `--proof-image`, `--allowlist`, `--network-target`, `--disk-min-gb`, `--ca-key` |
 | `--json` | off | one JSON object per event on stdout instead of log lines on stderr |
@@ -130,6 +131,71 @@ Events (`{"event": "tunnel", "kind": ...}`): `start`, `connect`, `connect_failed
 connection, writes every tunnel down and exits 0; a pass in flight finishes first, hence the pm2 `--kill-timeout`.
 One keeper per state directory (`tunnels.lock`). A keeper that was killed outright leaves its connections behind;
 the next one closes each before connecting the box again.
+
+## The lease accounting check
+
+A LEASED card is paid by the card-hour and serves the gateway's traffic only: every request it answers comes through
+the gateway. On every heartbeat visit that passes (every 60 s per box), for each leased instance whose manifest
+`runtime` has a counters table (`RUNTIME_COUNTERS` in `checks/config.py`; today `sparkinfer`), the watch reads the
+gateway's `/healthz` (`--gateway-url`), then the runtime's own `GET /metrics` on the instance's front-door port
+(through the box, like the health probe), then the gateway's `/healthz` again, and compares completion tokens
+(`controller/usage_check.py`). Request counts are not compared: the keeper's and the health probe's requests make no
+tokens.
+
+Every quantity the controller cannot know exactly is replaced by an upper bound in the miner's favour:
+
+| Term | What it is |
+|---|---|
+| `runtime_delta` | `sparkinfer_tokens_total{kind="completion"}` now, minus at the baseline |
+| `gateway_delta` | completion tokens the gateway counted from the runtime's own `usage`, from the baseline's first read to this sample's second |
+| `unaccounted_allowance_delta` | for every request whose count the gateway did not learn (no `usage`, e.g. a stream without `stream_options.include_usage`; a client that left mid-stream; an upstream error), its own `max_tokens` / `max_completion_tokens`, else the runtime's output ceiling (16384, or a higher limit the manifest names) |
+| `in_flight` × `ceiling` | requests still in flight on the instance at the second gateway read |
+
+`surplus = runtime_delta − gateway_delta − unaccounted_allowance_delta − in_flight × ceiling`. A surplus above
+`max(2000 tokens, 5 % of runtime_delta)` is a **strike**; two strikes on consecutive visits are a **detection**;
+anything else clears the count. The baseline is the first sample after the card is LEASED (the start's canary comes
+before it). A runtime counter that went down (the runtime restarted) or a gateway whose `started_at` changed starts a
+new baseline and clears the strikes; so does a restarted controller (the baselines live in its memory). No gateway to
+ask, a gateway without the totals, a `/metrics` that does not answer or lacks the series, or a runtime with no table:
+**no judgement**, said once in the log, never a strike.
+
+**On a detection** (Kimbo 9/18):
+
+- The instance is marked draining at once (the gateway stops routing to it; the lease and its pay end at the
+  detection, nothing is withheld) and the reconciler drains it through the normal planned drain, waiting for the
+  gateway's in-flight requests; its card returns to IDLE after the usual re-proof. Not a bench. The drain writes no
+  `clean_lease` for it.
+- One SOFT standing event `external_use` on the box (drops one standing level), with reason
+  `suspected external (non-gateway) usage` and every number above.
+- The box takes no new lease for `EXTERNAL_USE_COOLDOWN_S` (1 h): its cards stay IDLE, proved and idle-paid, and are
+  not placement candidates. Its other leased cards keep their leases.
+- The third `external_use` inside 7 days is a **bench** with failed reason `external_use`, entering the ladder at the
+  16 h rung (then 64 h), whatever the bench count was. Everything a bench does applies: no pay while benched, no lease,
+  every instance on the box drained, back through ADMIT when it ends; `gitt controller release <hotkey>` ends it early.
+  Events older than 7 days do not count.
+
+**The operator log.** Every sample is one `usage_check` event in `run`'s log (`--json`: one object per line), with
+`kind` (`baseline`, `rebaseline`, `clear`, `strike`, `detection`, `no_judgement`, `throughput_low`), `box`,
+`instance`, `entry` and the numbers: `runtime_completion_tokens`, `runtime_prompt_tokens`, `runtime_requests`,
+`runtime_active`, `since` (the baseline), `runtime_delta`, `gateway_delta`, `unaccounted_allowance_delta`,
+`in_flight`, `ceiling`, `surplus`, `threshold`, `gateway_requests`, `gateway_unaccounted_requests`,
+`gateway_started_at`, and `strikes` on a strike. A detection is also a `watch` event of kind `external_use`, and the
+`external_use` standing event in `boxes.json` carries the same numbers. To audit one: read the instance's
+`usage_check` rows from its `baseline` to its `detection` (the surplus should grow across both strikes) beside the
+gateway's usage lines for that instance. To undo a bench judged wrong: `gitt controller release <hotkey> --reason ...`
+(the standing event stays; the release is recorded beside it).
+
+The check counts on one gateway routing to the fleet, the one `--gateway-url` names: traffic sent to an instance any
+other way (a second gateway on the same state directory, an operator's own request to a tunnel port) is usage that
+gateway did not send.
+
+**Throughput, recorded only.** The gateway keeps, per instance, the median decode rate of the last 100 streamed
+requests that ran alone on it (`decode_tps_alone_p50`, `decode_tps_alone_n` in `/healthz` `served`). When that median
+is under 0.6 × the manifest's `profile.decode_tps_single` over at least 20 requests, the sample adds a `usage_check`
+row of kind `throughput_low`. It never strikes, drains or touches standing in this release.
+
+The public fleet document shows the standing word and, for a bench, `last_failed: ["external_use"]` like any other
+reason; none of the numbers.
 
 ## The public fleet document
 

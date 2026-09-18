@@ -610,3 +610,11 @@ def test_run_threads_the_workload_bind_switch_to_the_reconciler(state, tmp_path,
         )  # fmt: skip
     assert result.exit_code == 0, result.output
     assert seen == {'bind': bind}
+
+
+def test_the_gateway_reader_reaches_the_drain_and_the_accounting_check(tmp_path):
+    def read():
+        return None
+
+    controller, _ = _tick_controller(tmp_path, [0.0], lambda proof, **kw: None, gateway_state=read)
+    assert controller.reconciler.gateway_state is read and controller.watch.gateway_state is read

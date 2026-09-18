@@ -708,6 +708,12 @@ def run_round(
                     r.checks.append(proof_skipped(r.checks))
                 elif not r.proved:
                     r.after = current  # identity passed and every card is busy: nothing proved, nothing applied
+                    age_s = now - current.last_check_at if current.last_check_at else None
+                    r.busy = (
+                        'every card busy: '
+                        + ', '.join(f'{u[:12]}… {s}' for u, s in r.skipped.items())
+                        + (f'; last proof {age_s / 3600:.1f} h ago' if age_s is not None else '; never proved')
+                    )
                     continue
                 elif r.stage_error:
                     r.checks.append(ck.proof_result(ProbeResult(provider, cards=r.cards, error=r.stage_error)))

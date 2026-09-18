@@ -42,7 +42,6 @@ async def forward(self: 'Validator') -> None:
     Emission blending:
     - Combined scoring pool: 90%, allocated by repository emission_share
     - Maintainer cut:        per-repo carve-out routed to maintainer miner neurons
-    - Issue treasury:       10%, flat to UID 111
     - Compute pool:          1 - OSS_EMISSION_SHARE, paid by the controller's signed scorecard (COMPUTE_SCORECARD_PATH);
                              recycled when it is stale, invalid or unset
     - Recycle:              registry slack and inactive repo slices to UID 0

@@ -3,17 +3,18 @@
 
 """Rotation and standing-ordered placement over the fake box (vault ``23`` §8, ``24`` §3 WS-E): a lease past its cap is
 replaced first and drained only once the replacement is LEASED; at most ~10% of leased cards cycle at once; no free card
-means no rotation (never below the replica count); a failed replacement calls the rotation off; placement prefers the
+means the lease is cycled in place within that same budget; a failed replacement calls the rotation off; placement prefers the
 best standing, then the freshest check, and a release takes the lowest standing first. A normal drain records the
 lease's clean seconds."""
 
 import pytest
 
-from gittensor.controller.checks.state import CHECKING, IDLE, LEASED, START_FAILED
+from gittensor.controller.checks.state import CHECKING, IDLE, LEASED, START_FAILED, apply_verdict
 from gittensor.controller.registry import DeploymentStore
 from gittensor.controller.standing import CLEAN_LEASE
 from tests.controller.conftest import UUID_5090, UUID_5090_B
 from tests.controller.test_placement import ENTRY, Clock, FakeDocker, idle_box, make_world, reconciler, seed
+from tests.controller.test_state import admit_verdict
 
 H = 3_600.0
 
@@ -75,17 +76,67 @@ def test_at_most_a_tenth_of_leased_cards_cycle_at_once(world):
     assert len(rec.instances.instances) == 20
 
 
-def test_no_free_card_means_no_rotation_and_the_lease_runs_on(world):
+def proved(rec, box_id, uuid, at):
+    """What the re-prove does to a drained card: a passing proof returns it from CHECKING to IDLE."""
+    box = rec.boxes.boxes[box_id]
+    rec.boxes.put(apply_verdict(box, admit_verdict(box.pinned_uuids), at, proved=[uuid]))
+
+
+def test_no_free_card_cycles_the_lease_in_place(world):
+    """A fleet leased to capacity (Kimbo 9/18): no card to rotate onto, so the lease is drained where it is, its card
+    is re-proved, and the replica starts again; the drain is what writes the clean lease-hours."""
     root, registry = world
     seed(root, idle_box('hk1', uuids=(UUID_5090,)), replicas=1)
     clock = Clock()
     rec = reconciler(root, registry, {'hk1': FakeDocker(gpus=(UUID_5090,))}, clock=clock)
     assert rec.run_pass().ok
+    (old,) = records(rec)
+
+    clock.t += old.lease_cap_s - 1
+    report = rec.run_pass()
+    assert report.rotations == [] and report.actions == []  # inside its cap the lease runs on
+
+    clock.t += 2
+    report = rec.run_pass()
+    assert report.rotations == [old.id] and [a.kind for a in report.actions] == ['drain']
+    box = rec.boxes.boxes['hk1']
+    assert box.cards[UUID_5090].state == CHECKING and not rec.instances.instances
+    (event,) = [e for e in box.standing_events if e['kind'] == CLEAN_LEASE]
+    assert event['leased_s'] == pytest.approx(old.lease_cap_s + 1, abs=1)
+
+    assert rec.run_pass().actions == []  # not proved yet: nothing starts on a CHECKING card
+    proved(rec, 'hk1', UUID_5090, clock.t)
+    report = rec.run_pass()
+    (new,) = records(rec)
+    assert [a.kind for a in report.actions] == ['start'] and new.id != old.id and not new.replaces
+    assert rec.boxes.boxes['hk1'].cards[UUID_5090].state == LEASED
+
+
+def test_in_place_cycling_keeps_to_the_rotation_budget(world):
+    """Two cards, two replicas, both past their cap: one is cycled, the other waits until the first is LEASED again."""
+    root, registry = world
+    seed(root, idle_box('hk1'), replicas=2)
+    clock = Clock()
+    rec = reconciler(root, registry, {'hk1': FakeDocker()}, clock=clock)
+    assert rec.run_pass().ok and len(rec.instances.instances) == 2
+
     clock.t += 3 * H
     report = rec.run_pass()
+    assert len(report.rotations) == 1 and [a.kind for a in report.actions] == ['drain']
+    (first,) = report.rotations
+    (other,) = records(rec)
+
+    report = rec.run_pass()  # the drained card is CHECKING: it counts against the budget, the other lease runs on
     assert report.rotations == [] and report.actions == []
-    (record,) = records(rec)
-    assert not record.rotating and not record.draining
+
+    freed = next(u for u, c in rec.boxes.boxes['hk1'].cards.items() if c.state == CHECKING)
+    proved(rec, 'hk1', freed, clock.t)
+    report = rec.run_pass()  # the replica comes back first; the other lease is still not touched in this pass
+    assert [a.kind for a in report.actions] == ['start'] and report.rotations == []
+    assert other.id in rec.instances.instances and first not in rec.instances.instances
+
+    report = rec.run_pass()  # now everything is LEASED again: the second lease takes its turn
+    assert report.rotations == [other.id]
 
 
 def test_a_failed_replacement_calls_the_rotation_off(world):

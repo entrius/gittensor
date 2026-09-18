@@ -232,5 +232,12 @@ def passing_runner(
     return runner
 
 
+@pytest.fixture(autouse=True)
+def no_drain_grace(monkeypatch):
+    """A drain with no gateway to ask sleeps ``DRAIN_GRACE_S`` first: real seconds in the daemon tests. Tests of the
+    wait itself set their own."""
+    monkeypatch.setattr('gittensor.controller.checks.config.DRAIN_GRACE_S', 0.0)
+
+
 def failing(stderr: str, code: int = 1) -> CommandResult:
     return CommandResult(code, '', stderr)

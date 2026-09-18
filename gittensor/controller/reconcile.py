@@ -16,7 +16,9 @@ One pass, one SSH visit per box:
   last good heartbeat, no bench). A running labelled container with no record is re-adopted when its card is LEASED
   to that instance; a container caught mid-start (card STARTING) or on a card we did not lease is undeployed.
 * **Too many** (or a disabled / unverifiable entry, or a benched box): DRAINING, undeploy with the manifest's drain,
-  CHECKING. The next proof round returns the card to IDLE after a pass.
+  CHECKING. The next proof round returns the card to IDLE after a pass. A planned drain of a LEASED card (not a benched
+  box's) first waits for the gateway: the record is marked draining, and the container is stopped only once the
+  gateway has re-read the table and counts no request in flight on it (``_await_quiet``, bounded).
 * **Too many** releases the lowest standing first, then the oldest last full check.
 * **Too few**: pick an IDLE card that satisfies ``placement`` (GPU type from the pinned card name, ``min_vram_gb``
   against our spec table, one card per instance), best standing first, then freshest last check; STARTING, pre-stage,
@@ -241,6 +243,24 @@ class ReconcileReport:
         return not self.errors and not self.unreachable and all(a.ok for a in self.actions)
 
 
+def gateway_healthz(url: str, timeout: float = 3.0) -> Callable[[], dict | None]:
+    """A reader of the gateway's ``/healthz`` (the one route without the key) for ``Reconciler.gateway_state``: the
+    JSON as a dict, None when it cannot be read."""
+    import urllib.request
+
+    target = url.rstrip('/') + '/healthz'
+
+    def read() -> dict | None:
+        try:
+            with urllib.request.urlopen(target, timeout=timeout) as response:  # noqa: S310 (operator-given URL)
+                data = json.loads(response.read().decode())
+            return data if isinstance(data, dict) else None
+        except Exception:
+            return None
+
+    return read
+
+
 @dataclass
 class Reconciler:
     boxes: StateStore
@@ -250,6 +270,9 @@ class Reconciler:
     make_runner: Callable[[BoxState], HostRunner]
     http_for: Callable[[HostRunner, BoxState], HttpClient] = lambda runner, box: BoxHttp(runner)
     pull_token: PullToken | None = None
+    # The gateway's /healthz as a dict ({'refreshed_at': …, 'in_flight': {instance: n}}), or None when it cannot be
+    # read. None here: no gateway to ask, a drain takes the fixed grace only.
+    gateway_state: Callable[[], dict | None] | None = None
     clock: Callable[[], float] = time.monotonic
     wall: Callable[[], float] = time.time
     sleep: Callable[[float], None] = time.sleep
@@ -748,6 +771,9 @@ class Reconciler:
         if box.status == IDLE and box.card(record.uuid).state in (STARTING, LEASED):
             self._move(box_id, record.uuid, DRAINING, action)
         marks.append(('mark_draining', self.clock()))
+        if box.status == IDLE and action.states[0] == LEASED:
+            action.detail = self._await_quiet(record.id)  # a benched box is stopped at once: its answers are not wanted
+            marks.append(('await_quiet', self.clock()))
         try:
             result = undeploy(runner, record.id, record.drain, self.clock)
         except _TRANSPORT as e:
@@ -761,13 +787,46 @@ class Reconciler:
         if self._box(box_id).card(record.uuid).state == DRAINING:
             self._move(box_id, record.uuid, CHECKING, action)
         action.ok = result.in_time
-        action.detail = (f'drained in {result.elapsed_s:.1f} s' if result.found else 'no container left') + (
-            '' if result.in_time else f' — past drain.max_s {record.drain_max_s} s: failed drain'
+        waited = f'{action.detail}; ' if action.detail else ''
+        action.detail = (
+            waited
+            + (f'drained in {result.elapsed_s:.1f} s' if result.found else 'no container left')
+            + ('' if result.in_time else f' — past drain.max_s {record.drain_max_s} s: failed drain')
         )
         if action.states[0] == LEASED and record.leased_at is not None:
             self._lease_event(box_id, record, result.in_time)
         action.timings_ms = _durations(marks)
         return action
+
+    def _await_quiet(self, instance_id: str) -> str:
+        """Before a planned drain stops its container: wait until the gateway has re-read the table (the record is
+        already marked draining, so it routes nothing new there) and has no request in flight on the instance. Bounded
+        by ``DRAIN_WAIT_MAX_S``; a gateway that cannot be asked gets ``DRAIN_GRACE_S`` instead. Returns what happened,
+        for the action's detail."""
+        marked, started = self.wall(), self.clock()
+        if self.gateway_state is None:
+            self.sleep(cfg.DRAIN_GRACE_S)
+            return f'no gateway to ask: {cfg.DRAIN_GRACE_S:.0f} s grace'
+        while True:
+            waited = self.clock() - started
+            try:
+                state = self.gateway_state()
+            except Exception:
+                state = None
+            if state is not None and 'in_flight' not in state:
+                state = None  # an older gateway: routable counts only. Unknown is not quiet
+            if state is None:
+                if waited >= cfg.DRAIN_GRACE_S:
+                    return f'gateway did not answer with its in-flight counts: {waited:.0f} s grace'
+            elif float(state.get('refreshed_at') or 0.0) >= marked:
+                left = int((state.get('in_flight') or {}).get(instance_id, 0))
+                if left <= 0:
+                    return f'quiet after {waited:.0f} s'
+                if waited >= cfg.DRAIN_WAIT_MAX_S:
+                    return f'{left} request(s) still in flight after {waited:.0f} s: stopped anyway'
+            elif waited >= cfg.DRAIN_WAIT_MAX_S:
+                return f'gateway never re-read the table in {waited:.0f} s: stopped anyway'
+            self.sleep(cfg.DRAIN_WAIT_POLL_S)
 
     def _lease_event(self, box_id: str, record: InstanceRecord, in_time: bool) -> None:
         """A drained lease's standing event: ``clean_lease`` with its leased seconds, or ``drain_failed``. A box benched

@@ -490,6 +490,9 @@ def build_app(gateway: Gateway) -> FastAPI:
             'status': 'ok',
             'routable': table.routable_counts(),
             'instances': len(table.instances),
+            # requests being served right now, per instance: the controller waits for a draining instance's to reach
+            # zero before it stops the container (no stream cut by a rotation)
+            'in_flight': {i: n for i, n in table.in_flight.items() if n > 0},
             'refreshed_at': table.loaded_at,
             'error': table.last_error,
         }

@@ -124,7 +124,7 @@ from gittensor.controller.proof.slot import (
     stage_box,
 )
 from gittensor.controller.publish import build_fleet, live_pay, pay_entry, scorecard_view, write_fleet
-from gittensor.controller.reconcile import InstanceStore, Reconciler, ReconcileReport
+from gittensor.controller.reconcile import InstanceStore, Reconciler, ReconcileReport, gateway_healthz
 from gittensor.controller.registry import (
     DeploymentStore,
     Registry,
@@ -2188,6 +2188,12 @@ class _DaemonPrinter:
     '--static-alpha-tao', type=float, default=cfg.STATIC_ALPHA_TAO, show_default=True, help='Fallback TAO per alpha.'
 )
 @click.option(
+    '--gateway-url',
+    default='',
+    help='The gateway (e.g. http://127.0.0.1:8791): a planned drain then waits until its /healthz shows no request '
+    'in flight on the instance before the container is stopped. Unset: a short fixed grace instead.',
+)
+@click.option(
     '--discover',
     is_flag=True,
     default=False,
@@ -2216,6 +2222,7 @@ def run_command(
     metagraphed_url,
     static_tao_usd,
     static_alpha_tao,
+    gateway_url,
     discover,
     discover_interval,
     max_seconds,
@@ -2279,6 +2286,7 @@ def run_command(
                 build=_run_build,
                 build_cmd=build_cmd,
                 pull_token=token,
+                gateway_state=gateway_healthz(gateway_url) if gateway_url else None,
                 intervals=Intervals(
                     round_s=round_interval,
                     reconcile_s=reconcile_interval,

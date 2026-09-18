@@ -185,3 +185,59 @@ def test_placement_prefers_standing_then_freshness_and_releases_the_lowest_stand
     assert [(a.kind, a.box) for a in report.actions] == [('drain', 'fresh')]  # probation goes before trusted
     assert rec.boxes.boxes['trusted'].cards[UUID_5090].state == LEASED
     assert rec.boxes.boxes['fresh'].status == IDLE
+
+
+def full_box(world, **kw):
+    """One card, one replica, leased and past its cap: the next pass cycles it in place (a planned drain)."""
+    root, registry = world
+    seed(root, idle_box('hk1', uuids=(UUID_5090,)), replicas=1)
+    clock, box = Clock(), FakeDocker(gpus=(UUID_5090,))
+    rec = reconciler(root, registry, {'hk1': box}, clock=clock, **kw)
+    assert rec.run_pass().ok
+    (record,) = records(rec)
+    clock.t += 3 * H
+    return rec, clock, box, record
+
+
+def test_a_planned_drain_waits_until_the_gateway_has_no_request_in_flight_on_the_instance(world):
+    """The record is marked draining first (the gateway stops routing there), then the container is stopped only
+    once the gateway has re-read the table and counts nothing in flight: a rotation cuts no customer stream."""
+    seen = []
+
+    def gateway():
+        (record,) = rec.instances.instances.values()
+        assert record.draining and box.containers  # asked while draining, container still up
+        seen.append(clock.t)
+        if len(seen) == 1:
+            return {'refreshed_at': clock.t - 60, 'in_flight': {}}  # has not re-read the table yet: not trusted
+        return {'refreshed_at': clock.t, 'in_flight': {record.id: 2 if len(seen) < 5 else 0}}
+
+    rec, clock, box, record = full_box(world, gateway_state=gateway)
+    before = clock.t
+    report = rec.run_pass()
+    (drain,) = report.actions
+    assert drain.kind == 'drain' and drain.ok and 'quiet after' in drain.detail and len(seen) == 5
+    assert clock.t - before >= 4 * 2.0 and not box.containers
+    (event,) = [e for e in rec.boxes.boxes['hk1'].standing_events if e['kind'] == CLEAN_LEASE]
+    assert event['leased_s'] == pytest.approx(3 * H, abs=1)  # the lease ends where the drain began, not after the wait
+
+
+def test_a_drain_never_waits_for_ever(world, monkeypatch):
+    monkeypatch.setattr('gittensor.controller.checks.config.DRAIN_GRACE_S', 6.0)
+    rec, clock, box, record = full_box(
+        world, gateway_state=lambda: {'refreshed_at': clock.t, 'in_flight': {record.id: 1}}
+    )
+    before = clock.t
+    (drain,) = rec.run_pass().actions
+    assert 'still in flight after' in drain.detail and 'stopped anyway' in drain.detail and not box.containers
+    assert 330 <= clock.t - before < 340
+
+    rec, clock, box, record = full_box(world, gateway_state=lambda: None)  # a gateway that does not answer
+    before = clock.t
+    (drain,) = rec.run_pass().actions
+    assert 'gateway did not answer' in drain.detail and 6 <= clock.t - before < 10 and not box.containers
+
+    old_gateway = {'status': 'ok', 'refreshed_at': 9e18}  # no in_flight field: unknown is not quiet
+    rec, clock, box, record = full_box(world, gateway_state=lambda: old_gateway)
+    (drain,) = rec.run_pass().actions
+    assert 'gateway did not answer with its in-flight counts' in drain.detail and not box.containers

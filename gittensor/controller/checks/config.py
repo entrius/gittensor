@@ -141,6 +141,13 @@ LEASE_CAP_S = 3_600.0
 LEASE_CAP_JITTER = 0.2
 LEASE_CAP_MULTIPLIER = {'probation': 0.5, 'standard': 1.0, 'trusted': 2.0}
 ROTATION_MAX_FRACTION = 0.10
+# A planned drain (rotation, in-place cycle, scale-down) waits for the gateway before it stops the container: until the
+# gateway has re-read instances.json (it routes nothing new to a draining instance) and reports no request in flight
+# on it. Bounded: the longest answer das allows is 330 s. With no gateway to ask (or one that does not answer), the
+# short fixed grace covers the gateway's refresh and nothing more.
+DRAIN_WAIT_MAX_S = 330.0
+DRAIN_WAIT_POLL_S = 2.0
+DRAIN_GRACE_S = 6.0
 
 # Pay (24 §3 WS-F, 23 §7). The ledger settles every card every SETTLEMENT_TICK_S (one block) from the recorded state;
 # the scorecard pays the trailing SETTLEMENT_WINDOW_S (phase 0's settlement window was one hour too).

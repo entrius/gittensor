@@ -183,6 +183,8 @@ def test_429_when_every_slot_is_taken_and_the_slot_frees_after_completion(world)
                     busy = await resp.text()
                 assert f'gt_gateway_in_flight{{entry="{entry}",instance="i-a"}} 1' in busy
                 assert f'gt_gateway_capacity_429_total{{entry="{entry}"}} 1' in busy
+                async with client.get('/healthz') as resp:  # keyless: what the controller's drain waits on
+                    assert (await resp.json())['in_flight'] == {'i-a': 1}
                 rt.hold.set()
                 assert (await first)[0] == 200
                 assert (await post(client, TOOL_BODY))[0] == 200
@@ -191,6 +193,8 @@ def test_429_when_every_slot_is_taken_and_the_slot_frees_after_completion(world)
                 assert f'gt_gateway_in_flight{{entry="{entry}",instance="i-a"}} 0' in idle
                 assert f'gt_gateway_requests_total{{entry="{entry}",instance="i-a"}} 2' in idle
                 assert gw.table.in_flight == {}
+                async with client.get('/healthz') as resp:
+                    assert (await resp.json())['in_flight'] == {}
         assert len(rt.received) == 2  # the refused request never reached the runtime
         refused = [json.loads(line) for line in lines if json.loads(line)['status'] == 429]
         assert [(u['instance'], u['entry'], u['model']) for u in refused] == [(None, entry, RUNTIME_ID)]

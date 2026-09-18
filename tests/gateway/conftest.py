@@ -2,8 +2,8 @@
 # Copyright © 2025 Entrius
 
 """Fixtures for the gateway: a fake OpenAI runtime (an asyncio aiohttp server that records exactly what reached it and
-streams), a controller state directory with a signed registry and an ``instances.json``, and the gateway itself on a
-real socket."""
+streams), a controller state directory with a signed registry, an ``instances.json`` and a ``tunnels.json``, and the
+gateway itself on a real socket."""
 
 import asyncio
 import json
@@ -55,6 +55,7 @@ class FakeRuntime:
     def __init__(self, model_id=RUNTIME_ID, usage=True, max_output_tokens: int | None = 32768):
         self.model_id, self.usage, self.max_output_tokens = model_id, usage, max_output_tokens
         self.received: list[dict] = []
+        self.models_read = 0
         self.sent: list[bytes] = []
         self.hold: asyncio.Event | None = None
         self.after_first: asyncio.Event | None = None
@@ -85,6 +86,7 @@ class FakeRuntime:
         return [b'data: ' + json.dumps(e).encode() + b'\n\n' for e in events] + [b'data: [DONE]\n\n']
 
     async def _models(self, request):
+        self.models_read += 1
         model = {
             'id': self.model_id,
             'object': 'model',
@@ -177,13 +179,19 @@ class World:
         self.key, self.pubkey = keypair(tmp_path)
         self.registry = Registry(self.root / 'registry', self.pubkey)
         self.records: dict[str, dict] = {}
+        self.tunnels: dict[str, dict] = {}
+        self.written_at: float | None = None  # None: now, on every save
 
     def bless(self, doc: dict | None = None) -> str:
         verified = make_entry(doc or manifest_doc(), now=1_757_000_000)
         self.registry.write(verified, sign_bytes(verified.entry.canonical_bytes(), self.key))
         return verified.entry_id
 
-    def place(self, instance_id: str, entry: str, port: int, healthy=True, draining=False) -> None:
+    def place(
+        self, instance_id: str, entry: str, port: int, healthy=True, draining=False, tunnel=True, record_port=None
+    ) -> None:
+        """An instance whose tunnel (``tunnel``: up) ends at ``port``. The record's own port is ``record_port``, by
+        default one nothing listens on: a request that reaches the runtime went through the tunnel."""
         record = InstanceRecord(
             id=instance_id,
             entry=entry,
@@ -191,21 +199,48 @@ class World:
             uuid=f'GPU-{instance_id}',
             container_id='c' * 64,
             host='127.0.0.1',
-            port=port,
+            port=record_port if record_port is not None else dead_port(),
+            host_port=8080,
             healthy=healthy,
             draining=draining,
         )
         self.records[instance_id] = asdict(record)
+        self.tunnels[instance_id] = {
+            'box': 'hk-test', 'host': '127.0.0.1', 'port': port, 'up': tunnel, 'since': 0.0, 'error': '' if tunnel else 'x',
+        }  # fmt: skip
         self.save()
 
     def update(self, instance_id: str, **fields) -> None:
         self.records[instance_id].update(fields)
         self.save()
 
+    def tunnel(self, instance_id: str, **fields) -> None:
+        self.tunnels[instance_id].update(fields)
+        self.save()
+
     def save(self) -> None:
         tmp = self.root / 'instances.json.tmp'
         tmp.write_text(json.dumps(self.records, indent=1))
         tmp.replace(self.root / 'instances.json')
+        self.save_tunnels()
+
+    def save_tunnels(self) -> None:
+        written_at = time.time() if self.written_at is None else self.written_at
+        self._tunnels_doc = {'schema': 1, 'written_at': written_at, 'listen_host': '127.0.0.1', 'tunnels': self.tunnels}
+        tmp = self.root / 'tunnels.json.tmp'
+        tmp.write_text(json.dumps(self._tunnels_doc, indent=1))
+        tmp.replace(self.root / 'tunnels.json')
+
+    def tunnels_doc(self) -> dict:
+        """What the last save wrote."""
+        return json.loads(json.dumps(self._tunnels_doc))
+
+
+def dead_port() -> int:
+    """A loopback port nothing listens on."""
+    with socket.socket() as s:
+        s.bind(('127.0.0.1', 0))
+        return s.getsockname()[1]
 
 
 @pytest.fixture
@@ -214,10 +249,11 @@ def world(tmp_path) -> World:
 
 
 @asynccontextmanager
-async def gateway(world: World, sink=None, **config):
+async def gateway(world: World, sink=None, allow_direct=False, **config):
     """The gateway app on a real loopback socket (lifespan on: the first table read happens before it serves)."""
     config.setdefault('refresh_s', 0.05)
-    gw = Gateway(GatewayConfig(key=KEY, **config), InstanceTable(world.root, world.registry), sink=sink)
+    table = InstanceTable(world.root, world.registry, allow_direct=allow_direct)
+    gw = Gateway(GatewayConfig(key=KEY, **config), table, sink=sink)
     sock = socket.socket()
     sock.bind(('127.0.0.1', 0))
     server = uvicorn.Server(uvicorn.Config(build_app(gw), log_level='warning', lifespan='on'))

@@ -23,6 +23,11 @@ status line back (any status). ``since``: when ``up`` last changed. An instance 
 life, across keeper restarts (the ports are read back from ``tunnels.json``); the port of an instance that is gone is
 released. Each box connects, forwards and probes on its own worker, so a box that is slow or unreachable holds up no
 other; a failed connect is retried with backoff (1 s doubling, capped at 30 s).
+
+Every pass also runs ``true`` on the box over the live master (the link check, 5 s timeout): it tests the connection,
+not a workload, so a card that is starting or stopped never touches it. Two failures in a row stop the master, write
+the box's tunnels down at once and reconnect. The pass loop itself never waits on a box, so ``written_at`` advances
+every pass however slow one box is.
 """
 
 from __future__ import annotations
@@ -52,15 +57,16 @@ from gittensor.controller.runspec import PlacementError, bridge_gateway
 from gittensor.controller.ssh import CertificateAuthority, SshRunner, SshTransportError
 from gittensor.controller.ssh.certs import CertificateError
 from gittensor.controller.ssh.runner import CONNECT_TIMEOUT_S, _text
+from gittensor.controller.tunnels_file import SCHEMA, TUNNELS_FILE, read_tunnels, write_atomic
 
-SCHEMA = 1
-TUNNELS_FILE = 'tunnels.json'
 LOCK_FILE = 'tunnels.lock'
 DEFAULT_LISTEN_HOST = '127.0.0.1'
 DEFAULT_PORT_RANGE = (21000, 21999)
 DEFAULT_INTERVAL_S = 3.0
 BACKOFF_CAP_S = 30.0
-SERVER_ALIVE_COUNT_MAX = 3  # with the runner's ServerAliveInterval=15: a silent peer is dropped after ~45 s
+SERVER_ALIVE_COUNT_MAX = 3  # with the runner's ServerAliveInterval=15: ssh itself gives up on a silent peer at ~45 s
+LINK_CHECK_TIMEOUT_S = 5.0  # one trivial command over the master, every pass: the keeper's own, faster look
+LINK_CHECK_FAILURES = 2  # in a row: the master is stopped and the box reconnected
 MASTER_WAIT_S = CONNECT_TIMEOUT_S + 5  # login + the master's control socket appearing
 CONTROL_TIMEOUT_S = 10.0  # one `ssh -O` request to a local master
 PROBE_TIMEOUT_S = 5.0
@@ -167,6 +173,35 @@ class TunnelRunner(SshRunner):
             return CommandResult(255, '', f'{self._ssh}: {e}')
         return CommandResult(proc.returncode, _text(proc.stdout), _text(proc.stderr))
 
+    def link_check(self, timeout: float = LINK_CHECK_TIMEOUT_S) -> CommandResult:
+        """``true`` on the box over the master: a round trip on the connection itself, whatever the workloads are
+        doing. No certificate is presented, and ``ProxyCommand=false`` keeps ssh from dialling the box on its own if
+        the master's socket is gone: this only ever rides the master."""
+        argv = [
+            self._ssh,
+            '-o',
+            'ControlMaster=no',
+            '-o',
+            f'ControlPath={self.socket}',
+            '-o',
+            'BatchMode=yes',
+            '-o',
+            'ProxyCommand=false',
+            '-T',
+            '-p',
+            str(self.port),
+            f'{self.user}@{self.host}',
+            '--',
+            'true',
+        ]
+        try:
+            proc = self._run(argv, capture_output=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return CommandResult(255, '', f'no answer over the connection in {timeout:.0f}s')
+        except OSError as e:
+            return CommandResult(255, '', f'{self._ssh}: {e}')
+        return CommandResult(proc.returncode, _text(proc.stdout), _text(proc.stderr))
+
     def close(self) -> None:
         """Discard the certificate. The master is the link's to stop."""
         if self._credential is not None:
@@ -224,12 +259,15 @@ class BoxLink:
         emit: Emit,
         clock: Callable[[], float],
         stop: threading.Event,
+        report: Callable[[dict[str, tuple[bool, str]]], None] | None = None,
     ):
         self.box_id, self.host, self.port = box.box_id, box.host, box.port
         self.box = box
         self.control, self.listen_host = control, listen_host
         self._make_runner, self._popen, self._probe = make_runner, popen, probe
         self._emit, self._clock, self._stop = emit, clock, stop
+        self._report = report or (lambda results: None)
+        self.link_failures, self.link_error = 0, ''
         self.runner: TunnelRunner | None = None
         self.proc: Any = None
         self.bridge_gw = ''
@@ -283,6 +321,7 @@ class BoxLink:
         runner.close()  # the login is done: the certificate is not needed again on this connection
         self.proc, self.runner = proc, runner
         self.forwards, self._forward_errors = {}, {}
+        self.link_failures = 0
         self.connects += 1
 
     def _stderr_tail(self) -> str:
@@ -307,10 +346,16 @@ class BoxLink:
         """Connect if needed, make the master's forwards match ``targets`` and probe each one. Returns ``{instance:
         (up, error)}``."""
         now = self._clock()
+        lost = ''
         if self.proc is not None and not self.alive():
-            code = self.proc.poll()
-            self.error = f'connection closed (ssh exit {code}): {self._stderr_tail() or "no output"}'
-            self._emit('down', box=self.box_id, instances=sorted(self.forwards), detail=self.error)
+            lost = f'connection closed (ssh exit {self.proc.poll()}): {self._stderr_tail() or "no output"}'
+        elif self.alive() and not self._link_ok():
+            lost = f'connection not answering: {LINK_CHECK_FAILURES} link checks failed in a row ({self.link_error})'
+            _terminate(self.proc)
+        if lost:
+            self.error = lost
+            self._emit('down', box=self.box_id, instances=sorted(self.forwards), detail=lost)
+            self._report({i: (False, lost) for i in targets})  # down now, not after the reconnect below
             self.proc, self.runner, self.forwards = None, None, {}
             self.next_attempt = now  # reconnect at once; backoff starts if that fails
         if not self.alive():
@@ -328,6 +373,19 @@ class BoxLink:
             self.failures, self.error = 0, ''
             self._emit('connect', box=self.box_id, host=self.host, port=self.port, bridge_gw=self.bridge_gw)
         return self._sync_forwards(targets)
+
+    def _link_ok(self) -> bool:
+        """One link check on the live master. False once ``LINK_CHECK_FAILURES`` have failed in a row; a single
+        failure only counts (the pass goes on and the probes say what they find)."""
+        assert self.runner is not None
+        result = self.runner.link_check()
+        if result.ok:
+            self.link_failures = 0
+            return True
+        self.link_failures += 1
+        self.link_error = (result.stderr or result.stdout).strip()[:200] or f'exit {result.exit_code}'
+        self._emit('link_check', box=self.box_id, ok=False, failures=self.link_failures, detail=self.link_error)
+        return self.link_failures < LINK_CHECK_FAILURES
 
     def _sync_forwards(self, targets: dict[str, Target]) -> dict[str, tuple[bool, str]]:
         assert self.runner is not None
@@ -545,7 +603,7 @@ class TunnelKeeper:
             return
         if link is None:
             control = self.control_root / hashlib.sha256(box_id.encode()).hexdigest()[:16]
-            link = BoxLink(box, control, self.listen_host, self._make_runner, self._popen, self._probe, self.emit, self._clock, self.stop_event)  # fmt: skip
+            link = BoxLink(box, control, self.listen_host, self._make_runner, self._popen, self._probe, self.emit, self._clock, self.stop_event, self._apply)  # fmt: skip
             with self._lock:
                 self.links[box_id] = link
         if self.stop_event.is_set():
@@ -625,18 +683,3 @@ def _print_event(event: dict) -> None:
 
 
 _PRINT_LOCK = threading.Lock()
-
-
-def write_atomic(path: Path, doc: dict) -> None:
-    """tmp beside the file, then rename: a reader sees the old file or the new one, never a partial one."""
-    tmp = path.with_name(f'.{path.name}.{os.getpid()}.tmp')
-    tmp.write_text(json.dumps(doc, indent=1))
-    os.replace(tmp, path)
-
-
-def read_tunnels(path: Path) -> dict | None:
-    try:
-        doc = json.loads(Path(path).read_text())
-    except (OSError, ValueError):
-        return None
-    return doc if isinstance(doc, dict) and doc.get('schema') == SCHEMA else None

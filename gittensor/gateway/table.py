@@ -5,7 +5,15 @@
 
 Every refresh reads ``<state-dir>/instances.json`` (written atomically by the controller's reconciler) and re-verifies
 the registry entry behind each instance; an entry that does not verify leaves its instances unroutable. An instance is
-**routable** iff ``healthy and not draining`` and its entry verified: draining flips routing off on the next refresh.
+**routable** iff ``healthy and not draining``, its entry verified, and it has an address: draining flips routing off
+on the next refresh.
+
+The address is the instance's tunnel, from ``tunnels.json`` (written by ``gitt controller tunnels`` every ~3 s): its
+``host:port`` when the tunnel is ``up`` and the file was written in the last ``TUNNELS_STALE_S``. An older file means
+no keeper is running and every tunnel in it counts as down. Completions, the ``/http`` passthrough and the
+``/v1/models`` fetch all use that one address. No tunnel, no address, unless the operator turned on ``allow_direct``
+(the previous behaviour: the record's own ``host:port``), which never applies to a ``bind: private`` instance.
+
 Slots are in-memory counters per instance under the manifest's ``front_door.concurrency``, in one process (Redis only
 when a second replica needs shared counters, ``26`` §4). The gateway only reads the state directory.
 """
@@ -15,15 +23,70 @@ from __future__ import annotations
 import copy
 import json
 import random
-from dataclasses import dataclass, field
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
 from gittensor.controller.manifest import Manifest
 from gittensor.controller.reconcile import InstanceRecord
 from gittensor.controller.registry import Registry, RegistryError
+from gittensor.controller.runspec import BIND_PRIVATE
+from gittensor.controller.tunnels_file import TUNNELS_FILE, TUNNELS_STALE_S, TunnelsFileError, load_tunnels
 
 GATEWAY_OPENAI, HTTP = 'gateway-openai', 'http'
+
+
+@dataclass(frozen=True)
+class Tunnels:
+    """One read of ``tunnels.json``. ``up``: instance id -> the tunnel's ``(host, port)``, only for tunnels that are up
+    in a fresh file."""
+
+    up: dict[str, tuple[str, int]] = field(default_factory=dict)
+    down: int = 0
+    fresh: bool = False
+    written_at: float | None = None
+    error: str = ''
+
+    def summary(self) -> dict[str, Any]:
+        return {'up': len(self.up), 'down': self.down, 'fresh': self.fresh, 'written_at': self.written_at}
+
+
+def tunnel_view(path: Path, now: float) -> Tunnels:
+    try:
+        doc = load_tunnels(path)
+    except TunnelsFileError as e:
+        return Tunnels(error=str(e))
+    written_at = doc.get('written_at')
+    written_at = (
+        float(written_at) if isinstance(written_at, (int, float)) and not isinstance(written_at, bool) else None
+    )
+    fresh = written_at is not None and now - written_at <= TUNNELS_STALE_S
+    rows = doc['tunnels']
+    up: dict[str, tuple[str, int]] = {}
+    if fresh:
+        for instance_id, row in rows.items():
+            if not isinstance(row, dict) or row.get('up') is not True:
+                continue
+            host, port = row.get('host'), row.get('port')
+            if isinstance(host, str) and host and isinstance(port, int) and not isinstance(port, bool):
+                up[str(instance_id)] = (host, port)
+    error = (
+        '' if fresh else f'{TUNNELS_FILE}: not written in the last {TUNNELS_STALE_S:g} s; every tunnel counts as down'
+    )
+    return Tunnels(up=up, down=len(rows) - len(up), fresh=fresh, written_at=written_at, error=error)
+
+
+def address_of(record: InstanceRecord, tunnels: Tunnels, allow_direct: bool) -> tuple[str, int] | None:
+    """Where the gateway reaches the instance: its tunnel, else (``allow_direct``, not private) the record's own
+    ``host:port``, else nowhere."""
+    tunnel = tunnels.up.get(record.id)
+    if tunnel is not None:
+        return tunnel
+    if allow_direct and record.bind != BIND_PRIVATE and record.host and record.port is not None:
+        return record.host, record.port
+    return None
 
 
 @dataclass(frozen=True)
@@ -31,6 +94,7 @@ class Instance:
     record: InstanceRecord
     manifest: Manifest | None  # None: its registry entry did not verify on this read
     error: str = ''
+    address: tuple[str, int] | None = None  # (host, port) the gateway reaches it at; None: not routable
 
     @property
     def id(self) -> str:
@@ -56,12 +120,15 @@ class Instance:
     @property
     def routable(self) -> bool:
         r = self.record
-        return self.manifest is not None and r.healthy and not r.draining and bool(r.host) and r.port is not None
+        return self.manifest is not None and r.healthy and not r.draining and self.address is not None
 
     @property
     def base_url(self) -> str:
-        host = self.record.host
-        return f'http://{f"[{host}]" if ":" in host else host}:{self.record.port}'
+        """The one address for completions, the passthrough and the ``/v1/models`` fetch alike."""
+        if self.address is None:
+            raise LookupError(f'instance {self.id} has no address')
+        host, port = self.address
+        return f'http://{f"[{host}]" if ":" in host else host}:{port}'
 
     def declares(self, method: str, path: str) -> bool:
         return bool(self.manifest) and any(
@@ -75,14 +142,25 @@ class Loaded:
 
     instances: dict[str, Instance] = field(default_factory=dict)
     overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
+    tunnels: Tunnels = field(default_factory=Tunnels)
     error: str = ''
 
 
 class InstanceTable:
-    def __init__(self, state_dir: str | Path, registry: Registry, rng: random.Random | None = None):
+    def __init__(
+        self,
+        state_dir: str | Path,
+        registry: Registry,
+        rng: random.Random | None = None,
+        allow_direct: bool = False,
+        wall: Callable[[], float] = time.time,
+    ):
         self.state_dir = Path(state_dir)
         self.registry = registry
         self.rng = rng or random.Random()
+        self.allow_direct = allow_direct
+        self.wall = wall
+        self.tunnels = Tunnels(error=f'{TUNNELS_FILE}: not read yet')
         self.instances: dict[str, Instance] = {}
         self.overrides: dict[str, dict[str, Any]] = {}
         self.in_flight: dict[str, int] = {}
@@ -98,11 +176,15 @@ class InstanceTable:
     def overrides_path(self) -> Path:
         return self.state_dir / 'models_override.json'
 
+    @property
+    def tunnels_path(self) -> Path:
+        return self.state_dir / TUNNELS_FILE
+
     # -- refresh ------------------------------------------------------------------------------------------------------
 
     def read(self) -> Loaded:
         """Blocking (file reads, one ``ssh-keygen -Y verify`` per entry): run it off the event loop."""
-        loaded = Loaded()
+        loaded = Loaded(tunnels=tunnel_view(self.tunnels_path, self.wall()))
         try:
             raw = json.loads(self.instances_path.read_text() or '{}') if self.instances_path.exists() else {}
             records = [InstanceRecord.from_dict(v) for v in raw.values()]
@@ -115,7 +197,10 @@ class InstanceTable:
                 verified[entry_id] = (self.registry.read(entry_id).manifest, '')
             except RegistryError as e:
                 verified[entry_id] = (None, str(e))
-        loaded.instances = {r.id: Instance(r, *verified[r.entry]) for r in records}
+        loaded.instances = {
+            r.id: Instance(r, *verified[r.entry], address=address_of(r, loaded.tunnels, self.allow_direct))
+            for r in records
+        }
         try:
             if self.overrides_path.exists():
                 overrides = json.loads(self.overrides_path.read_text() or '{}')
@@ -126,9 +211,15 @@ class InstanceTable:
 
     def apply(self, loaded: Loaded, now: float) -> None:
         """Swap a read in. A broken ``instances.json`` keeps the previous table (the controller writes atomically, so
-        that is a bug or an operator edit, not a half-written file)."""
-        self.last_error = loaded.error
+        that is a bug or an operator edit, not a half-written file), re-addressed by this read's tunnels: a tunnel
+        that went down stops routing either way."""
+        self.last_error = '; '.join(e for e in (loaded.error, loaded.tunnels.error) if e)
+        self.tunnels = loaded.tunnels
         if loaded.error.startswith('instances.json'):
+            self.instances = {
+                k: replace(i, address=address_of(i.record, self.tunnels, self.allow_direct))
+                for k, i in self.instances.items()
+            }
             return
         self.instances = loaded.instances
         self.overrides = loaded.overrides

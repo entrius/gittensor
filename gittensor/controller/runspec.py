@@ -538,9 +538,14 @@ class BoxHttp:
     """HTTP to an instance from the box itself, over the controller's SSH session: ``curl`` in the agent container to
     the host's published port through the docker bridge gateway. No inbound path to the box is needed."""
 
-    def __init__(self, runner: HostRunner):
+    def __init__(self, runner: HostRunner, gateway: str = ''):
         self.runner = runner
-        self._gateway = ''
+        self._gateway = gateway
+
+    def use_gateway(self, address: str) -> None:
+        """The bridge gateway already looked up on this visit (a private start needs it first): no second lookup."""
+        if not self._gateway:
+            self._gateway = address
 
     def gateway(self) -> str:
         if not self._gateway:

@@ -906,8 +906,8 @@ class Reconciler:
             address = ''
             if self.workload_bind == BIND_PRIVATE:
                 address = (bind_address or (lambda: bridge_gateway(runner)))()
-                if isinstance(http, BoxHttp) and not http._gateway:
-                    http._gateway = address  # the same lookup serves the probes
+                if isinstance(http, BoxHttp):
+                    http.use_gateway(address)  # the same lookup serves the probes
             client = host_port_client(http, manifest, host_port)
             spec = build_run_spec(verified.entry_id, manifest, uuid, instance_id, host_port, address)
             prestage(runner, spec, manifest, self.pull_token, self.clock, report=staged)

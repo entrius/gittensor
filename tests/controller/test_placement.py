@@ -621,6 +621,17 @@ def test_box_http_goes_through_the_bridge_gateway():
     assert box.commands('curl ')[0].endswith('http://172.17.0.1:8080/v1/models')
 
 
+def test_box_http_handed_the_bridge_gateway_does_not_look_it_up_again():
+    box = FakeDocker()
+    http = BoxHttp(box.runner)
+    http.use_gateway('172.18.0.1')
+    http.use_gateway('172.19.0.1')  # the first one handed over stands
+    http.request('GET', 8080, '/v1/models')
+    assert box.commands('curl ')[0].endswith('http://172.18.0.1:8080/v1/models')
+    assert BoxHttp(box.runner, gateway='172.20.0.1').gateway() == '172.20.0.1'
+    assert not [c for c in box.runner.calls if not c.startswith('curl ')]  # no lookup on the box
+
+
 # ---------------------------------------------------------------- reconcile -----------------------------------------
 
 

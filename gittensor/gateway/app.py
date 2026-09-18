@@ -6,7 +6,7 @@
     POST /v1/chat/completions, /v1/completions   gateway-openai entries, routed by ``model``
     GET  /v1/models                              each entry's runtime /v1/models under its manifest name + override
     ANY  /http/<name><route>                     http entries, declared routes only, passed through
-    GET  /healthz                                routable instances per entry (the only route without the key)
+    GET  /healthz                                routable instances per entry, tunnels (the only route without the key)
     GET  /metrics                                plain-text counters per entry and instance
 
 Every request but ``GET /healthz`` carries ``X-GT-Gateway-Key``: das sends it; user keys, quota and billing are das's.
@@ -17,7 +17,8 @@ body. One
 JSON usage line per request goes to stdout with the manifest expected-profile signals (``23`` §5), recorded here and
 judged by no one here.
 
-The gateway → instance link is **plain HTTP** for this cut: no TLS and no per-instance secret yet (``26`` §10).
+The gateway reaches an instance only through its tunnel (``table.py``): the keeper's SSH connection to the box, HTTP
+inside it. Every request, and the ``/v1/models`` fetch, goes to ``Instance.base_url``.
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ import aiohttp
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 
+from gittensor.controller.tunnels_file import TUNNELS_FILE
 from gittensor.gateway.limits import RequestRefused, enforce_openai_limits, parse_object
 from gittensor.gateway.table import Instance, InstanceTable
 
@@ -102,6 +104,9 @@ class Metrics:
             lines.append(f'gt_gateway_in_flight{{entry="{i.entry}",instance="{i.id}"}} {table.in_flight.get(i.id, 0)}')
         for entry, n in table.routable_counts().items():
             lines.append(f'gt_gateway_routable_instances{{entry="{entry}"}} {n}')
+        for i in sorted(table.instances.values(), key=lambda i: (i.entry, i.id)):
+            lines.append(f'gt_gateway_tunnel_up{{entry="{i.entry}",instance="{i.id}"}} {int(i.id in table.tunnels.up)}')
+        lines.append(f'gt_gateway_tunnels_fresh {int(table.tunnels.fresh)}')
         return '\n'.join(lines) + '\n'
 
 
@@ -268,9 +273,15 @@ class Gateway:
 
     async def refresh(self) -> None:
         loaded = await asyncio.to_thread(self.table.read)
+        tunnels_before = self.table.tunnels.error
         self.table.apply(loaded, self.wall())
         if loaded.error:
             log.warning('refresh: %s', loaded.error)
+        if loaded.tunnels.error != tunnels_before:  # once per change: a missing keeper is logged, not every refresh
+            if loaded.tunnels.error:
+                log.warning('refresh: %s', loaded.tunnels.error)
+            else:
+                log.info('refresh: %s read, %d tunnels up', TUNNELS_FILE, len(loaded.tunnels.up))
         await self._refresh_models()
 
     async def _refresh_loop(self) -> None:
@@ -495,6 +506,7 @@ def build_app(gateway: Gateway) -> FastAPI:
             'in_flight': {i: n for i, n in table.in_flight.items() if n > 0},
             'refreshed_at': table.loaded_at,
             'error': table.last_error,
+            'tunnels': table.tunnels.summary(),
         }
 
     @app.get('/metrics')

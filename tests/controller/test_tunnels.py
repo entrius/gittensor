@@ -79,6 +79,8 @@ class FakeSsh:
         self.blocked: dict[str, threading.Event] = {}
         self.ports_in_use: set[int] = set()
         self.silent_ports: set[int] = set()  # the forward is there but the workload behind it does not answer
+        self.cut: set[int] = set()  # id() of masters still running locally whose connection no longer answers
+        self.link_checks: list[str] = []  # host of every link check
         self.connects: list[tuple[str, str]] = []  # (host, certificate text)
         self.ops: list[tuple[str, str, str]] = []  # (host, op, forward spec)
         self.on_probe = None
@@ -110,6 +112,14 @@ class FakeSsh:
             alive = self.alive(control)
             if '-O' not in argv:
                 assert 'ControlMaster=no' in argv, 'a command must ride the master, never log in itself'
+                if argv[-1] == 'true':
+                    assert 'ProxyCommand=false' in argv and not _option(argv, 'CertificateFile')
+                    self.link_checks.append(host)
+                    if id(self.masters.get(control)) in self.cut:
+                        raise subprocess.TimeoutExpired(argv, timeout)
+                    if not alive:
+                        return subprocess.CompletedProcess(argv, 255, b'', b'Control socket connect: No such file\n')
+                    return subprocess.CompletedProcess(argv, 0, b'', b'')
                 if not alive:
                     return subprocess.CompletedProcess(argv, 255, b'', b'Permission denied (publickey).\n')
                 return subprocess.CompletedProcess(argv, 0, f'{BRIDGE}\n'.encode(), b'')
@@ -127,6 +137,10 @@ class FakeSsh:
             elif op == 'exit':
                 self.masters[control].returncode = 0
             return subprocess.CompletedProcess(argv, 0, b'', b'')
+
+    def cut_link(self, host):
+        """The connection goes silent: ssh has not noticed yet, the master still runs."""
+        self.cut |= {id(m) for m in self.masters.values() if m.host == host and m.returncode is None}
 
     def kill_master(self, host):
         for master in self.masters.values():
@@ -345,6 +359,61 @@ def test_a_dead_master_takes_its_instances_down_and_reconnects_with_a_new_certif
     assert len(certs) == 3 and len(set(certs)) == 3  # a freshly minted certificate for every connect
     assert world.ca.minted == 4  # boxA x3, boxB x1
     keeper.shutdown()
+
+
+def test_two_failed_link_checks_in_a_row_reconnect_and_write_the_box_down_at_once(world):
+    world.boxes(boxA='10.0.0.1', boxB='10.0.0.2')
+    world.instances(('i1', 'boxA', 20000), ('i2', 'boxA', 20001), ('i3', 'boxB', 20000))
+    keeper = world.keeper()
+    keeper.pass_once(wait_s=5)
+    assert all(_up(world.doc()).values()) and world.ssh.link_checks == []  # a fresh connection is not checked
+    old = next(m for m in world.ssh.masters.values() if m.host == '10.0.0.1')
+
+    world.ssh.cut_link('10.0.0.1')
+    keeper.pass_once(wait_s=5)  # one failure only counts
+    assert all(_up(world.doc()).values()) and old.returncode is None
+    assert [(e['box'], e['failures']) for e in world.kinds('link_check')] == [('boxA', 1)]
+
+    world.events.clear()
+    keeper.pass_once(wait_s=5)
+    assert old.terminated
+    assert len([h for h, _ in world.ssh.connects if h == '10.0.0.1']) == 2  # reconnected in the same pass
+    assert _up(world.doc()) == {'i1': True, 'i2': True, 'i3': True}
+    kinds = [(e['kind'], e.get('instance', e.get('box'))) for e in world.events if e['kind'] in ('down', 'connect')]
+    assert kinds == [('down', 'boxA'), ('down', 'i1'), ('down', 'i2'), ('connect', 'boxA')]  # down before reconnect
+    assert 'link checks failed in a row' in world.kinds('down')[1]['detail']
+    assert len([h for h, _ in world.ssh.connects if h == '10.0.0.2']) == 1  # boxB's connection untouched
+    keeper.shutdown()
+
+
+def test_a_workload_that_stops_answering_never_costs_its_box_the_connection(world):
+    world.boxes(boxA='10.0.0.1')
+    world.instances(('i1', 'boxA', 20000), ('i2', 'boxA', 20001))
+    keeper = world.keeper()
+    keeper.pass_once(wait_s=5)
+    master = next(iter(world.ssh.masters.values()))
+    world.ssh.silent_ports.add(keeper.ports['i1'])  # i1's runtime is starting, or stopped
+    for _ in range(4):
+        keeper.pass_once(wait_s=5)
+    assert _up(world.doc()) == {'i1': False, 'i2': True}
+    assert len(world.ssh.connects) == 1 and master.returncode is None
+    assert world.ssh.link_checks == ['10.0.0.1'] * 4 and not world.kinds('link_check')
+    assert world.ssh.ops_for('10.0.0.1', 'cancel') == []  # i2's forward untouched throughout
+    keeper.shutdown()
+
+
+def test_link_check_argv_rides_the_master_only(world, tmp_path):
+    calls = []
+
+    def run(argv, **kw):
+        calls.append((argv, kw))
+        return subprocess.CompletedProcess(argv, 0, b'', b'')
+
+    runner = TunnelRunner('10.0.0.1', 2200, world.ca, tmp_path / 'kh', 'tun-x', control=tmp_path / 'c', run=run)
+    assert runner.link_check().ok and world.ca.minted == 0  # no certificate: nothing logs in
+    argv, kw = calls[0]
+    assert argv[argv.index('--') :] == ['--', 'true'] and kw['timeout'] == tunnels.LINK_CHECK_TIMEOUT_S
+    assert {'ControlMaster=no', f'ControlPath={tmp_path / "c"}', 'ProxyCommand=false', 'BatchMode=yes'} <= set(argv)
 
 
 def test_connect_failures_back_off_to_the_cap(world):

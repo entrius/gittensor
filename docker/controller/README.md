@@ -118,9 +118,13 @@ Every pass and every change it writes `<state-dir>/tunnels.json` (tmp + rename),
 `up`: the box's connection is alive, the forward is registered and one request through the local port got an HTTP
 status line back (any status); `since`: when `up` last changed; `error`: why it is not up. Every instance in
 `instances.json` gets a tunnel, draining ones included (requests in flight finish through it) until its record is
-gone. Each box connects and probes on its own worker, so one slow or unreachable box holds up no other; a failed
-connect is retried after 1 s, doubling to at most 30 s. Events (`{"event": "tunnel", "kind": ...}`): `start`,
-`connect`, `connect_failed`, `forward`, `cancel`, `up`, `down`, `close`, `stop`. SIGTERM or SIGINT closes every
+gone. Each box connects and probes on its own worker, so one slow or unreachable box holds up no other, and the pass
+never waits on a box: `written_at` advances every pass (the gateway counts a file older than 10 s as no keeper). A
+failed connect is retried after 1 s, doubling to at most 30 s. Every pass also runs `true` on each box over its live
+connection (5 s timeout); two failures in a row stop that connection, write its tunnels down at once and reconnect.
+That check is on the connection, not a workload: a card starting or stopped never costs the box its connection.
+Events (`{"event": "tunnel", "kind": ...}`): `start`, `connect`, `connect_failed`, `link_check`, `forward`, `cancel`,
+`up`, `down`, `close`, `stop`. SIGTERM or SIGINT closes every
 connection, writes every tunnel down and exits 0; a pass in flight finishes first, hence the pm2 `--kill-timeout`.
 One keeper per state directory (`tunnels.lock`). A keeper that was killed outright leaves its connections behind;
 the next one closes each before connecting the box again.

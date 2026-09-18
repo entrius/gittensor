@@ -251,6 +251,7 @@ def test_a_lease_ended_by_missed_heartbeats_is_re_proved_only_after_the_reconcil
         report = controller.round_once()  # the fleet round skips the card too
         assert report.boxes[0].verdict is None and not proofs()
         assert report.boxes[0].skipped == {UUID_5090: 'CHECKING (instance pending)'} and card() == CHECKING
+        assert 'every card busy' in report.boxes[0].busy and 'last proof' in report.boxes[0].busy  # said in the log
         controller.reconcile_once()  # the reconciler undeploys it
         assert controller.reconciler.join(5)
         assert record.id not in controller.instances.instances and record.container_id not in docker.containers

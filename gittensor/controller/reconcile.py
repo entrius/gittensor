@@ -25,9 +25,13 @@ One pass, one SSH visit per box:
   ``start_failed`` standing event); ``FAILED_STARTS_BENCH_AFTER`` in a row on one box benches it.
 * **Rotation** (``23`` §8, WS-E): a lease past its cap gets a replacement started on the best free card, and is drained
   on a later pass once that replacement is LEASED and healthy: replacement first, never below the replica count, at
-  most ``ROTATION_MAX_FRACTION`` of leased cards cycling at once, oldest check first; no free card, no rotation. Cycle
-  time is unpaid by construction: neither card is LEASED-and-paid while it moves. A normal drain of a LEASED card
-  records a ``clean_lease`` standing event with its leased seconds, a late one ``drain_failed``.
+  most ``ROTATION_MAX_FRACTION`` of leased cards cycling at once, oldest check first. With no free card that fits (a
+  fleet leased to capacity, Kimbo 9/18) the lease is cycled **in place**: drained, its card re-proved from CHECKING,
+  and the replica started again by **Too few**; the same budget counts every card already on its way round (STARTING,
+  DRAINING, CHECKING), so capacity dips by that fraction at most. Without it a full fleet is never drained: no proof,
+  no ``clean_lease``, probation for ever. Cycle time is unpaid by construction: neither card is LEASED-and-paid while
+  it moves. A normal drain of a LEASED card records a ``clean_lease`` standing event with its leased seconds, a late
+  one ``drain_failed``.
 
 Every step is saved before the next begins and every docker operation is idempotent, so a pass killed anywhere is
 finished by the next one. Not here: the gateway (it reads ``instances.json``), the in-lease heartbeat and health watch
@@ -645,10 +649,12 @@ class Reconciler:
                 return box, uuid, host_port
             return None
 
+        fresh_starts = 0
         for entry_id, verified in sorted(entries.items()):
             need = report.desired[entry_id] - len(by_entry.get(entry_id, []))
             while need > 0 and (pick := take(verified)) is not None:
                 add(pick[0].box_id, ('start', (entry_id, pick[1], '', pick[2])))
+                fresh_starts += 1
                 need -= 1
             if need > 0:
                 why = ''.join(f'; {box_id}: {reason}' for box_id, reason in sorted(port_skips.items()))
@@ -660,7 +666,9 @@ class Reconciler:
 
         # Rotation (23 §8): a lease past its cap gets a replacement started on the best free card; it is drained on a
         # later pass once the replacement is LEASED. Oldest full check first, at most ROTATION_MAX_FRACTION of leased
-        # cards at once (never fewer than one), and no free card means no rotation.
+        # cards at once (never fewer than one). No free card: the lease is cycled in place (drained now; its card is
+        # re-proved from CHECKING and Too few starts the replica again), within the same budget less every card already
+        # on its way round, so a fleet leased to capacity is still proved and still earns its clean lease-hours.
         leased = [r for entry_records in by_entry.values() for r in entry_records if self._leased(r)]
         for record in leased:
             if record.lease_cap_s is None:  # adopted, or started by a controller from before rotation
@@ -668,12 +676,25 @@ class Reconciler:
                 self._put_record(record)
         budget = max(1, int(cfg.ROTATION_MAX_FRACTION * (len(leased) + len(rotating)))) - len(rotating)
         expired = [r for r in leased if r.leased_at is not None and now - r.leased_at >= (r.lease_cap_s or 0.0)]
+        cycling = fresh_starts + sum(
+            1
+            for box in boxes
+            if box.status == IDLE
+            for uuid in box.pinned_uuids
+            if box.card(uuid).state in (STARTING, DRAINING, CHECKING)
+        )
         for record in sorted(expired, key=release_order):
             if budget <= 0:
                 break
             verified = entries.get(record.entry)
-            pick = take(verified) if verified is not None else None
+            if verified is None:
+                continue
+            pick = take(verified)
             if pick is None:
+                if budget - cycling > 0:
+                    add(record.box, ('drain', record))
+                    report.rotations.append(record.id)
+                    budget -= 1
                 continue
             add(pick[0].box_id, ('start', (record.entry, pick[1], record.id, pick[2])))
             record.rotating = pick[0].box_id

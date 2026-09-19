@@ -18,6 +18,7 @@ full check and box state (``controller.checks``), the GPU-proof slot (``controll
     gitt controller reconcile [--loop]                         desired replicas vs running instances, over SSH
     gitt controller instances                                  what runs where (what the gateway will read)
     gitt controller run                                        the controller as one process: round + reconcile + watch
+    gitt controller tunnels [--status]                         one SSH connection per box carrying its instances' traffic
     gitt controller status                                     boxes, cards, instances, last round / reconcile (read-only)
     gitt controller scorecard                                  the last signed scorecard, checked as the validator does
 
@@ -44,6 +45,7 @@ import importlib
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -65,6 +67,7 @@ from gittensor.cli.help import StyledGroup
 from gittensor.cli.helpers import NETWORK_CHOICE, console, err_console
 from gittensor.cli.json_output import emit_error_json, emit_json
 from gittensor.cli.miner_commands.helpers import NETUID_DEFAULT, _resolve_endpoint
+from gittensor.controller import tunnels
 from gittensor.controller.checks import checks as ck
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.full_check import (
@@ -135,7 +138,7 @@ from gittensor.controller.registry import (
     make_entry,
     sign_bytes,
 )
-from gittensor.controller.runspec import PullToken
+from gittensor.controller.runspec import BIND_PRIVATE, WORKLOAD_BINDS, PullToken
 from gittensor.controller.ssh import (
     CertificateAuthority,
     SshRunner,
@@ -1136,6 +1139,7 @@ def controller_group():
         reconcile  Place and drain instances until running matches desired (--loop: every 30 s)
         instances  List placement instances: entry, box, card, container, host:port, healthy
         run        The controller as one process: proof round, reconcile, heartbeat + health watch
+        tunnels    Keep one SSH connection per box forwarding its instances to local ports (--status)
         status     Boxes, cards, instances, last round / reconcile / watch (read-only, safe beside run)
     """
 
@@ -1170,14 +1174,15 @@ def _parse_port_range(value: str) -> list[int]:
     'port_maps',
     multiple=True,
     metavar='PORT=PUBLIC',
-    help='A host that remaps published ports (a Lium pod): instances on host port PORT are reached on PUBLIC.',
+    help='A host that remaps published ports (a Lium pod): instances on host port PORT are shown as PUBLIC '
+    "(used only for a public-bind instance under the gateway's --allow-direct).",
 )
 @click.option(
     '--workload-ports',
     default=None,
     metavar='LOW-HIGH',
     help=f'Host ports instances are published on (default: {WORKLOAD_PORT_RANGE[0]}-{WORKLOAD_PORT_RANGE[1]}, '
-    'what `gitt up` opens). A dev box whose provider exposes other ports: e.g. 8080-8080 with --port-map.',
+    'what `gitt up` keeps free). A dev box whose provider has other ports free: e.g. 8080-8080.',
 )
 @_state_options
 def admit_command(hotkey, host, port, force_rekey, port_maps, workload_ports, state_dir, json_mode):
@@ -1923,6 +1928,17 @@ def _qualified_text(q: dict | None) -> str:
     return ' · '.join(parts)
 
 
+def _workload_bind_option(fn):
+    return click.option(
+        '--workload-bind',
+        type=click.Choice(WORKLOAD_BINDS),
+        default=BIND_PRIVATE,
+        show_default=True,
+        help="Where a new workload's port is published: private, the box's docker bridge address; public, the "
+        'previous publish form. Applies to new starts; running instances keep theirs.',
+    )(fn)
+
+
 @controller_group.command('reconcile')
 @click.option('--loop', is_flag=True, default=False, help='Repeat every --interval seconds.')
 @click.option('--interval', type=float, default=cfg.RECONCILE_INTERVAL_S, show_default=True)
@@ -1932,12 +1948,22 @@ def _qualified_text(q: dict | None) -> str:
     default=None,
     help='Read-only registry token, one line "username:token"; installed for each pull and removed after.',
 )
+@_workload_bind_option
 @click.option('--max-passes', type=int, default=0, hidden=True)
 @_registry_options
 @_ca_key_option
 @_state_options
 def reconcile_command(
-    loop, interval, pull_token_file, max_passes, release_pubkey, allow_dev_keys, ca_key, state_dir, json_mode
+    loop,
+    interval,
+    pull_token_file,
+    workload_bind,
+    max_passes,
+    release_pubkey,
+    allow_dev_keys,
+    ca_key,
+    state_dir,
+    json_mode,
 ):
     """Make running instances match every enabled deployment × replicas: start on IDLE cards that fit, drain what is
     over, disabled or unverifiable, and re-adopt our labelled containers after a restart.
@@ -1962,6 +1988,7 @@ def reconcile_command(
                 registry=registry,
                 make_runner=lambda box: _make_runner(state, box, ca_key, 'reconcile'),
                 pull_token=token,
+                workload_bind=workload_bind,
                 sleep=_sleep,
                 visit_all=n == 1,
             )
@@ -2051,6 +2078,96 @@ def instances_command(state_dir, json_mode):
             'yes' if r['draining'] else 'no',
         )
     console.print(table)
+
+
+# ---------------------------------------------------------------- tunnels: the traffic path, its own process --------
+
+
+@controller_group.command('tunnels')
+@click.option('--status', is_flag=True, default=False, help='Print tunnels.json and exit (read-only).')
+@click.option(
+    '--listen-host',
+    default=tunnels.DEFAULT_LISTEN_HOST,
+    show_default=True,
+    help='Address the local ports listen on: the docker network gateway the gateway container reaches this host at.',
+)
+@click.option(
+    '--port-range',
+    default=f'{tunnels.DEFAULT_PORT_RANGE[0]}-{tunnels.DEFAULT_PORT_RANGE[1]}',
+    show_default=True,
+    help='Local ports handed to instances; an instance keeps its port for its whole life.',
+)
+@click.option('--interval', type=float, default=tunnels.DEFAULT_INTERVAL_S, show_default=True, help='Seconds between passes.')  # fmt: skip
+@click.option('--max-passes', type=int, default=0, hidden=True)
+@_ca_key_option
+@_state_options
+def tunnels_command(status, listen_host, port_range, interval, max_passes, ca_key, state_dir, json_mode):
+    """Keep one SSH connection per box that carries an instance, with a local forward per instance to where the
+    workload answers on the box, and write <state-dir>/tunnels.json (what the gateway routes by) every pass.
+
+    \b
+    Its own long-running process (pm2: gt-tunnels), beside `run`: restarting the controller leaves the connections
+    that carry traffic up. Forwards are added and cancelled on the live connection, never by reconnecting. One JSON
+    line per event on stdout. SIGTERM closes every connection, writes every tunnel down and exits 0.
+    """
+    state = StateDir(Path(state_dir).expanduser())
+    if status:
+        _print_tunnels(state, json_mode)
+        return
+    try:
+        ports = tunnels.parse_port_range(port_range)
+    except ValueError as e:
+        _fail(str(e), json_mode, EXIT_NO_VERDICT)
+    state.ensure()
+    ca_key = Path(ca_key).expanduser() if ca_key else state.ca_key
+    _require_ca_key(ca_key, json_mode)
+    try:
+        with tunnels.keeper_lock(state.root):
+            keeper = _make_keeper(state, ca_key, listen_host, ports)
+            stop = keeper.stop_event
+            previous = {sig: signal.signal(sig, lambda *_: stop.set()) for sig in (signal.SIGTERM, signal.SIGINT)}
+            try:
+                keeper.serve(interval_s=interval, max_passes=max_passes)
+            finally:
+                for sig, handler in previous.items():
+                    signal.signal(sig, handler)
+    except tunnels.KeeperRunning as e:
+        _fail(str(e), json_mode, EXIT_NO_VERDICT)
+
+
+def _make_keeper(state: StateDir, ca_key: Path, listen_host: str, ports: tuple[int, int]) -> tunnels.TunnelKeeper:
+    make_runner = tunnels.ssh_runner_factory(ca_key, state.known_hosts)
+    return tunnels.TunnelKeeper(state.root, make_runner, listen_host=listen_host, port_range=ports)
+
+
+def _print_tunnels(state: StateDir, json_mode: bool) -> None:
+    path = state.root / tunnels.TUNNELS_FILE
+    doc = tunnels.read_tunnels(path)
+    if doc is None:
+        _fail(f'{path}: no tunnels written yet (is gt-tunnels running?)', json_mode, EXIT_NO_VERDICT)
+    if json_mode:
+        emit_json({'success': True, **doc})
+        return
+    now = time.time()
+    rows = doc.get('tunnels', {})
+    table = Table(
+        title=f'{escape(str(path))} · written {_age(doc.get("written_at"), now)} ago · listen {escape(str(doc.get("listen_host", "")))}',
+        show_header=True,
+    )
+    for column in ('Instance', 'Box', 'Local', 'Up', 'Since', 'Error'):
+        table.add_column(column, no_wrap=column != 'Error')
+    for instance, row in rows.items():
+        table.add_row(
+            escape(instance),
+            escape(str(row.get('box', ''))[:16]),
+            escape(f'{row.get("host")}:{row.get("port")}' if row.get('port') else '—'),
+            '[green]up[/green]' if row.get('up') else '[red]down[/red]',
+            _age(row.get('since'), now),
+            escape(str(row.get('error', ''))),
+        )
+    console.print(table)
+    if not rows:
+        err_console.print('[dim]no instances[/dim]')
 
 
 # ---------------------------------------------------------------- run: the controller as one process ----------------
@@ -2151,6 +2268,14 @@ class _DaemonPrinter:
     def watch(self, report: WatchReport) -> None:
         self._actions('watch', report.actions)
         self._problems('watch', [], report.unreachable)
+        for row in report.usage:  # the lease accounting check: every number, for the operator's audit
+            mark = '[red]✗[/red]' if row['kind'] in ('strike', 'detection') else '[dim]·[/dim]'
+            line = f'{mark} usage_check {row["kind"]} {escape(row["box"][:16])} {escape(row["instance"])}'
+            if 'surplus' in row:
+                line += f' surplus {row["surplus"]:.0f} / threshold {row["threshold"]:.0f}'
+            if row.get('detail'):
+                line += f' {escape(str(row["detail"]))}'
+            self._emit('usage_check', row, line)
 
     def discover(self, report: DiscoverReport) -> None:
         for a in report.actions:
@@ -2200,6 +2325,7 @@ class _DaemonPrinter:
     default=None,
     help='Read-only registry token, one line "username:token"; installed for each pull and removed after.',
 )
+@_workload_bind_option
 @click.option(
     '--scorecard-interval',
     type=float,
@@ -2230,7 +2356,8 @@ class _DaemonPrinter:
     '--gateway-url',
     default='',
     help='The gateway (e.g. http://127.0.0.1:8791): a planned drain then waits until its /healthz shows no request '
-    'in flight on the instance before the container is stopped. Unset: a short fixed grace instead.',
+    'in flight on the instance before the container is stopped, and the lease accounting check reads its totals. '
+    'Unset: a short fixed grace instead, and no accounting check.',
 )
 @click.option(
     '--discover',
@@ -2256,6 +2383,7 @@ def run_command(
     reconcile_interval,
     heartbeat_interval,
     pull_token_file,
+    workload_bind,
     scorecard_interval,
     price_source,
     metagraphed_url,
@@ -2325,6 +2453,7 @@ def run_command(
                 build=_run_build,
                 build_cmd=build_cmd,
                 pull_token=token,
+                workload_bind=workload_bind,
                 gateway_state=gateway_healthz(gateway_url) if gateway_url else None,
                 intervals=Intervals(
                     round_s=round_interval,

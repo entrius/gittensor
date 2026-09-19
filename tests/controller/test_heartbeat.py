@@ -8,6 +8,8 @@ cheat; a heartbeat with no answer benches nothing but makes the instance unrouta
 the lease; health failures below the threshold do nothing and at it replace the replica with a standing event, and
 the reconciler starts the replacement; the state store keeps an operator's admit written beside the controller."""
 
+import time
+
 import pytest
 
 from gittensor.controller.checks.runner import regex
@@ -34,6 +36,7 @@ from gittensor.controller.heartbeat import (
 from gittensor.controller.locks import BoxLocks
 from gittensor.controller.reconcile import InstanceStore
 from gittensor.controller.ssh import SshTransportError
+from gittensor.controller.tunnels_file import TUNNELS_FILE, write_atomic
 from gittensor.gateway.table import InstanceTable
 from tests.controller.conftest import NVML_MD5, UUID_5090, UUID_5090_B
 from tests.controller.test_placement import Clock, FakeDocker, idle_box, make_world, reconciler, seed
@@ -222,7 +225,11 @@ def test_one_missed_heartbeat_makes_the_instance_unroutable_and_three_end_the_le
     span = (record.pay_from, record.pay_through)
 
     def routable():
-        table = InstanceTable(rec.instances.path.parent, rec.instances.__class__ and watch.registry)
+        root = rec.instances.path.parent
+        tunnel = {'box': 'hk1', 'host': '127.0.0.1', 'port': 21000, 'up': True, 'since': 0.0, 'error': ''}
+        doc = {'schema': 1, 'written_at': time.time(), 'listen_host': '127.0.0.1', 'tunnels': {record.id: tunnel}}
+        write_atomic(root / TUNNELS_FILE, doc)  # the tunnel is up throughout: only the heartbeat decides here
+        table = InstanceTable(root, rec.instances.__class__ and watch.registry)
         table.apply(table.read(), clock.t)
         return table.instances[record.id].routable
 

@@ -165,6 +165,42 @@ DRAIN_WAIT_MAX_S = 330.0
 DRAIN_WAIT_POLL_S = 2.0
 DRAIN_GRACE_S = 6.0
 
+# The lease accounting check (usage_check.py): a leased card serves the gateway's traffic only. On every heartbeat
+# visit the runtime's own counters are read beside the gateway's per-instance totals; the completion tokens the runtime
+# made beyond everything the gateway sent it (plus an upper bound for each request whose count the gateway did not
+# learn, and for each request in flight) is the surplus. Over max(MIN_TOKENS, MIN_FRACTION x the runtime's tokens) is
+# a strike; EXTERNAL_USE_STRIKES in a row are a detection: the instance is drained to IDLE through the planned drain,
+# an `external_use` SOFT standing event, and the box takes no new lease for EXTERNAL_USE_COOLDOWN_S. The
+# EXTERNAL_USE_BENCH_AFTER-th detection inside EXTERNAL_USE_WINDOW_S is a bench that enters the ladder no lower than
+# rung EXTERNAL_USE_BENCH_RUNG + 1 (16 h, then 64 h). Kimbo 9/18.
+EXTERNAL_USE_MIN_TOKENS = 2_000
+EXTERNAL_USE_MIN_FRACTION = 0.05
+EXTERNAL_USE_STRIKES = 2
+EXTERNAL_USE_COOLDOWN_S = 3_600.0
+EXTERNAL_USE_BENCH_AFTER = 3
+EXTERNAL_USE_WINDOW_S = 7 * 86_400.0
+EXTERNAL_USE_BENCH_RUNG = 2  # bench_count is at least this before the bench climbs one rung: 16 h
+EXTERNAL_USE_REASON = 'suspected external (non-gateway) usage'
+# The most completion tokens one request may produce when it names no max_tokens: the runtime's own output limit
+# (sparkinfer's SPARKINFER_MAX_OUTPUT_TOKENS default). A manifest that sets a higher limit raises it for its instances.
+RUNTIME_OUTPUT_CEILING_TOKENS = 16_384
+# Which of a runtime's /metrics series the check reads, keyed by the manifest's `runtime`: a metric name and the labels
+# a series must carry (series that match are summed). A runtime not listed here is not checked.
+RUNTIME_COUNTERS: dict[str, dict[str, tuple[str, dict[str, str]]]] = {
+    'sparkinfer': {
+        'completion_tokens': ('sparkinfer_tokens_total', {'kind': 'completion'}),
+        'prompt_tokens': ('sparkinfer_tokens_total', {'kind': 'prompt'}),
+        'requests': ('sparkinfer_requests_total', {}),
+        'active': ('sparkinfer_active_requests', {}),
+    },
+}
+# Recorded only, never acted on (Kimbo 9/18): the gateway's rolling median decode rate over requests that ran alone on
+# their card, below this fraction of the manifest's profile.decode_tps_single once there are this many of them, is
+# written to the operator log as evidence.
+THROUGHPUT_EVIDENCE_FRACTION = 0.6
+THROUGHPUT_EVIDENCE_MIN_N = 20
+DECODE_TPS_WINDOW = 100  # the gateway's rolling window per instance
+
 # Pay (24 §3 WS-F, 23 §7). The ledger settles every card every SETTLEMENT_TICK_S (one block) from the recorded state;
 # the scorecard pays the trailing SETTLEMENT_WINDOW_S (phase 0's settlement window was one hour too).
 SETTLEMENT_TICK_S = 12.0

@@ -591,9 +591,26 @@ def _json_checks(result):
 
 
 class TestPublish:
-    def test_help_names_what_to_open(self, runner):
+    def test_help_names_the_one_port_to_open_and_the_range_to_keep_free(self, runner):
         result = runner.invoke(cli, ['up', '--help'])
-        assert 'the sshd port (--ssh-port, default 2200)' in result.output and '20000-20015' in result.output
+        to_open, _, rest = result.output.partition('Keep free on this box, nothing to open:')
+        to_open = to_open.partition('Open on your firewall / router')[2]
+        assert 'one port and nothing else' in to_open and 'the sshd port (--ssh-port, default 2200)' in to_open
+        assert '20000' not in to_open  # the workload range is not among the ports to open
+        assert 'the workload ports 20000-20015' in rest.partition('Examples:')[0]
+        assert 'carrier-grade NAT' in result.output  # the sshd port still has to be reachable
+
+    def test_the_started_line_names_the_one_port_to_open(self, runner, docker_calls, probe):
+        result = runner.invoke(cli, UP)
+        assert result.exit_code == 0, result.output
+        started = ' '.join(result.output[result.output.index('Started gt-agent-runner') :].split())
+        assert 'sshd :2200 is the one port to open' in started
+        assert 'workload ports 20000-20015 stay free on this box, nothing to open' in started
+
+    def test_the_workload_ports_row_asks_only_that_the_range_is_free(self, probe):
+        report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
+        row = next(r for r in report.results if r.name == 'Workload ports')
+        assert row.status == 'pass' and row.detail == '20000-20015 free (kept free on this box, nothing to open)'
 
     def test_happy_path_publishes_the_endpoint_then_starts(self, runner, docker_calls, probe):
         result = runner.invoke(cli, [*UP, '--json'])

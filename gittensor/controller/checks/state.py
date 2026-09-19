@@ -99,11 +99,11 @@ class BoxState:
     host_key: str = ''
     cards: Dict[str, CardState] = field(default_factory=dict)  # pinned uuid -> card state
     failed_starts: int = 0  # consecutive failed lease starts on this box; FAILED_STARTS_BENCH_AFTER benches it
-    # Host port -> the port the outside world reaches it on, for hosts that remap ports (a Lium pod). Empty on a real
-    # miner box, where the host port is reached as-is.
+    # Host port -> the port a remapping host (a Lium pod) shows it as, applied to an instance record's ``port``. Only a
+    # public-bind instance under the gateway's --allow-direct is addressed by it; empty on a real miner box.
     port_map: Dict[str, int] = field(default_factory=dict)
-    # [low, high] host ports instances are given, inclusive. Empty: the convention every `gitt up` box opens
-    # (``WORKLOAD_PORT_RANGE``); a dev box whose provider exposes other ports sets it at admit.
+    # [low, high] host ports instances are given, inclusive. Empty: the range every `gitt up` box keeps free
+    # (``WORKLOAD_PORT_RANGE``); a dev box whose provider has other ports free sets it at admit.
     workload_ports: List[int] = field(default_factory=list)
     # Who put the box here: 'chain' (discovery read its endpoint off the metagraph and removes it when the hotkey
     # deregisters) or 'operator' (`gitt controller admit`; discovery leaves it alone). '' is a file from before this.
@@ -198,9 +198,11 @@ def _bench(
     now: float,
     failed: Sequence[str],
     ladder: Sequence[int] = cfg.BENCH_BACKOFF_LADDER_S,
+    floor: int = 0,
 ) -> BoxState:
-    """Climb the ladder from the rung clean time has left, clear the pin and the cards, wait it out."""
-    new.bench_count = ladder_rung(new, now) + 1
+    """Climb the ladder from the rung clean time has left, clear the pin and the cards, wait it out. With ``floor``
+    the rung is at least that before it climbs, whatever it was."""
+    new.bench_count = max(ladder_rung(new, now), floor) + 1
     new.status = BENCHED
     new.benched_at = now
     new.bench_until = now + backoff_seconds(new.bench_count, ladder)
@@ -518,6 +520,43 @@ def apply_instance_unreachable(state: BoxState, uuid: str, now: float, **detail)
     the instance when the box answers again, then the one-box probe re-proves the card), nothing withheld, no bench.
     Pure."""
     return _end_lease(state, INSTANCE_UNREACHABLE, uuid, now, **detail)
+
+
+EXTERNAL_USE = 'external_use'
+
+
+def external_uses(state: BoxState, now: float, window_s: float = cfg.EXTERNAL_USE_WINDOW_S) -> List[dict]:
+    """The box's ``external_use`` events inside the window ending at ``now``."""
+    return [
+        e
+        for e in state.standing_events
+        if e.get('kind') == EXTERNAL_USE and now - window_s < float(e.get('at') or 0.0) <= now
+    ]
+
+
+def apply_external_use(
+    state: BoxState,
+    uuid: str,
+    now: float,
+    bench_after: int = cfg.EXTERNAL_USE_BENCH_AFTER,
+    window_s: float = cfg.EXTERNAL_USE_WINDOW_S,
+    floor: int = cfg.EXTERNAL_USE_BENCH_RUNG,
+    **detail,
+) -> BoxState:
+    """A detection by the lease accounting check (Kimbo 9/18): one ``external_use`` SOFT standing event with the
+    reason and the numbers. The card stays LEASED here: the caller drains it through the planned drain, and it comes
+    back IDLE after the usual re-proof. The ``bench_after``-th inside ``window_s`` is a bench with the failed reason
+    ``external_use`` that enters the ladder no lower than ``floor`` + 1. Nothing withheld either way. Pure."""
+    new = add_event(state, EXTERNAL_USE, now, uuid=uuid, reason=cfg.EXTERNAL_USE_REASON, **detail)
+    if new.status != IDLE or len(external_uses(new, now, window_s)) < bench_after:
+        return new
+    return _bench(new, now, [EXTERNAL_USE], floor=floor)
+
+
+def lease_cooldown_until(state: BoxState, cooldown_s: float = cfg.EXTERNAL_USE_COOLDOWN_S) -> Optional[float]:
+    """Until when the box takes no new lease after its last ``external_use`` event; None when it never had one."""
+    ats = [float(e.get('at') or 0.0) for e in state.standing_events if e.get('kind') == EXTERNAL_USE]
+    return max(ats) + cooldown_s if ats else None
 
 
 def provable_uuids(state: BoxState, reported: Sequence[str]) -> List[str]:

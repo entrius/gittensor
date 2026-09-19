@@ -46,3 +46,20 @@ def test_limits_leave_unusual_shapes_to_the_runtime():
 def test_a_bad_token_limit_is_refused(bad):
     with pytest.raises(RequestRefused, match='max_tokens must be a positive integer'):
         enforce_openai_limits({'max_tokens': bad}, '/v1/completions')
+
+
+@pytest.mark.parametrize('path', ['/v1/chat/completions', '/v1/completions'])
+@pytest.mark.parametrize('key', ['n', 'best_of'])
+@pytest.mark.parametrize('bad', [2, 5, 0, True, '2', 1.5])
+def test_one_request_is_one_completion(path, key, bad):
+    with pytest.raises(RequestRefused, match=f'{key} must be 1') as refused:
+        enforce_openai_limits({'model': 'm', key: bad}, path)
+    assert refused.value.status == 400
+    assert refused.value.body() == {'error': {'type': 'invalid_request_error', 'message': f'{key} must be 1'}}
+
+
+@pytest.mark.parametrize('path', ['/v1/chat/completions', '/v1/completions'])
+def test_n_and_best_of_absent_or_one_go_on_untouched(path):
+    for body in ({'model': 'm'}, {'model': 'm', 'n': 1}, {'model': 'm', 'best_of': 1}, {'model': 'm', 'n': 1, 'best_of': 1}):  # fmt: skip
+        sent = dict(body)
+        assert enforce_openai_limits(body, path) is None and body == sent

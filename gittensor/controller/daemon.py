@@ -66,7 +66,7 @@ from gittensor.controller.pay.scorecard import build_scorecard, write_scorecard
 from gittensor.controller.publish import Publisher, build_fleet
 from gittensor.controller.reconcile import InstanceStore, Reconciler, ReconcileReport
 from gittensor.controller.registry import DeploymentStore, Registry
-from gittensor.controller.runspec import BoxHttp, HttpClient, PullToken
+from gittensor.controller.runspec import BIND_PRIVATE, BoxHttp, HttpClient, PullToken
 from gittensor.controller.ssh import write_host_key
 
 STATUS_FILE = 'controller.json'
@@ -139,6 +139,7 @@ class Controller:
         build: Callable[[str], subprocess.CompletedProcess] | None = None,
         build_cmd: str | None = None,
         pull_token: PullToken | None = None,
+        workload_bind: str = BIND_PRIVATE,
         gateway_state: Callable[[], dict | None] | None = None,
         intervals: Intervals | None = None,
         reporter: Reporter | None = None,
@@ -198,6 +199,7 @@ class Controller:
             make_runner=lambda box: make_runner(box, 'reconcile'),
             http_for=http_for,
             pull_token=pull_token,
+            workload_bind=workload_bind,
             gateway_state=gateway_state,
             sleep=sleep,
             box_locks=self.box_locks,
@@ -214,6 +216,7 @@ class Controller:
             self.intervals.heartbeat_s,
             lock=self.write_lock,
             box_locks=self.box_locks,
+            gateway_state=gateway_state,
         )
         self.discovery = Discovery(
             self.boxes, self.instances, state.known_hosts, scan_host_key or _no_scan, lock=self.write_lock
@@ -444,7 +447,7 @@ class Controller:
     def watch_once(self) -> WatchReport:
         report = self.watch.run_pass()
         self.settle_once()
-        if report.visited:
+        if report.visited or report.usage:
             self._set_status(
                 'watch',
                 {

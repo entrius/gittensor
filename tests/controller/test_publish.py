@@ -287,3 +287,16 @@ def test_gitt_controller_publish_writes_the_document_once(tmp_path):
     assert json.loads(fleet_path(root).read_text()) == payload['fleet']
     assert 'wrote' in invoke('publish', '--state-dir', root, '--allow-dev-keys').output
     assert invoke('publish', '--state-dir', tmp_path / 'nowhere', '--allow-dev-keys').exit_code != 0
+
+
+def test_the_bind_of_an_instance_does_not_reach_the_document(tmp_path):
+    status = {'round': {}, 'reconcile': {}}
+    docs = []
+    for bind in ('public', 'private'):
+        boxes, instances = fleet()
+        for record in instances.values():
+            record.bind = bind
+        docs.append(build_fleet(tmp_path, boxes, instances, status, True, NOW, lambda entry: IMAGE, 'finney', 74))
+    assert docs[0] == docs[1]
+    text = json.dumps(docs[1])
+    assert 'bind' not in text and 'private' not in text and '172.17' not in text

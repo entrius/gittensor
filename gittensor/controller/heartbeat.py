@@ -41,7 +41,15 @@ span three intervals, not three watch ticks.
 **Health while leased.** Per instance, every ``manifest.health.interval_s``, the manifest health probe.
 ``failure_threshold`` failures in a row replace the replica: undeploy with the manifest's drain, card to CHECKING, a
 ``health_failed`` standing event, and the reconciler starts a replacement on its next pass. Not a bench: a wedged
-workload is not a caught cheat. ``manifest.profile`` is not judged here (out of scope for WS-D).
+workload is not a caught cheat.
+
+**The lease accounting check** (``usage_check.py``), on every visit that ran the heartbeat and passed: per instance
+whose manifest ``runtime`` has a counters table (``RUNTIME_COUNTERS``), the runtime's own ``/metrics`` (one ``GET``
+through the box HTTP client) between two reads of the gateway's ``/healthz``. Every sample is one ``usage_check`` row
+in the operator log. A detection drains the instance to IDLE through the reconciler's planned drain (not a bench; the
+lease and its pay end at the detection, nothing withheld), writes one ``external_use`` SOFT standing event, and keeps
+the box out of placement for ``EXTERNAL_USE_COOLDOWN_S``; the third inside a week benches the box
+(``apply_external_use``). The gateway's decode rate against ``profile.decode_tps_single`` is logged as evidence only.
 
 The watch records each answer in ``instances.json`` (``last_heartbeat_at``, ``heartbeat_ok``, ``heartbeat``: the three
 answers and the four pay conditions of ``23`` §7) and takes no box lock (see ``locks.py``).
@@ -74,6 +82,7 @@ from gittensor.controller.checks.state import (
     CardTransitionError,
     StateStore,
     add_event,
+    apply_external_use,
     apply_heartbeat_failure,
     apply_instance_stopped,
     apply_instance_unreachable,
@@ -96,6 +105,16 @@ from gittensor.controller.runspec import (
 )
 from gittensor.controller.ssh import SshTransportError
 from gittensor.controller.ssh.certs import CertificateError
+from gittensor.controller.usage_check import (
+    THROUGHPUT_LOW,
+    Sample,
+    Track,
+    gateway_view,
+    judge,
+    output_ceiling,
+    runtime_counters,
+    throughput_evidence,
+)
 
 _TRANSPORT = (SshTransportError, CertificateError)
 _CONTAINER_ID = re.compile(r'[0-9a-f]{64}')
@@ -466,7 +485,7 @@ def observe_pay(record: InstanceRecord, now: float) -> None:
 
 @dataclass
 class WatchAction:
-    kind: str  # heartbeat | health | bench | replace | miss | stopped | unreachable
+    kind: str  # heartbeat | health | bench | replace | miss | stopped | unreachable | external_use
     box: str
     instance: str = ''
     uuid: str = ''
@@ -481,6 +500,7 @@ class WatchReport:
     actions: list[WatchAction] = field(default_factory=list)
     unreachable: dict[str, str] = field(default_factory=dict)
     visited: list[str] = field(default_factory=list)
+    usage: list[dict] = field(default_factory=list)  # the lease accounting check's rows, one per instance sampled
 
     @property
     def ok(self) -> bool:
@@ -499,6 +519,10 @@ class Watch:
     wall: Callable[[], float] = time.time
     lock: threading.RLock = field(default_factory=threading.RLock, repr=False)  # the shared state-write lock
     box_locks: BoxLocks | None = None  # `run`'s per-box locks: never taken here, only looked at (the device scan)
+    # The gateway's /healthz as a dict, or None when it cannot be read (``reconcile.gateway_healthz``). None here: no
+    # gateway to ask, and the lease accounting check makes no judgement.
+    gateway_state: Callable[[], dict | None] | None = None
+    usage_tracks: dict[str, Track] = field(default_factory=dict, repr=False)  # instance id -> the check's baseline
 
     def _box_busy(self, box_id: str) -> bool:
         return self.box_locks is not None and self.box_locks.held(box_id)
@@ -546,7 +570,12 @@ class Watch:
         report = WatchReport()
         now = self.wall()
         due: dict[str, tuple[list[InstanceRecord], dict[str, Manifest | None]]] = {}
-        for box_id, records in self.leased().items():
+        leased = self.leased()
+        with self.lock:
+            live = {r.id for records in leased.values() for r in records}
+            for instance_id in [i for i in self.usage_tracks if i not in live]:
+                del self.usage_tracks[instance_id]  # no longer leased: a lease that comes back starts a new baseline
+        for box_id, records in leased.items():
             manifests = self._manifests(records)
             if self._heartbeat_due(records, now) or any(self._health_due(r, manifests[r.entry], now) for r in records):
                 due[box_id] = (records, manifests)
@@ -564,9 +593,9 @@ class Watch:
         box = self.boxes.boxes[box_id]
         runner = self.make_runner(box)
         try:
-            if self._heartbeat_due(records, self.wall()):
-                if not self._heartbeat(box_id, box, runner, records, manifests, report):
-                    return
+            beat = self._heartbeat_due(records, self.wall())
+            if beat and not self._heartbeat(box_id, box, runner, records, manifests, report):
+                return
             for record in records:
                 current = self.instances.instances.get(record.id)
                 if current is None or current.draining:
@@ -575,6 +604,8 @@ class Watch:
                 if manifest is not None and self._health_due(current, manifest, self.wall()):
                     if not self._health(box_id, box, runner, current, manifest, report):
                         return
+            if beat:
+                self._usage(box_id, box, runner, records, manifests, report)
         except Exception as e:  # a bug must not kill the watch loop; the next tick retries
             with self.lock:
                 report.unreachable[box_id] = f'{type(e).__name__}: {e}'[:300]
@@ -837,4 +868,122 @@ class Watch:
             + (f'drained in {result.elapsed_s:.1f} s' if result.found else 'no container left')
         )
         with self.lock:
+            report.actions.append(action)
+
+    # -- the lease accounting check ---------------------------------------------------------------------------------
+
+    def _gateway(self) -> Any:
+        if self.gateway_state is None:
+            return None
+        try:
+            return self.gateway_state()
+        except Exception:
+            return None
+
+    def _counters(self, runner, box, record: InstanceRecord, manifest: Manifest) -> tuple[dict | None, str]:
+        """The runtime's own counters for one instance, or None and why not."""
+        table = cfg.RUNTIME_COUNTERS.get(manifest.runtime)
+        if table is None:
+            return None, f'runtime {manifest.runtime!r} has no counters table'
+        if manifest.front_door.port is None:
+            return None, 'no front-door port to read /metrics on'
+        try:
+            client = host_port_client(self.http_for(runner, box), manifest, record.host_port)
+            response = client.request('GET', manifest.front_door.port, '/metrics')
+        except (*_TRANSPORT, PlacementError) as e:
+            return None, f'/metrics not read: {type(e).__name__}'
+        if response.status != 200:
+            return None, f'/metrics -> {response.status or response.error or "no response"}'
+        counters = runtime_counters(response.body, table)
+        if counters is None:
+            return None, f'/metrics has no {table["completion_tokens"][0]} completion series'
+        return counters, ''
+
+    def _usage(self, box_id, box, runner, records: list[InstanceRecord], manifests, report: WatchReport) -> None:
+        """One sample per instance still leased after this visit: the gateway, the runtime's counters, the gateway
+        again. Every sample is a ``usage_check`` row; a detection ends the lease (``_external_use``)."""
+        with self.lock:
+            current = [c for r in records if (c := self.instances.instances.get(r.id)) is not None and not c.draining]
+        current = [r for r in current if manifests.get(r.entry) is not None]
+        if not current:
+            return
+        before = gateway_view(self._gateway())
+        read = {r.id: self._counters(runner, box, r, manifests[r.entry]) for r in current}  # type: ignore[arg-type]
+        after = gateway_view(self._gateway()) if before is not None else None
+        why_gateway = (
+            'no gateway to ask' if self.gateway_state is None else 'gateway /healthz not read, or without totals'
+        )
+        now = self.wall()
+        for record in current:
+            manifest = manifests[record.entry]
+            assert manifest is not None
+            counters, why = read[record.id]
+            sample = Sample(
+                now,
+                counters,
+                before,
+                after,
+                output_ceiling(manifest),
+                why or ('' if after is not None else why_gateway),
+            )
+            with self.lock:
+                track, judgement = judge(self.usage_tracks.get(record.id, Track()), sample, record.id)
+                self.usage_tracks[record.id] = track
+                if judgement.log:
+                    report.usage.append(
+                        {
+                            'kind': judgement.kind, 'box': box_id, 'instance': record.id, 'entry': record.entry,
+                            'uuid': record.uuid, 'detail': judgement.detail, **judgement.numbers,
+                        }
+                    )  # fmt: skip
+                low = (
+                    throughput_evidence(after.of(record.id), manifest.profile.get('decode_tps_single'))
+                    if after
+                    else None
+                )
+                if low is not None:  # evidence only: never a strike, a drain or a standing event
+                    report.usage.append(
+                        {'kind': THROUGHPUT_LOW, 'box': box_id, 'instance': record.id, 'entry': record.entry, **low}
+                    )
+            if judgement.detected:
+                self._external_use(box_id, record, judgement.numbers, report)
+
+    def _external_use(self, box_id: str, record: InstanceRecord, numbers: dict, report: WatchReport) -> None:
+        """A detection: the lease ends now (pay through now, nothing withheld), the record is marked draining so the
+        reconciler drains it through the planned drain (it waits for the gateway), an ``external_use`` SOFT event goes
+        on the box, which takes no new lease for ``EXTERNAL_USE_COOLDOWN_S``. The third inside a week benches the box:
+        every instance on it is then drained as a benched box's are."""
+        now = self.wall()
+        action = WatchAction('external_use', box_id, record.id, record.uuid, False, states=[LEASED])
+        with self.lock:
+            current = self.instances.instances.get(record.id)
+            box = self.boxes.boxes.get(box_id)
+            if current is None or current.draining or box is None:
+                return
+            current.draining, current.healthy, current.pay_open = True, False, False
+            current.stopped_at = min(current.stopped_at, now) if current.stopped_at is not None else now
+            current.ended_by = 'external_use'
+            self.instances.put(current)
+            summary = {
+                k: numbers[k] for k in ('runtime_delta', 'gateway_delta', 'surplus', 'threshold') if k in numbers
+            }
+            after = apply_external_use(box, record.uuid, now, instance=record.id, entry=record.entry, **numbers)
+            self.boxes.put(after)
+            action.detail = f'{cfg.EXTERNAL_USE_REASON}: ' + ', '.join(f'{k} {v:.0f}' for k, v in summary.items())
+            if after.status == BENCHED:
+                for other in self.instances.on_box(box_id):
+                    other.draining, other.healthy, other.pay_open = True, False, False
+                    other.stopped_at = other.stopped_at or now
+                    self.instances.put(other)
+                action.states.append(BENCHED)
+                action.detail += (
+                    f'; the {cfg.EXTERNAL_USE_BENCH_AFTER}rd inside {cfg.EXTERNAL_USE_WINDOW_S / 86_400:.0f} days: box '
+                    f'BENCHED until {after.bench_until:.0f}, every instance on it drained'
+                )
+            else:
+                action.detail += (
+                    '; lease ended, the planned drain returns the card to IDLE; no new lease on the box for '
+                    f'{cfg.EXTERNAL_USE_COOLDOWN_S:.0f} s'
+                )
+            self.usage_tracks.pop(record.id, None)
             report.actions.append(action)

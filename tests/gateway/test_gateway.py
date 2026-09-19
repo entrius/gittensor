@@ -2,21 +2,23 @@
 # Copyright © 2025 Entrius
 
 """The gateway end to end against fake runtimes: passthrough of tool calling byte for byte, the limits, SSE relay,
-reserve-or-429, draining, the key, /v1/models republishing, the usage line, and the table refresh (vault ``26`` §2,
-``25`` "Front door types")."""
+reserve-or-429, draining, the key, /v1/models republishing, the usage line, the table refresh, and addressing every
+instance through its tunnel (vault ``26`` §2, ``25`` "Front door types")."""
 
 import asyncio
 import json
-import socket
+import time
 
 from click.testing import CliRunner
 
+from gittensor.controller.tunnels_file import TUNNELS_STALE_S
 from gittensor.gateway.cli import gateway_command
 from tests.gateway.conftest import (
     AUTH,
     NAME,
     RUNTIME_ID,
     FakeRuntime,
+    dead_port,
     gateway,
     manifest_doc,
     post,
@@ -112,6 +114,7 @@ def test_limits_are_refused_before_any_instance_sees_the_request(world):
     remote_video = {**TOOL_BODY, 'messages': [{'role': 'user', 'content': [{'type': 'video_url', 'video_url': 'http://x/v.mp4'}]}]}  # fmt: skip
     cases = [
         ({**TOOL_BODY, 'n': 2}, 400, 'n must be 1'),
+        ({**TOOL_BODY, 'best_of': 2}, 400, 'best_of must be 1'),
         (remote_image, 400, 'remote media not supported yet'),
         (remote_video, 400, 'remote media not supported yet'),
         ({**TOOL_BODY, 'max_tokens': 'lots'}, 400, 'max_tokens must be a positive integer'),
@@ -132,6 +135,33 @@ def test_limits_are_refused_before_any_instance_sees_the_request(world):
                 assert got == 400 and 'not JSON' in json.loads(answer)['error']['message']
                 assert gw.table.in_flight == {}
         assert rt.received == []
+
+    asyncio.run(scenario())
+
+
+def test_one_request_is_one_completion_on_both_routes(world):
+    prompt = {'model': NAME, 'prompt': '<|im_start|>user\nhi', 'max_tokens': 8}
+
+    async def scenario():
+        entry = world.bless()
+        async with runtimes(FakeRuntime()) as (rt,):
+            world.place('i-a', entry, rt.port)
+            async with gateway(world) as (_, client):
+                for path, body in (('/v1/chat/completions', TOOL_BODY), ('/v1/completions', prompt)):
+                    for key in ('n', 'best_of'):
+                        got, answer, _ = await post(client, {**body, key: 3}, path=path)
+                        assert (got, json.loads(answer)) == (
+                            400,
+                            {'error': {'type': 'invalid_request_error', 'message': f'{key} must be 1'}},
+                        )
+                assert rt.received == []  # refused before any instance saw them
+                ones = [
+                    ('/v1/chat/completions', json.dumps({**TOOL_BODY, 'n': 1, 'best_of': 1}, indent=1).encode()),
+                    ('/v1/completions', json.dumps({**prompt, 'model': RUNTIME_ID, 'n': 1, 'best_of': 1}).encode()),
+                ]
+                for path, raw in ones:
+                    assert (await post(client, path=path, raw=raw))[0] == 200
+        assert [(r['path'], r['body']) for r in rt.received] == ones  # as sent, byte for byte
 
     asyncio.run(scenario())
 
@@ -388,11 +418,9 @@ def test_runtime_errors_pass_through_with_their_body_and_a_dead_instance_is_a_50
             async with gateway(world) as (gw, client):
                 status, body, _ = await post(client, TOOL_BODY)
                 assert (status, json.loads(body)) == (400, runtime_error)
-                with socket.socket() as probe:
-                    probe.bind(('127.0.0.1', 0))
-                    dead = probe.getsockname()[1]
-                world.update('i-a', port=dead)
-                await until(lambda: gw.table.instances['i-a'].record.port == dead)
+                dead = dead_port()
+                world.tunnel('i-a', port=dead)
+                await until(lambda: gw.table.instances['i-a'].address == ('127.0.0.1', dead))
                 status, body, _ = await post(client, TOOL_BODY)
                 assert (status, json.loads(body)['error']['type']) == (502, 'upstream')
                 assert gw.table.in_flight == {}
@@ -416,6 +444,199 @@ def test_http_front_doors_pass_through_declared_routes_only(world):
         assert [r['path'] for r in rt.received] == ['/echo']
 
     asyncio.run(scenario())
+
+
+# ---------------------------------------------------------------- the tunnel address -----------------------------------
+
+
+BY_NAME = {**TOOL_BODY, 'model': NAME}  # known without any runtime's /v1/models having been read
+
+
+async def healthz(client) -> dict:
+    async with client.get('/healthz') as resp:
+        return await resp.json()
+
+
+async def metrics(client) -> str:
+    async with client.get('/metrics', headers=AUTH) as resp:
+        return await resp.text()
+
+
+def test_completions_passthrough_and_models_all_go_to_the_tunnel_address(world):
+    async def scenario():
+        entry = world.bless()
+        routes = [{'path': '/echo', 'method': 'POST'}, {'path': '/v1/models', 'method': 'GET'}]
+        http_entry = world.bless(manifest_doc(name='gt-http', front_door='http', routes=routes))
+        async with runtimes(FakeRuntime(), FakeRuntime(), FakeRuntime()) as (tunnel, http_tunnel, record):
+            # The records name a runtime of their own: it must never be called.
+            world.place('i-a', entry, tunnel.port, record_port=record.port)
+            world.place('i-h', http_entry, http_tunnel.port, record_port=record.port)
+            async with gateway(world) as (gw, client):
+                assert gw.table.instances['i-a'].base_url == f'http://127.0.0.1:{tunnel.port}'
+                assert (await post(client, {**TOOL_BODY, 'model': NAME}))[0] == 200
+                assert (await post(client, {**TOOL_BODY, 'stream': True}))[0] == 200
+                async with client.post('/http/gt-http/echo', data=b'bytes', headers=AUTH) as resp:
+                    assert (resp.status, await resp.read()) == (200, b'bytes')
+        assert tunnel.models_read >= 1 and len(tunnel.received) == 2
+        assert [r['path'] for r in http_tunnel.received] == ['/echo']
+        assert (record.models_read, record.received) == (0, [])
+
+    asyncio.run(scenario())
+
+
+def test_a_tunnel_going_down_stops_routing_on_the_next_refresh_and_up_restores_it(world):
+    async def scenario():
+        entry = world.bless()
+        async with runtimes(FakeRuntime()) as (rt,):
+            world.place('i-a', entry, rt.port)
+            async with gateway(world) as (gw, client):
+                assert (await post(client, TOOL_BODY))[0] == 200
+                assert (await healthz(client))['tunnels'] == {
+                    'up': 1, 'down': 0, 'fresh': True, 'written_at': world.tunnels_doc()['written_at'],
+                }  # fmt: skip
+                assert 'gt_gateway_tunnel_up{entry="%s",instance="i-a"} 1' % entry in await metrics(client)
+
+                world.tunnel('i-a', up=False)
+                await until(lambda: not gw.table.instances['i-a'].routable)
+                assert (await post(client, TOOL_BODY))[0] == 429
+                health = await healthz(client)
+                assert (health['routable'], health['tunnels']['up'], health['tunnels']['down']) == ({entry: 0}, 0, 1)
+                assert 'gt_gateway_tunnel_up{entry="%s",instance="i-a"} 0' % entry in await metrics(client)
+
+                world.tunnel('i-a', up=True)
+                await until(lambda: gw.table.instances['i-a'].routable)
+                assert (await post(client, TOOL_BODY))[0] == 200
+        assert len(rt.received) == 2
+
+    asyncio.run(scenario())
+
+
+def test_a_stale_tunnels_file_counts_every_tunnel_down(world):
+    async def scenario():
+        entry = world.bless()
+        async with runtimes(FakeRuntime()) as (rt,):
+            world.place('i-a', entry, rt.port)
+            async with gateway(world) as (gw, client):
+                assert (await post(client, TOOL_BODY))[0] == 200
+                world.written_at = time.time() - TUNNELS_STALE_S - 1  # the keeper stopped writing
+                world.save_tunnels()
+                await until(lambda: not gw.table.tunnels.fresh)
+                assert (await post(client, TOOL_BODY))[0] == 429
+                health = await healthz(client)
+                assert health['tunnels'] == {'up': 0, 'down': 1, 'fresh': False, 'written_at': world.written_at}
+                assert 'not written in the last' in health['error']
+                text = await metrics(client)
+                assert 'gt_gateway_tunnels_fresh 0' in text
+                assert 'gt_gateway_tunnel_up{entry="%s",instance="i-a"} 0' % entry in text
+                world.written_at = None
+                world.save_tunnels()
+                await until(lambda: gw.table.instances['i-a'].routable)
+                assert 'gt_gateway_tunnels_fresh 1' in await metrics(client)
+        assert len(rt.received) == 1
+
+    asyncio.run(scenario())
+
+
+def test_a_missing_or_foreign_tunnels_file_means_no_tunnels_and_says_so(world):
+    async def scenario():
+        entry = world.bless()
+        async with runtimes(FakeRuntime()) as (rt,):
+            world.place('i-a', entry, rt.port)
+            path = world.root / 'tunnels.json'
+            path.unlink()
+            async with gateway(world) as (gw, client):
+                assert (await post(client, BY_NAME))[0] == 429
+                health = await healthz(client)
+                assert health['status'] == 'ok' and 'tunnels.json: missing' in health['error']
+                assert health['tunnels'] == {'up': 0, 'down': 0, 'fresh': False, 'written_at': None}
+                for text in ('{"i-a": ', json.dumps({**world.tunnels_doc(), 'schema': 0}), '[]'):
+                    path.write_text(text)
+                    await until(lambda: 'tunnels.json' in gw.table.last_error and 'missing' not in gw.table.last_error)
+                    assert (await post(client, BY_NAME))[0] == 429
+                    path.unlink()
+                    await until(lambda: 'missing' in gw.table.last_error)
+                world.save_tunnels()
+                await until(lambda: gw.table.instances['i-a'].routable)
+                assert (await healthz(client))['error'] == ''
+                assert (await post(client, BY_NAME))[0] == 200
+        assert len(rt.received) == 1
+
+    asyncio.run(scenario())
+
+
+def test_a_broken_instances_file_keeps_the_table_but_a_tunnel_going_down_still_counts(world):
+    async def scenario():
+        entry = world.bless()
+        async with runtimes(FakeRuntime()) as (rt,):
+            world.place('i-a', entry, rt.port)
+            async with gateway(world) as (gw, client):
+                (world.root / 'instances.json').write_text('{"i-a": ')
+                await until(lambda: gw.table.last_error.startswith('instances.json'))
+                assert (await post(client, TOOL_BODY))[0] == 200  # the previous table stands
+                world.tunnels['i-a']['up'] = False
+                world.save_tunnels()
+                await until(lambda: not gw.table.instances['i-a'].routable)
+                assert (await post(client, TOOL_BODY))[0] == 429
+        assert len(rt.received) == 1
+
+    asyncio.run(scenario())
+
+
+def test_allow_direct_uses_the_record_address_without_a_tunnel_but_never_for_a_private_instance(world):
+    async def scenario():
+        entry = world.bless()
+        async with runtimes(FakeRuntime(), FakeRuntime(), FakeRuntime()) as (public, private, tunnel):
+            world.place('i-pub', entry, dead_port(), tunnel=False, record_port=public.port)
+            world.place('i-priv', entry, dead_port(), tunnel=False, record_port=private.port)
+            world.update('i-priv', bind='private')
+            world.place('i-tun', entry, tunnel.port, record_port=public.port)
+            async with gateway(world) as (gw, _):
+                routable = {i: gw.table.instances[i].routable for i in ('i-pub', 'i-priv', 'i-tun')}
+                assert routable == {'i-pub': False, 'i-priv': False, 'i-tun': True}
+            async with gateway(world, allow_direct=True) as (gw, client):
+                table = gw.table
+                assert table.instances['i-pub'].address == ('127.0.0.1', public.port)
+                assert table.instances['i-priv'].address is None and not table.instances['i-priv'].routable
+                assert table.instances['i-tun'].address == ('127.0.0.1', tunnel.port)  # the tunnel still comes first
+                for _ in range(8):
+                    assert (await post(client, BY_NAME))[0] == 200
+        assert len(public.received) + len(tunnel.received) == 8 and private.received == []
+
+    asyncio.run(scenario())
+
+
+def test_healthz_keeps_in_flight_beside_the_tunnel_fields(world):
+    async def scenario():
+        entry = world.bless()
+        async with runtimes(FakeRuntime()) as (rt,):
+            rt.hold = asyncio.Event()
+            world.place('i-a', entry, rt.port)
+            async with gateway(world) as (gw, client):
+                pending = asyncio.create_task(post(client, TOOL_BODY))
+                await until(lambda: gw.table.in_flight.get('i-a') == 1)
+                health = await healthz(client)
+                assert set(health) == {
+                    'status',
+                    'routable',
+                    'instances',
+                    'in_flight',
+                    'refreshed_at',
+                    'error',
+                    'tunnels',
+                    'started_at',
+                    'served',
+                }
+                assert health['in_flight'] == {'i-a': 1} and health['tunnels']['up'] == 1
+                rt.hold.set()
+                assert (await pending)[0] == 200
+                assert (await healthz(client))['in_flight'] == {}
+
+    asyncio.run(scenario())
+
+
+def test_the_allow_direct_flag_is_on_the_command():
+    text = ' '.join(CliRunner().invoke(gateway_command, ['--help']).output.split())
+    assert "--allow-direct Address an instance at its record's host and port when it has no tunnel" in text
 
 
 def test_the_command_refuses_to_start_without_the_key(monkeypatch, tmp_path):

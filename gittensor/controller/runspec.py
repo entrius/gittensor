@@ -6,9 +6,13 @@ pre-stage, deploy, probe and undeploy one placement instance (vault ``24`` §3 W
 
 Everything here drives the box's host docker daemon through the controller's SSH session (``HostRunner``) with the
 plain docker CLI, like the proof slot does. Every container we start carries ``io.gittensor.instance`` /
-``io.gittensor.entry`` / ``io.gittensor.uuid`` / ``io.gittensor.port`` labels, so a restarted controller rebuilds its
-view from ``docker ps`` (``26`` §3), and every operation is safe to retry: ``deploy`` of an instance that is already
-running returns its container, ``undeploy`` of one that is gone is a no-op.
+``io.gittensor.entry`` / ``io.gittensor.uuid`` / ``io.gittensor.port`` / ``io.gittensor.bind`` labels, so a restarted
+controller rebuilds its view from ``docker ps`` (``26`` §3), and every operation is safe to retry: ``deploy`` of an
+instance that is already running returns its container, ``undeploy`` of one that is gone is a no-op.
+
+A workload's port is published on the box's docker bridge gateway address (``bind`` private): the agent container and
+the host are its only callers, and health probes and canaries reach it there too (``BoxHttp``), one address for
+probes and traffic alike. ``bind`` public is the previous publish form, kept for a rollback.
 """
 
 from __future__ import annotations
@@ -28,13 +32,18 @@ from typing import Any, Protocol
 
 import yaml
 
-from gittensor.agent.config import DRAIN_LABEL, ENTRY_LABEL, INSTANCE_LABEL, PORT_LABEL, UUID_LABEL
+from gittensor.agent.config import BIND_LABEL, DRAIN_LABEL, ENTRY_LABEL, INSTANCE_LABEL, PORT_LABEL, UUID_LABEL
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import CommandResult, HostRunner
 from gittensor.controller.manifest import Artifact, Canary, Drain, Manifest
 
 _CONTAINER_ID = re.compile(r'^[0-9a-f]{64}$')
 _INSTANCE_ID = re.compile(r'^[a-z0-9][a-z0-9-]{3,62}$')
+_BRIDGE_GATEWAY = re.compile(r'[0-9.]{7,15}')
+
+# Where a workload's port is published: the box's docker bridge gateway address, or every address (the previous form).
+BIND_PRIVATE, BIND_PUBLIC = 'private', 'public'
+WORKLOAD_BINDS = (BIND_PRIVATE, BIND_PUBLIC)
 
 
 class PlacementError(Exception):
@@ -69,10 +78,15 @@ class RunSpec:
     # entrypoint verifies the artifacts the registry entry names, not whatever the image was built with.
     manifest_host_path: str = ''
     drain_max_s: int = 0  # the manifest's drain.max_s, on the container as a label so `gitt down` can drain it too
+    bind_address: str = ''  # the box's docker bridge gateway the port is published on; '': every address
 
     @property
     def name(self) -> str:
         return f'gt-{self.instance_id}'
+
+    @property
+    def bind(self) -> str:
+        return BIND_PRIVATE if self.bind_address else BIND_PUBLIC
 
 
 def volume_host_dir(manifest: Manifest, volume_name: str, root: str = cfg.MODELS_ROOT) -> str:
@@ -105,11 +119,17 @@ def artifact_host_path(manifest: Manifest, artifact: Artifact, root: str = cfg.M
 
 
 def build_run_spec(
-    entry_id: str, manifest: Manifest, uuid: str, instance_id: str, host_port: int | None = None
+    entry_id: str,
+    manifest: Manifest,
+    uuid: str,
+    instance_id: str,
+    host_port: int | None = None,
+    bind_address: str = '',
 ) -> RunSpec:
     """One instance of ``manifest`` pinned to one card, its front-door port published on ``host_port`` (the box's
-    port the placement assigned; None publishes the manifest's port as-is). ``network.egress: []`` gets the no-egress
-    bridge; a non-empty allowlist is NOT enforced yet and runs on the default bridge, with a note saying so."""
+    port the placement assigned; None publishes the manifest's port as-is) at ``bind_address`` (the box's docker bridge
+    gateway; '' publishes on every address). ``network.egress: []`` gets the no-egress bridge; a non-empty allowlist is
+    NOT enforced yet and runs on the default bridge, with a note saying so."""
     if manifest.placement.cards_per_instance != 1:
         raise PlacementError(f'{entry_id}: cards_per_instance {manifest.placement.cards_per_instance} (only 1 for now)')
     if not _INSTANCE_ID.match(instance_id):
@@ -136,6 +156,7 @@ def build_run_spec(
         notes=tuple(notes),
         manifest_host_path=manifest_host_path(manifest, entry_id),
         drain_max_s=manifest.drain.max_s if manifest.drain.type != 'kill' else 0,
+        bind_address=bind_address,
     )
 
 
@@ -153,9 +174,11 @@ def run_command(spec: RunSpec) -> str:
     if spec.port is not None:
         parts.append(f'--label {shlex.quote(f"{PORT_LABEL}={host_port}")}')  # the host port: what a restart re-adopts
     parts.append(f'--label {shlex.quote(f"{DRAIN_LABEL}={int(spec.drain_max_s)}")}')  # `gitt down` drains by it
+    parts.append(f'--label {shlex.quote(f"{BIND_LABEL}={spec.bind}")}')
     parts.append(f'--gpus "device={spec.uuid}"')
     if spec.port is not None:
-        parts.append(f'-p {host_port}:{spec.port}')
+        publish = f'{spec.bind_address}:{host_port}:{spec.port}' if spec.bind_address else f'{host_port}:{spec.port}'
+        parts.append(f'-p {shlex.quote(publish)}')
     parts.append('--restart no')
     parts += [f'-e {shlex.quote(f"{k}={v}")}' for k, v in spec.env]
     parts += [f'-v {shlex.quote(f"{host}:{mount}" + (":ro" if ro else ""))}' for host, mount, ro in spec.volumes]
@@ -389,6 +412,7 @@ class BoxContainer:
     entry_id: str
     uuid: str
     port: int | None
+    bind: str = BIND_PUBLIC  # the bind label; a container from before the label is public
 
     @property
     def running(self) -> bool:
@@ -399,7 +423,7 @@ class BoxContainer:
 
 _PS_FORMAT = '\t'.join(
     ['{{.ID}}', '{{.State}}']
-    + [f'{{{{.Label "{label}"}}}}' for label in (INSTANCE_LABEL, ENTRY_LABEL, UUID_LABEL, PORT_LABEL)]
+    + [f'{{{{.Label "{label}"}}}}' for label in (INSTANCE_LABEL, ENTRY_LABEL, UUID_LABEL, PORT_LABEL, BIND_LABEL)]
 )
 
 
@@ -412,10 +436,11 @@ def parse_containers(stdout: str) -> list[BoxContainer]:
     out = []
     for line in stdout.splitlines():
         cols = line.split('\t')
-        if len(cols) != 6 or not _CONTAINER_ID.match(cols[0]):
+        if len(cols) != 7 or not _CONTAINER_ID.match(cols[0]):
             continue
         port = int(cols[5]) if cols[5].isdigit() else None
-        out.append(BoxContainer(cols[0], cols[1], cols[2], cols[3], cols[4], port))
+        bind = cols[6] if cols[6] in WORKLOAD_BINDS else BIND_PUBLIC
+        out.append(BoxContainer(cols[0], cols[1], cols[2], cols[3], cols[4], port, bind))
     return out
 
 
@@ -496,23 +521,35 @@ class HttpClient(Protocol):
     ) -> HttpResponse: ...
 
 
+BRIDGE_GATEWAY_COMMAND = "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'"
+
+
+def bridge_gateway(runner: HostRunner) -> str:
+    """The box's docker bridge gateway address: where a workload's port is published and where probes reach it from
+    the agent container. Raises ``PlacementError`` when docker names none."""
+    result = runner.run(BRIDGE_GATEWAY_COMMAND, timeout=cfg.SSH_COMMAND_TIMEOUT_S)
+    gateway = result.stdout.strip() if result.ok else ''
+    if not _BRIDGE_GATEWAY.fullmatch(gateway):
+        raise PlacementError(f'no docker bridge gateway on the box: {(result.stderr or result.stdout)[:200]!r}')
+    return gateway
+
+
 class BoxHttp:
     """HTTP to an instance from the box itself, over the controller's SSH session: ``curl`` in the agent container to
     the host's published port through the docker bridge gateway. No inbound path to the box is needed."""
 
-    def __init__(self, runner: HostRunner):
+    def __init__(self, runner: HostRunner, gateway: str = ''):
         self.runner = runner
-        self._gateway = ''
+        self._gateway = gateway
+
+    def use_gateway(self, address: str) -> None:
+        """The bridge gateway already looked up on this visit (a private start needs it first): no second lookup."""
+        if not self._gateway:
+            self._gateway = address
 
     def gateway(self) -> str:
         if not self._gateway:
-            result = self.runner.run(
-                "docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'",
-                timeout=cfg.SSH_COMMAND_TIMEOUT_S,
-            )
-            self._gateway = result.stdout.strip() if result.ok else ''
-            if not re.fullmatch(r'[0-9.]{7,15}', self._gateway):
-                raise PlacementError(f'no docker bridge gateway on the box: {(result.stderr or result.stdout)[:200]!r}')
+            self._gateway = bridge_gateway(self.runner)
         return self._gateway
 
     def request(self, method, port, path, body=None, timeout=cfg.HTTP_PROBE_TIMEOUT_S) -> HttpResponse:

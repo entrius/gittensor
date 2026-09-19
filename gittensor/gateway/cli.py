@@ -5,8 +5,9 @@
 
     GT_GATEWAY_KEY=<secret> gitt gateway --state-dir ~/.gittensor/controller [--listen 0.0.0.0:8790] [--refresh 3]
 
-It reads the controller's state directory (``instances.json``, ``registry/``, ``models_override.json``) and writes
-nothing there; usage lines go to stdout, logs to stderr.
+It reads the controller's state directory (``instances.json``, ``tunnels.json``, ``registry/``,
+``models_override.json``) and writes nothing there; usage lines go to stdout, logs to stderr. Start
+``gitt controller tunnels`` first: an instance is reached through its tunnel or not at all.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ def _listen(ctx, param, value: str) -> tuple[str, int]:
     type=click.Path(file_okay=False, path_type=Path),
     default=DEFAULT_STATE_DIR,
     show_default=True,
-    help="The controller's state directory, read only: instances.json, registry/, models_override.json.",
+    help="The controller's state directory, read only: instances.json, tunnels.json, registry/, models_override.json.",
 )
 @click.option('--listen', default='0.0.0.0:8790', show_default=True, callback=_listen, help='host:port to serve on.')
 @click.option(
@@ -50,12 +51,20 @@ def _listen(ctx, param, value: str) -> tuple[str, int]:
     help='Public key registry entries must verify against (default: the compiled release key).',
 )
 @click.option('--allow-dev-keys', is_flag=True, default=False, help='Trust a --release-pubkey tagged DO-NOT-SHIP.')
-def gateway_command(state_dir, listen, refresh, request_timeout, max_body_bytes, release_pubkey, allow_dev_keys):
+@click.option(
+    '--allow-direct',
+    is_flag=True,
+    default=False,
+    help="Address an instance at its record's host and port when it has no tunnel; the previous behaviour.",
+)
+def gateway_command(
+    state_dir, listen, refresh, request_timeout, max_body_bytes, release_pubkey, allow_dev_keys, allow_direct
+):
     """Route OpenAI-style requests onto healthy leased instances: take a free slot or 429, never queue.
 
     \b
     Every request but GET /healthz needs the X-GT-Gateway-Key header equal to $GT_GATEWAY_KEY.
-    The link to instances is plain HTTP for now (no TLS, no per-instance secret).
+    An instance is reached through its tunnel (tunnels.json, from `gitt controller tunnels`).
     """
     key = os.environ.get(KEY_ENV, '')
     if not key:
@@ -76,11 +85,10 @@ def gateway_command(state_dir, listen, refresh, request_timeout, max_body_bytes,
         sys.exit(2)
     logging.basicConfig(stream=sys.stderr, level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
     config = GatewayConfig(key=key, refresh_s=refresh, request_timeout_s=request_timeout, max_body_bytes=max_body_bytes)
-    gateway = Gateway(config, InstanceTable(state_dir, registry))
+    gateway = Gateway(config, InstanceTable(state_dir, registry, allow_direct=allow_direct))
     host, port = listen
-    click.echo(
-        f'gateway on {host}:{port}, state {state_dir}, refresh {refresh:g} s (plain HTTP to instances)', err=True
-    )
+    path = 'tunnels, else the record address' if allow_direct else 'tunnels only'
+    click.echo(f'gateway on {host}:{port}, state {state_dir}, refresh {refresh:g} s, instances via {path}', err=True)
     uvicorn.run(build_app(gateway), host=host, port=port, log_level='warning', loop='asyncio')
 
 

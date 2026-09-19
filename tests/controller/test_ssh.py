@@ -180,6 +180,11 @@ class TestSshRunner:
                 r.run('true')
         with self._runner(ca_key, tmp_path, calls, returncode=3, stdout=b'', stderr=b'boom') as r:
             assert r.run('exit 3') == CommandResult(3, '', 'boom')
+        # our own ssh client killed by a signal (a controller stop mid-visit) is no answer from the box: mainnet 9/19, a
+        # restart killed a heartbeat's nvidia-smi (exit -2), judged as `same_card`, and a healthy box was benched
+        with self._runner(ca_key, tmp_path, calls, returncode=-2, stdout=b'', stderr=b'') as r:
+            with pytest.raises(SshTransportError, match='killed by signal 2'):
+                r.run('nvidia-smi')
 
         def timeout_run(argv, input=None, capture_output=True, timeout: float = 0.0):
             raise subprocess.TimeoutExpired(argv, timeout)

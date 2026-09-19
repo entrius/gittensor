@@ -20,7 +20,7 @@ import json
 from typing import Any
 
 _TOKEN_FIELDS = ('max_tokens', 'max_completion_tokens')
-_SINGLE_FIELDS = ('n', 'best_of')
+SINGLE_FIELDS = ('n', 'best_of')
 _MEDIA_PARTS = ('image_url', 'video_url')
 
 
@@ -47,7 +47,7 @@ def parse_object(raw: bytes) -> dict[str, Any]:
 
 def enforce_openai_limits(body: dict[str, Any], path: str) -> None:
     """Refuse what breaks a limit. The body is never changed: the token fields go on as sent, or stay absent."""
-    for key in _SINGLE_FIELDS:
+    for key in SINGLE_FIELDS:
         value = body.get(key)
         if value is not None and (isinstance(value, bool) or value != 1):
             raise RequestRefused(400, f'{key} must be 1')

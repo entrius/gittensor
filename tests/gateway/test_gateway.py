@@ -331,6 +331,23 @@ def test_models_republish_the_runtime_under_the_manifest_name_with_the_override(
     asyncio.run(scenario())
 
 
+def test_models_never_advertise_n_or_best_of(world):
+    async def scenario():
+        entry = world.bless()
+        params = {'n': {'max': 8, 'min': 1}, 'best_of': {'max': 8, 'min': 1}, 'max_tokens': {'max': 16384, 'min': 1}}
+        extra = {'output_modalities': [{'streaming': True, 'supported_parameters': params}]}
+        async with runtimes(FakeRuntime(model_extra=extra)) as (rt,):
+            world.place('i-a', entry, rt.port)
+            async with gateway(world) as (_, client):
+                async with client.get('/v1/models', headers=AUTH) as resp:
+                    (model,) = (await resp.json())['data']
+        assert model['output_modalities'] == [
+            {'streaming': True, 'supported_parameters': {'max_tokens': {'max': 16384, 'min': 1}}}
+        ]
+
+    asyncio.run(scenario())
+
+
 def test_models_output_cap_is_the_manifests_else_the_runtimes_own_never_invented(world):
     async def scenario():
         capped = world.bless({**manifest_doc(name='gt-capped'), 'profile': {'max_output_tokens': 16384, 'vram_gb': 30}})

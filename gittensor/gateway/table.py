@@ -34,6 +34,7 @@ from gittensor.controller.reconcile import InstanceRecord
 from gittensor.controller.registry import Registry, RegistryError
 from gittensor.controller.runspec import BIND_PRIVATE
 from gittensor.controller.tunnels_file import TUNNELS_FILE, TUNNELS_STALE_S, TunnelsFileError, load_tunnels
+from gittensor.gateway.limits import SINGLE_FIELDS
 
 GATEWAY_OPENAI, HTTP = 'gateway-openai', 'http'
 
@@ -289,9 +290,10 @@ class InstanceTable:
 
     def model_objects(self) -> list[dict[str, Any]]:
         """One object per model name with a routable instance: the runtime's own object (capabilities kept) with the
-        manifest name as ``id``, ``max_output_tokens`` from the blessed manifest when it names one (``profile``), else
-        the runtime's own advertised number, else absent (the gateway invents and clamps no cap of its own, Kimbo
-        9/16), then the operator override (keyed by name, then by entry id) merged on top."""
+        manifest name as ``id``, less the parameters the gateway holds at one (``n``, ``best_of``: never advertised),
+        ``max_output_tokens`` from the blessed manifest when it names one (``profile``), else the runtime's own
+        advertised number, else absent (the gateway invents and clamps no cap of its own, Kimbo 9/16), then the
+        operator override (keyed by name, then by entry id) merged on top."""
         source = self.models_source()
         by_name: dict[str, str] = {}
         for entry_id in sorted(source, key=_entry_order):
@@ -301,6 +303,7 @@ class InstanceTable:
             data = [m for m in self.runtime_models.get(entry_id, []) if isinstance(m, dict)]
             runtime = next((m for m in data if m.get('id') == name), data[0] if data else {})
             obj = {**copy.deepcopy(runtime), 'id': name, 'object': 'model', 'owned_by': 'gittensor'}
+            _omit_single_fields(obj)
             cap = manifest_output_cap(next((i.manifest for i in source[entry_id] if i.manifest), None))
             if cap:
                 obj['max_output_tokens'] = cap  # else the runtime's own stays as advertised, or there is none
@@ -319,6 +322,21 @@ def manifest_output_cap(manifest: Manifest | None) -> int | None:
 def _entry_order(entry_id: str) -> tuple[str, int]:
     name, _, version = entry_id.partition('@')
     return name, -int(version) if version.isdigit() else 0
+
+
+def _omit_single_fields(node: Any) -> None:
+    """Drop ``n`` and ``best_of`` from every ``supported_parameters`` in a runtime's model object, wherever it sits:
+    one request is one completion here (limits.py), so a range for them is never advertised."""
+    if isinstance(node, dict):
+        params = node.get('supported_parameters')
+        if isinstance(params, dict):
+            for key in SINGLE_FIELDS:
+                params.pop(key, None)
+        for value in node.values():
+            _omit_single_fields(value)
+    elif isinstance(node, list):
+        for value in node:
+            _omit_single_fields(value)
 
 
 def _merge(into: dict[str, Any], over: dict[str, Any]) -> None:

@@ -162,7 +162,9 @@ def gateway_view(doc: Any) -> GatewayView | None:
     started_at, served = _number(doc.get('started_at')), doc.get('served')
     if started_at is None or not isinstance(served, dict):
         return None
-    in_flight = doc.get('in_flight') if isinstance(doc.get('in_flight'), dict) else {}
+    in_flight = doc.get('in_flight')
+    if not isinstance(in_flight, dict):
+        in_flight = {}
     return GatewayView(
         started_at,
         {str(k): Served.from_dict(v) for k, v in served.items()},

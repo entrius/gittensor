@@ -282,7 +282,6 @@ class BoxLink:
         self.failures = 0
         self.next_attempt = 0.0
         self.error = ''
-        self.connects = 0
         self._forward_errors: dict[str, str] = {}
 
     @property
@@ -329,7 +328,6 @@ class BoxLink:
         self.proc, self.runner = proc, runner
         self.forwards, self._forward_errors = {}, {}
         self.link_failures, self.since_link_check = 0, 0
-        self.connects += 1
 
     def _stderr_tail(self) -> str:
         try:

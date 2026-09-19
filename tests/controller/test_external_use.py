@@ -121,10 +121,10 @@ def lease(tmp_path, gateway=True, events=(), **profile):
     clock.t = 1_000_000.0
     rec = reconciler(root, registry, {HOTKEY: box}, clock=clock)
     assert rec.run_pass().ok
-    gw = FakeGateway() if gateway else None
+    gw = FakeGateway()
     watch = Watch(
         rec.boxes, rec.instances, registry, make_runner=lambda b: box.runner, clock=clock, wall=clock, lock=rec._lock,
-        gateway_state=gw,
+        gateway_state=gw if gateway else None,
     )  # fmt: skip
     (record,) = rec.instances.instances.values()
     return rec, watch, box, gw, clock, record

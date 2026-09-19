@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
@@ -96,6 +97,7 @@ class FakeSsh:
         with self.lock:
             self.connects.append((host, cert))
             if host in self.unreachable:
+                assert stderr is not None
                 stderr.write(f'ssh: connect to host {host} port 2200: Connection timed out\n'.encode())
                 return FakeMaster(host, cert, returncode=255)
             master = FakeMaster(host, cert)
@@ -117,7 +119,7 @@ class FakeSsh:
                     assert 'ProxyCommand=false' in argv and not _option(argv, 'CertificateFile')
                     self.link_checks.append(host)
                     if id(self.masters.get(control)) in self.cut:
-                        raise subprocess.TimeoutExpired(argv, timeout)
+                        raise subprocess.TimeoutExpired(argv, timeout or 0.0)
                     if not alive:
                         return subprocess.CompletedProcess(argv, 255, b'', b'Control socket connect: No such file\n')
                     return subprocess.CompletedProcess(argv, 0, b'', b'')
@@ -197,16 +199,13 @@ def world(tmp_path):
             **kw,
         )
 
-    class World:
-        pass
-
-    w = World()
-    w.ssh, w.ca, w.clock, w.events, w.state, w.keeper = ssh, ca, clock, events, state, keeper
-    w.boxes = lambda **hosts: _boxes(state, hosts)
-    w.instances = lambda *rows: _instances(state, rows)
-    w.doc = lambda: json.loads((state / 'tunnels.json').read_text())
-    w.kinds = lambda kind: [e for e in events if e['kind'] == kind]
-    return w
+    return SimpleNamespace(
+        ssh=ssh, ca=ca, clock=clock, events=events, state=state, keeper=keeper,
+        boxes=lambda **hosts: _boxes(state, hosts),
+        instances=lambda *rows: _instances(state, rows),
+        doc=lambda: json.loads((state / 'tunnels.json').read_text()),
+        kinds=lambda kind: [e for e in events if e['kind'] == kind],
+    )  # fmt: skip
 
 
 def _boxes(state, hosts):

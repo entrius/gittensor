@@ -13,7 +13,7 @@ from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import HostRunner
 from gittensor.controller.checks.scrape import GpuInfo, HostScrape
 from gittensor.controller.checks.verdict import CheckResult
-from gittensor.controller.proof.slot import GpuProof, ProbeResult, probe_box
+from gittensor.controller.proof.slot import GpuProof, ProbeResult, clip, probe_box
 
 GPU_SPEC = 'gpu_spec'
 GPU_UUID_PIN = 'gpu_uuid_pin'
@@ -171,13 +171,13 @@ def check_disk_free(
 
 
 def check_network(results: Dict[str, Tuple[int, float]], targets: Sequence[str]) -> CheckResult:
-    """Every target answered with an HTTP status (any 2xx/3xx/4xx counts as reachable; 0 = no connection). The
-    download speed is recorded as evidence, not judged yet — the weights-download floor is a `needs a card` number."""
+    """Evidence only, never a failure (Kimbo 9/19): which targets answered with an HTTP status (any 2xx/3xx/4xx counts
+    as reachable; 0 = no connection) and how fast. One missed Hugging Face request benched a healthy serving box and
+    took the fleet to zero for 4 h (mainnet 9/19). Reaching the registry and the weights is proved where it matters:
+    a box that cannot pull fails its start (``state.record_start``)."""
     evidence = {url: {'http_code': code, 'bytes_per_s': speed} for url, (code, speed) in results.items()}
     unreachable = [url for url in targets if not (200 <= results.get(url, (0, 0.0))[0] < 500)]
-    if unreachable:
-        return CheckResult(NETWORK, False, {'reason': 'unreachable: ' + ', '.join(unreachable), 'targets': evidence})
-    return CheckResult(NETWORK, True, {'targets': evidence})
+    return CheckResult(NETWORK, True, {'targets': evidence, 'unreachable': unreachable})
 
 
 def check_gpu_proof(
@@ -189,21 +189,23 @@ def check_gpu_proof(
     clock: Callable[[], float] = time.monotonic,
 ) -> CheckResult:
     """Stage the provider's proof on the box, fire it on every card at the same instant, judge each card. Every card
-    must pass. No provider (``UnconfiguredProof``), a staging failure, a dead transport or an empty box all fail
-    closed with the reason named."""
+    must pass. Nothing passes without an answer: a proof that could not be carried out (no provider, a staging failure,
+    a container that never started) is ``not_run``; a dead transport mid-proof or an empty box fails, reason named."""
     return proof_result(probe_box(runner, gpus, proof, image, timeout, clock))
 
 
 def proof_result(probe: ProbeResult) -> CheckResult:
-    """A probe's cards as the ``gpu_proof`` check: every card must pass; a staging error fails with its reason. The
-    fleet round (stage everywhere, then fire everywhere) builds its ``ProbeResult`` itself and judges it here too."""
+    """A probe's cards as the ``gpu_proof`` check: every card must pass. A proof that could not be carried out (staging
+    failed, no container started) is ``not_run``, not a failure: no answer was judged. The fleet round (stage
+    everywhere, then fire everywhere) builds its ``ProbeResult`` itself and judges it here too."""
     evidence = {'provider': probe.provider, 'cards': probe.cards}
     if probe.error:
-        return CheckResult(GPU_PROOF, False, {**evidence, 'reason': probe.error})
+        return CheckResult(GPU_PROOF, False, {**evidence, 'reason': probe.error}, not_run=True)
     if not probe.cards:
         return CheckResult(GPU_PROOF, False, {**evidence, 'reason': 'no card answered'})
     if probe.failures:
-        return CheckResult(GPU_PROOF, False, {**evidence, 'reason': '; '.join(probe.failures)[:500]})
+        reason = clip('; '.join(probe.failures))
+        return CheckResult(GPU_PROOF, False, {**evidence, 'reason': reason}, not_run=probe.not_run)
     return CheckResult(GPU_PROOF, True, evidence)
 
 

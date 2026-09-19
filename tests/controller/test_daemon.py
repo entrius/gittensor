@@ -43,6 +43,7 @@ from tests.controller.conftest import (
     UUID_5090_B,
     FakeProof,
     challenge_for,
+    failing,
     fixture,
 )
 from tests.controller.test_cli import FAKE_PROOF, HK_A, HK_B, KEY_2, NET, admit, box_runner, invoke, round_args
@@ -261,6 +262,48 @@ def test_a_lease_ended_by_missed_heartbeats_is_re_proved_only_after_the_reconcil
         controller.reconcile_once()  # and it is placed again
         assert controller.reconciler.join(5) and card() == LEASED
         assert len(docker.commands('docker run -d')) == 2
+
+
+def test_a_strike_is_tried_again_once_a_round_not_at_every_watch_tick(world):
+    """A box at ADMIT (or with a CHECKING card) is re-proved at every watch tick. A proof that could not run is a strike
+    (mainnet 9/19), and three in a row are a bench: tried every tick, a broken container runtime would burn its three
+    strikes in three minutes."""
+    root, registry = world
+    shutil.copy(FIXTURES / 'nvml_allowlist.json', root / 'nvml_allowlist.json')
+    prover = box_runner().on(
+        regex(r'^docker start '), failing('Error response from daemon: OCI runtime create failed: prestart hook #0')
+    )
+    setup = ctl._setup(
+        root, None, FAKE_PROOF, (), (AGENT_DIGEST,), (), 'entrius/gt-proof:test', None, NETWORK_TARGETS, 100
+    )
+    controller = Controller(
+        ctl.StateDir(root),
+        registry,
+        make_runner=lambda box, purpose: prover,
+        run_round=lambda proof, **shared: ctl.run_round(setup, proof, **shared),
+        load_proof=FakeProof,
+        reprove=lambda proof, box_id, **shared: ctl.reprove_box(setup, proof, box_id, **shared),
+        read_chain=lambda: metagraph((HK_B, PUB_B, 2200, True)),
+        scan_host_key=lambda host, port: KEY_2,
+    )
+
+    def proofs():
+        return [c for c in prover.calls if c.startswith('docker create')]
+
+    with patch.object(ctl, '_make_runner', side_effect=lambda st, box, ca, purpose: prover):
+        controller.discover_once()
+        controller.watch_once()
+        _until(lambda: controller.boxes.boxes[HK_B].not_run_count == 1)
+        _until(lambda: (controller.status.get('reprove') or {}).get('verdict') == 'NOT_RUN')
+        box = controller.boxes.boxes[HK_B]
+        assert box.status == ADMIT and box.bench_count == 0 and len(proofs()) == 1
+        assert controller.reprove_once() == [] and len(proofs()) == 1  # not at the next tick
+        report = controller.round_once()  # nor at a round that comes before the retry is due
+        assert 'strike 1 of 3' in report.boxes[0].busy and len(proofs()) == 1
+        controller.boxes.put(BoxState.from_dict({**box.as_dict(), 'not_run_at': 0.0}))  # about a round later
+        assert controller.reprove_once() == [HK_B]
+        _until(lambda: controller.boxes.boxes[HK_B].not_run_count == 2)
+        assert len(proofs()) == 2
 
 
 def test_a_discovered_box_is_proved_at_the_next_watch_tick_and_the_round_does_not_prove_it_twice(world):

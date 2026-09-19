@@ -47,7 +47,15 @@ from typing import Any, Protocol
 
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import HostRunner
-from gittensor.controller.checks.state import ADMIT, CHECKING, IDLE, BoxState, StateStore, remove_requested
+from gittensor.controller.checks.state import (
+    ADMIT,
+    CHECKING,
+    IDLE,
+    BoxState,
+    StateStore,
+    not_run_retry_at,
+    remove_requested,
+)
 from gittensor.controller.discovery import ChainEndpoint, DiscoverReport, Discovery
 from gittensor.controller.heartbeat import Watch, WatchReport
 from gittensor.controller.locks import BoxLocks
@@ -477,6 +485,7 @@ class Controller:
                 if box.host
                 and box.box_id not in running
                 and now >= self._reprove_retry_at.get(box.box_id, 0.0)
+                and now >= (not_run_retry_at(box) or 0.0)  # a strike is tried again once a round, not every tick
                 and (
                     (box.status == ADMIT and not box.endpoint_changed)
                     or (

@@ -30,7 +30,8 @@ from gittensor.controller.checks.scrape import GpuInfo
 
 
 class ProofUnavailable(RuntimeError):
-    """No proof can be run: no provider, or the provider could not stage. The check fails closed."""
+    """No proof can be run: no provider, or the provider could not stage. Nothing is admitted; the check is ``not_run``
+    (no answer was judged), not a failed proof."""
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,7 @@ class ProofVerdict:
     speed: Optional[float] = None  # the provider's measured-speed figure (its unit)
     elapsed_ms: Optional[float] = None  # our clock around `docker start -a`
     extra: dict = field(default_factory=dict)
+    not_run: bool = False  # the container never started: there is no answer to judge (``container_never_started``)
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -94,7 +96,7 @@ class GpuProof(Protocol):
 
 
 class UnconfiguredProof:
-    """The default: no provider wired in. Every box fails its GPU proof, with a reason that says why."""
+    """The default: no provider wired in. No box passes its GPU proof, with a reason that says why."""
 
     version = 'unconfigured'
     REASON = (
@@ -168,6 +170,15 @@ class ProbeResult:
     def failures(self) -> List[str]:
         return [f'{c["uuid"]}: {c["reason"]}' for c in self.cards if not c['passed']]
 
+    @property
+    def not_run(self) -> bool:
+        """The proof could not be carried out and no card gave a wrong answer: staging failed, or every card that did
+        not pass never started its container. One judged failure among the cards makes it a failed proof."""
+        if self.error:
+            return True
+        failed = [c for c in self.cards if not c['passed']]
+        return bool(failed) and all(c.get('not_run') for c in failed)
+
 
 def proof_image_ready(runner: HostRunner, image: str = '', timeout: float = cfg.PROOF_IMAGE_PROBE_TIMEOUT_S) -> bool:
     """Whether the proof image is on the box; when it is not, its pull is started there, detached, and this returns
@@ -182,6 +193,22 @@ def proof_image_ready(runner: HostRunner, image: str = '', timeout: float = cfg.
         timeout=timeout,
     )
     return result.ok and result.stdout.strip().endswith('ready')
+
+
+def clip(text: str, keep: int = cfg.ERROR_CLIP) -> str:
+    """The last ``keep`` characters: a docker error says why at its end."""
+    text = text.strip()
+    return text if len(text) <= keep else '…' + text[-keep:]
+
+
+# What `docker start` prints, and exits non-zero on, when the runtime could not create or start the container (the
+# OCI runtime, NVIDIA's prestart hook, a device that is not there). Our binary never ran. A box could print this
+# itself, and gains nothing: a proof that did not run pays nothing and counts towards COULD_NOT_RUN_BENCH_AFTER.
+_DAEMON_ERROR = 'Error response from daemon'
+
+
+def container_never_started(exit_code: int, stderr: str) -> bool:
+    return exit_code != 0 and _DAEMON_ERROR in (stderr or '')
 
 
 PROOF_IMAGE_PULLING = 'proof image not on the box yet: its pull was started, proved on a later round'
@@ -216,16 +243,19 @@ def fire_box(
             return _card(gpu.uuid, '', ProofVerdict(False, 'not staged', gpu.uuid))
         command = proof.start_command(staged, gpu.uuid)
         started = clock()
+        never_started = False
         try:
             result = runner.run(command, timeout=timeout)
             elapsed_ms = (clock() - started) * 1000.0
             stdout = result.stdout if result.ok else ''
-            error = '' if result.ok else f'exit {result.exit_code}: {(result.stderr or result.stdout).strip()[:300]}'
-        except Exception as e:  # transport died mid-proof
+            error = '' if result.ok else f'exit {result.exit_code}: {clip(result.stderr or result.stdout)}'
+            never_started = container_never_started(result.exit_code, result.stderr)
+        except Exception as e:  # transport died mid-proof: the challenge was out, so this stays a failed proof
             elapsed_ms = (clock() - started) * 1000.0
-            stdout, error = '', f'{type(e).__name__}: {e}'[:300]
+            stdout, error = '', clip(f'{type(e).__name__}: {e}')
         if error:
-            verdict = ProofVerdict(False, f'job error: {error}', gpu.uuid, elapsed_ms=elapsed_ms)
+            reason = f'container never started: {error}' if never_started else f'job error: {error}'
+            verdict = ProofVerdict(False, reason, gpu.uuid, elapsed_ms=elapsed_ms, not_run=never_started)
         else:
             verdict = proof.judge(staged, gpu.uuid, stdout, elapsed_ms, gpu.memory_total_bytes)
         return _card(gpu.uuid, command, verdict)
@@ -259,10 +289,10 @@ def probe_box(
     try:
         staged = stage_box(runner, gpus, proof, image, timeout)
     except ProofUnavailable as e:
-        result.error = str(e)[:300]
+        result.error = clip(str(e))
         return result
     except Exception as e:  # transport
-        result.error = f'staging failed: {type(e).__name__}: {e}'[:300]
+        result.error = clip(f'staging failed: {type(e).__name__}: {e}')
         return result
     try:
         result.cards = fire_box(runner, gpus, proof, staged, timeout, clock)

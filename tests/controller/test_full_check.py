@@ -15,7 +15,7 @@ from gittensor.controller.checks.scrape import (
     network_command,
     nvidia_smi_command,
 )
-from gittensor.controller.checks.verdict import ADMIT, BENCH, CheckResult, CheckVerdict
+from gittensor.controller.checks.verdict import ADMIT, BENCH, NOT_RUN, CheckResult, CheckVerdict
 from gittensor.controller.proof.slot import UnconfiguredProof
 from tests.controller.conftest import (
     CONFIG,
@@ -115,12 +115,12 @@ def test_wrong_gpu_model_fails_gpu_spec_and_stages_nothing(proof, allowlist):
 def test_no_provider_in_the_slot_admits_nobody(allowlist):
     runner = passing_runner()
     verdict = run_full_check(runner, allowlist, UnconfiguredProof(), config=CONFIG)
-    assert verdict.verdict == BENCH and verdict.failed == [ck.GPU_PROOF]
+    assert verdict.verdict == NOT_RUN and not verdict.admitted and verdict.not_run == [ck.GPU_PROOF]
     ev = check(verdict, ck.GPU_PROOF).evidence
     assert 'no GPU proof provider configured' in ev['reason'] and ev['provider'] == 'unconfigured'
     assert proof_calls(runner) == []
     # and the default argument is that same fail-closed provider
-    assert run_full_check(passing_runner(), allowlist, config=CONFIG).failed == [ck.GPU_PROOF]
+    assert run_full_check(passing_runner(), allowlist, config=CONFIG).not_run == [ck.GPU_PROOF]
 
 
 def test_extra_uuid_fails_the_pin(proof, allowlist):
@@ -226,22 +226,53 @@ def test_proof_answered_by_another_card_or_underfilled_fails(proof, allowlist):
     assert verdict.failed == [ck.GPU_PROOF] and 'under-filled' in check(verdict, ck.GPU_PROOF).evidence['reason']
 
 
-def test_proof_job_failure_dead_transport_and_failed_staging(proof, allowlist):
+def test_a_proof_that_ran_and_failed_is_a_failure(proof, allowlist):
     runner = passing_runner().on(
         regex(r'^docker start '), failing('{"error":"nothing staged at /opt/gt-proof/bin/gt_proof"}')
     )
     verdict = run_full_check(runner, allowlist, proof, config=CONFIG)
-    assert verdict.failed == [ck.GPU_PROOF] and 'job error' in check(verdict, ck.GPU_PROOF).evidence['reason']
+    assert verdict.verdict == BENCH and verdict.failed == [ck.GPU_PROOF]
+    assert 'job error' in check(verdict, ck.GPU_PROOF).evidence['reason']
+    # the transport dying mid-proof stays a failure: the challenge was out
     runner = passing_runner().on(regex(r'^docker start '), TimeoutError('ssh: timed out'))
     verdict = run_full_check(runner, allowlist, proof, config=CONFIG)
     assert verdict.failed == [ck.GPU_PROOF] and 'TimeoutError' in check(verdict, ck.GPU_PROOF).evidence['reason']
+
+
+OCI_ERROR = (
+    'Error response from daemon: failed to create task for container: failed to create shim task: OCI runtime create '
+    'failed: runc create failed: unable to start container process: error during container init: error running '
+    "prestart hook #0: exit status 1, stdout: , stderr: Auto-detected mode as 'legacy'\n"
+    'nvidia-container-cli: initialization error: nvml error: driver/library version mismatch: unknown'
+)
+
+
+def test_a_proof_that_could_not_run_is_not_a_failure(proof, allowlist):
+    """Mainnet 9/19: NVIDIA's prestart hook failed on a miner's box, the proof never ran, and it was benched 64 h as a
+    failed GPU proof, with the hook's reason cut off at 300 characters."""
+    runner = passing_runner().on(regex(r'^docker start '), failing(OCI_ERROR))
+    verdict = run_full_check(runner, allowlist, proof, config=CONFIG)
+    assert verdict.verdict == NOT_RUN and not verdict.admitted
+    assert verdict.failed == [] and verdict.not_run == [ck.GPU_PROOF]
+    result = check(verdict, ck.GPU_PROOF)
+    assert result.not_run and not result.passed and result.as_dict()['not_run'] is True
+    assert 'container never started' in result.evidence['reason']
+    assert 'driver/library version mismatch' in result.evidence['reason']  # the end of the error is what is kept
+    # a failed stage is the same: nothing ran
     runner = passing_runner().on(regex(r'^docker create '), failing('docker: no such image'))
     verdict = run_full_check(runner, allowlist, proof, config=CONFIG)
     ev = check(verdict, ck.GPU_PROOF).evidence
-    assert verdict.failed == [ck.GPU_PROOF] and 'docker create failed' in ev['reason'] and ev['cards'] == []
+    assert verdict.not_run == [ck.GPU_PROOF] and 'docker create failed' in ev['reason'] and ev['cards'] == []
     runner = passing_runner().on(regex(r'^docker create '), ConnectionError('ssh: connection reset'))
-    ev = check(run_full_check(runner, allowlist, proof, config=CONFIG), ck.GPU_PROOF).evidence
-    assert 'staging failed: ConnectionError' in ev['reason']
+    verdict = run_full_check(runner, allowlist, proof, config=CONFIG)
+    assert verdict.verdict == NOT_RUN
+    assert 'staging failed: ConnectionError' in check(verdict, ck.GPU_PROOF).evidence['reason']
+
+
+def test_a_named_failure_wins_over_a_check_that_could_not_run():
+    checks = [CheckResult('gpu_spec', False, {'reason': 'a 4090'}), CheckResult(ck.GPU_PROOF, False, {}, not_run=True)]
+    verdict = CheckVerdict.from_checks(checks, [])
+    assert verdict.verdict == BENCH and verdict.failed == ['gpu_spec'] and verdict.not_run == [ck.GPU_PROOF]
 
 
 def test_agent_image_digest_disk_and_network(proof, allowlist):
@@ -263,9 +294,10 @@ def test_agent_image_digest_disk_and_network(proof, allowlist):
     assert verdict.failed == [ck.DISK_FREE] and '< 100 GB' in check(verdict, ck.DISK_FREE).evidence['reason']
     runner = passing_runner().on(disk_free_command(), failing('df: /var/lib/docker: No such file or directory'))
     assert run_full_check(runner, allowlist, proof, config=CONFIG).failed == [ck.DISK_FREE]
+    # the network is evidence, never a failure (mainnet 9/19: one Hugging Face miss emptied the fleet for 4 h)
     runner = passing_runner().on(network_command(NETWORK_TARGETS[1]), failing('curl: (6) Could not resolve host', 6))
     verdict = run_full_check(runner, allowlist, proof, config=CONFIG)
-    assert verdict.failed == [ck.NETWORK] and NETWORK_TARGETS[1] in check(verdict, ck.NETWORK).evidence['reason']
+    assert verdict.admitted and check(verdict, ck.NETWORK).evidence['unreachable'] == [NETWORK_TARGETS[1]]
 
 
 def test_several_failures_are_all_named(proof, allowlist):

@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from gittensor.controller.checks import config as cfg
-from gittensor.controller.checks.state import BENCHED, BoxState
+from gittensor.controller.checks.state import BENCHED, BoxState, ladder_rung
 from gittensor.controller.manifest import gpu_type_of
 from gittensor.controller.pay.ledger import Ledger, is_withheld
 from gittensor.controller.pay.rates import RatesError, load_rates
@@ -249,6 +249,9 @@ def build_fleet(
                 'last_failed': _names(box.last_failed),
                 'bench_until': box.bench_until if benched else None,
                 'benched_reason': bench_event['kind'] if bench_event else None,
+                # The rungs clean time has left (the next bench is rung + 1), and checks in a row that could not run.
+                'ladder_rung': ladder_rung(box, now),
+                'strikes': box.not_run_count,
                 'pay': pay,
                 'last_event': _last_event(box.standing_events),
                 'cards': cards,

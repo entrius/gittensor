@@ -52,8 +52,9 @@ class FakeRuntime:
     ``hold`` parks each completion until set (a busy instance); ``after_first`` parks a stream after its first chunk;
     ``error`` answers every completion with ``(status, body)``."""
 
-    def __init__(self, model_id=RUNTIME_ID, usage=True, max_output_tokens: int | None = 32768):
+    def __init__(self, model_id=RUNTIME_ID, usage=True, max_output_tokens: int | None = 32768, model_extra=None):
         self.model_id, self.usage, self.max_output_tokens = model_id, usage, max_output_tokens
+        self.model_extra: dict = model_extra or {}  # more fields on the runtime's own /v1/models object
         self.received: list[dict] = []
         self.models_read = 0
         self.sent: list[bytes] = []
@@ -97,6 +98,7 @@ class FakeRuntime:
         }
         if self.max_output_tokens is not None:
             model['max_output_tokens'] = self.max_output_tokens
+        model.update(self.model_extra)
         return web.json_response({'object': 'list', 'data': [model]})
 
     async def _completions(self, request):

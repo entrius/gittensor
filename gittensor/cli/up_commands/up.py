@@ -181,9 +181,10 @@ def up_command(
     certificate and drives it.
 
     \b
-    Open on your firewall / router, TCP from the internet, and nothing else:
+    Open on your firewall / router, TCP from the internet, one port and nothing else:
         the sshd port (--ssh-port, default {ssh})
-        the workload ports {low}-{high} (the controller publishes each instance on one of them)
+    Keep free on this box, nothing to open:
+        the workload ports {low}-{high} (the controller places each instance on one and reaches it over the sshd port)
     A home connection behind carrier-grade NAT cannot be reached and cannot join as-is.
 
     \b
@@ -371,7 +372,10 @@ def up_command(
     if not json_mode:
         started = AGENT_CONTAINER_NAME if no_update else RUNNER_CONTAINER_NAME
         low, high = WORKLOAD_PORT_RANGE
-        err_console.print(f'\n[green]Started {started}.[/green] sshd :{ssh_port}, workload ports {low}-{high}.')
+        err_console.print(
+            f'\n[green]Started {started}.[/green] sshd :{ssh_port} is the one port to open; '
+            f'workload ports {low}-{high} stay free on this box, nothing to open.'
+        )
         err_console.print(
             '[dim]Nothing else to do: the controller takes it from here. `gitt down` stops the agent.[/dim]'
         )

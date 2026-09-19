@@ -1146,14 +1146,15 @@ def _parse_port_range(value: str) -> list[int]:
     'port_maps',
     multiple=True,
     metavar='PORT=PUBLIC',
-    help='A host that remaps published ports (a Lium pod): instances on host port PORT are reached on PUBLIC.',
+    help='A host that remaps published ports (a Lium pod): instances on host port PORT are shown as PUBLIC '
+    "(used only for a public-bind instance under the gateway's --allow-direct).",
 )
 @click.option(
     '--workload-ports',
     default=None,
     metavar='LOW-HIGH',
     help=f'Host ports instances are published on (default: {WORKLOAD_PORT_RANGE[0]}-{WORKLOAD_PORT_RANGE[1]}, '
-    'what `gitt up` opens). A dev box whose provider exposes other ports: e.g. 8080-8080 with --port-map.',
+    'what `gitt up` keeps free). A dev box whose provider has other ports free: e.g. 8080-8080.',
 )
 @_state_options
 def admit_command(hotkey, host, port, force_rekey, port_maps, workload_ports, state_dir, json_mode):

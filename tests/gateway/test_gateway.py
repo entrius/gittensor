@@ -114,6 +114,7 @@ def test_limits_are_refused_before_any_instance_sees_the_request(world):
     remote_video = {**TOOL_BODY, 'messages': [{'role': 'user', 'content': [{'type': 'video_url', 'video_url': 'http://x/v.mp4'}]}]}  # fmt: skip
     cases = [
         ({**TOOL_BODY, 'n': 2}, 400, 'n must be 1'),
+        ({**TOOL_BODY, 'best_of': 2}, 400, 'best_of must be 1'),
         (remote_image, 400, 'remote media not supported yet'),
         (remote_video, 400, 'remote media not supported yet'),
         ({**TOOL_BODY, 'max_tokens': 'lots'}, 400, 'max_tokens must be a positive integer'),
@@ -134,6 +135,33 @@ def test_limits_are_refused_before_any_instance_sees_the_request(world):
                 assert got == 400 and 'not JSON' in json.loads(answer)['error']['message']
                 assert gw.table.in_flight == {}
         assert rt.received == []
+
+    asyncio.run(scenario())
+
+
+def test_one_request_is_one_completion_on_both_routes(world):
+    prompt = {'model': NAME, 'prompt': '<|im_start|>user\nhi', 'max_tokens': 8}
+
+    async def scenario():
+        entry = world.bless()
+        async with runtimes(FakeRuntime()) as (rt,):
+            world.place('i-a', entry, rt.port)
+            async with gateway(world) as (_, client):
+                for path, body in (('/v1/chat/completions', TOOL_BODY), ('/v1/completions', prompt)):
+                    for key in ('n', 'best_of'):
+                        got, answer, _ = await post(client, {**body, key: 3}, path=path)
+                        assert (got, json.loads(answer)) == (
+                            400,
+                            {'error': {'type': 'invalid_request_error', 'message': f'{key} must be 1'}},
+                        )
+                assert rt.received == []  # refused before any instance saw them
+                ones = [
+                    ('/v1/chat/completions', json.dumps({**TOOL_BODY, 'n': 1, 'best_of': 1}, indent=1).encode()),
+                    ('/v1/completions', json.dumps({**prompt, 'model': RUNTIME_ID, 'n': 1, 'best_of': 1}).encode()),
+                ]
+                for path, raw in ones:
+                    assert (await post(client, path=path, raw=raw))[0] == 200
+        assert [(r['path'], r['body']) for r in rt.received] == ones  # as sent, byte for byte
 
     asyncio.run(scenario())
 

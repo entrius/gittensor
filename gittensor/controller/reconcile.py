@@ -132,7 +132,9 @@ class InstanceRecord:
     uuid: str
     container_id: str = ''
     host: str = ''
-    port: int | None = None  # the port the outside reaches (the box's port map applied)
+    # host_port with the box's port map applied. Informational for a private instance (the gateway reaches it through
+    # its tunnel); only a public-bind instance under the gateway's --allow-direct is addressed at host:port.
+    port: int | None = None
     host_port: int | None = None  # the box's port the instance is published on, from its workload range
     bind: str = BIND_PUBLIC  # private: published on the box's docker bridge address; public: the previous form
     healthy: bool = False

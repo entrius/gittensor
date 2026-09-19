@@ -330,7 +330,7 @@ def check_workload_ports(probe: HostProbe, ports: range, report: PrereqReport, r
             '`gitt up --reclaim` removes them now',
             required=False,
         )
-    return CheckResult(name, True, f'{span} free (open them to the internet, like the sshd port)')
+    return CheckResult(name, True, f'{span} free (kept free on this box, nothing to open)')
 
 
 def check_public_ip(probe: HostProbe, given: str | None) -> tuple[CheckResult, str | None]:

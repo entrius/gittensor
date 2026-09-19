@@ -89,11 +89,11 @@ class BoxState:
     host_key: str = ''
     cards: Dict[str, CardState] = field(default_factory=dict)  # pinned uuid -> card state
     failed_starts: int = 0  # consecutive failed lease starts on this box; FAILED_STARTS_BENCH_AFTER benches it
-    # Host port -> the port the outside world reaches it on, for hosts that remap ports (a Lium pod). Empty on a real
-    # miner box, where the host port is reached as-is.
+    # Host port -> the port a remapping host (a Lium pod) shows it as, applied to an instance record's ``port``. Only a
+    # public-bind instance under the gateway's --allow-direct is addressed by it; empty on a real miner box.
     port_map: Dict[str, int] = field(default_factory=dict)
-    # [low, high] host ports instances are given, inclusive. Empty: the convention every `gitt up` box opens
-    # (``WORKLOAD_PORT_RANGE``); a dev box whose provider exposes other ports sets it at admit.
+    # [low, high] host ports instances are given, inclusive. Empty: the range every `gitt up` box keeps free
+    # (``WORKLOAD_PORT_RANGE``); a dev box whose provider has other ports free sets it at admit.
     workload_ports: List[int] = field(default_factory=list)
     # Who put the box here: 'chain' (discovery read its endpoint off the metagraph and removes it when the hotkey
     # deregisters) or 'operator' (`gitt controller admit`; discovery leaves it alone). '' is a file from before this.

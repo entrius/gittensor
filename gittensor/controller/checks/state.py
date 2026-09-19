@@ -7,7 +7,8 @@ state machine (IDLE / STARTING / LEASED / DRAINING / CHECKING, ``23`` §4a).
 Pure functions over a ``BoxState`` plus a tiny JSON store; the controller is the single writer. A box enters at ADMIT;
 its first passing full check pins its UUIDs, moves it to IDLE and makes every pinned card IDLE. Any BENCH verdict
 sends the box to BENCHED for the next rung of the ladder (1 h -> 4 h -> 16 h -> 64 h, ``23`` §5), clears the pin and
-the cards, and when the bench expires it re-enters through ADMIT. A long clean stretch resets the ladder.
+the cards, and when the bench expires it re-enters through ADMIT. Clean time steps the ladder back down
+(``ladder_rung``). A check that could not be carried out is a strike, not a bench (``apply_not_run``).
 
 The card, not the box, is the unit of placement (``23`` §4a, §7): a start takes an IDLE card to STARTING, then LEASED
 at its first healthy probe (or CHECKING on a failed start); a drain takes LEASED through DRAINING to CHECKING; the
@@ -21,7 +22,7 @@ from typing import Dict, List, Optional, Sequence
 
 from gittensor.agent.config import WORKLOAD_PORT_RANGE
 from gittensor.controller.checks import config as cfg
-from gittensor.controller.checks.verdict import CheckVerdict
+from gittensor.controller.checks.verdict import NOT_RUN, CheckVerdict
 
 ADMIT = 'ADMIT'
 IDLE = 'IDLE'
@@ -52,6 +53,7 @@ UNREACHABLE_BENCHED = 'unreachable_benched'
 START_FAILED = 'start_failed'
 DRAIN_FAILED = 'drain_failed'
 CLEAN_LEASE = 'clean_lease'
+CHECK_NOT_RUN = 'check_not_run'
 
 
 class CardTransitionError(ValueError):
@@ -75,13 +77,21 @@ class BoxState:
     status: str = ADMIT
     pinned_uuids: List[str] = field(default_factory=list)
     card_name: str = ''
-    bench_count: int = 0  # rungs climbed; resets after a clean stretch
+    bench_count: int = 0  # rungs climbed as of the last bench; ``ladder_rung`` is what clean time has left of it
     benched_at: Optional[float] = None
     bench_until: Optional[float] = None
     last_check_at: Optional[float] = None
     last_failed: List[str] = field(default_factory=list)
     admitted_at: Optional[float] = None
     unreachable_count: int = 0  # consecutive rounds with no verdict because SSH failed; reset by any verdict
+    # Consecutive checks that could not be carried out (``apply_not_run``), and when the last one was. A pass or a
+    # bench starts the count over.
+    not_run_count: int = 0
+    not_run_at: Optional[float] = None
+    # The clean clock behind ``ladder_rung`` runs from ``admitted_at``. It stops while the box is unreachable or has a
+    # strike: ``clean_paused_at`` is when it stopped, ``clean_paused_s`` the stops already over.
+    clean_paused_at: Optional[float] = None
+    clean_paused_s: float = 0.0
     # Where the box's agent sshd answers, and its host key pinned at admission (``gitt controller admit``). Files
     # written before these fields existed load with the defaults.
     host: str = ''
@@ -149,17 +159,48 @@ def backoff_seconds(bench_count: int, ladder: Sequence[int] = cfg.BENCH_BACKOFF_
     return int(ladder[min(bench_count, len(ladder)) - 1])
 
 
+def clean_seconds(state: BoxState, now: float) -> float:
+    """How long the box has been admitted and answering since its last bench, leased or idle. Zero on a box that is not
+    IDLE; the time it spent unreachable or on a strike does not count."""
+    if state.status != IDLE or state.admitted_at is None:
+        return 0.0
+    until = state.clean_paused_at if state.clean_paused_at is not None else now
+    return max(0.0, until - state.admitted_at - state.clean_paused_s)
+
+
+def ladder_rung(
+    state: BoxState,
+    now: float,
+    step_down_s: float = cfg.BENCH_LADDER_STEP_DOWN_S,
+    clean_slate_s: float = cfg.BENCH_LADDER_CLEAN_SLATE_S,
+) -> int:
+    """The rungs the box still stands on: ``bench_count`` less one per ``step_down_s`` of clean time, none at all from
+    ``clean_slate_s`` (Kimbo 9/19). The next bench is rung ``ladder_rung + 1``."""
+    clean = clean_seconds(state, now)
+    if clean >= clean_slate_s:
+        return 0
+    return max(0, state.bench_count - int(clean // step_down_s))
+
+
+def _pause_clean(new: BoxState, now: float) -> None:
+    if new.clean_paused_at is None and new.status == IDLE:
+        new.clean_paused_at = now
+
+
+def _resume_clean(new: BoxState, now: float) -> None:
+    if new.clean_paused_at is not None and not new.unreachable_count and not new.not_run_count:
+        new.clean_paused_s += max(0.0, now - new.clean_paused_at)
+        new.clean_paused_at = None
+
+
 def _bench(
     new: BoxState,
     now: float,
     failed: Sequence[str],
     ladder: Sequence[int] = cfg.BENCH_BACKOFF_LADDER_S,
-    ladder_reset_after_s: float = cfg.BENCH_LADDER_RESET_AFTER_S,
 ) -> BoxState:
-    """Climb the ladder (or restart it after a long clean stretch), clear the pin and the cards, wait it out."""
-    if new.benched_at is not None and now - new.benched_at > ladder_reset_after_s:
-        new.bench_count = 0
-    new.bench_count += 1
+    """Climb the ladder from the rung clean time has left, clear the pin and the cards, wait it out."""
+    new.bench_count = ladder_rung(new, now) + 1
     new.status = BENCHED
     new.benched_at = now
     new.bench_until = now + backoff_seconds(new.bench_count, ladder)
@@ -168,6 +209,10 @@ def _bench(
     new.admitted_at = None
     new.cards = {}
     new.failed_starts = 0
+    new.not_run_count = 0
+    new.not_run_at = None
+    new.clean_paused_at = None
+    new.clean_paused_s = 0.0
     return new
 
 
@@ -176,23 +221,30 @@ def apply_verdict(
     verdict: CheckVerdict,
     now: float,
     ladder: Sequence[int] = cfg.BENCH_BACKOFF_LADDER_S,
-    ladder_reset_after_s: float = cfg.BENCH_LADDER_RESET_AFTER_S,
     proved: Optional[Sequence[str]] = None,
 ) -> BoxState:
     """The state after a full check. Pure: returns a new ``BoxState``. A pass at ADMIT makes every pinned card IDLE;
     a pass at IDLE returns CHECKING cards to IDLE and leaves busy cards alone. With ``proved`` (the cards the proof
-    actually ran on) only those return: a card that reached CHECKING mid-round was not proved."""
+    actually ran on) only those return: a card that reached CHECKING mid-round was not proved. A verdict with nothing
+    failed and a check that could not run is a strike (``apply_not_run``)."""
+    if verdict.verdict == NOT_RUN:
+        return apply_not_run(state, verdict.not_run, now, ladder=ladder, proved=proved)
     new = BoxState.from_dict(state.as_dict())
     new.last_check_at = now
     new.last_failed = list(verdict.failed)
     new.unreachable_count = 0
     if verdict.admitted:
         new.identity = identity_baseline(verdict) or new.identity
+        new.not_run_count = 0
+        new.not_run_at = None
         if new.status == ADMIT:
             new.pinned_uuids = list(verdict.gpu_uuids)
             new.card_name = verdict.card_name
             new.admitted_at = now
+            new.clean_paused_at = None
+            new.clean_paused_s = 0.0
             new.cards = {}
+        _resume_clean(new, now)
         for uuid in new.pinned_uuids:
             card = new.cards.get(uuid)
             if card is None or (card.state == CHECKING and (proved is None or uuid in proved)):
@@ -200,7 +252,43 @@ def apply_verdict(
         new.status = IDLE
         return new
     new = add_event(new, CHECK_FAILED, now, failed=list(verdict.failed))
-    return _bench(new, now, verdict.failed, ladder, ladder_reset_after_s)
+    return _bench(new, now, verdict.failed, ladder)
+
+
+def apply_not_run(
+    state: BoxState,
+    not_run: Sequence[str],
+    now: float,
+    bench_after: int = cfg.COULD_NOT_RUN_BENCH_AFTER,
+    ladder: Sequence[int] = cfg.BENCH_BACKOFF_LADDER_S,
+    proved: Optional[Sequence[str]] = None,
+) -> BoxState:
+    """The state after a check that could not be carried out (Kimbo 9/19): a strike. No answer was judged, so it is no
+    caught cheat, and no proof either: ``last_check_at`` does not move, and the cards the proof was for (``proved``;
+    every IDLE card without it) go to CHECKING, unpaid and not leasable until a proof passes. Busy cards keep their
+    lease. A box at ADMIT stays there. ``bench_after`` strikes in a row are a failed check on the ladder: a box must not
+    dodge a proof by breaking its own container runtime. Pure."""
+    new = BoxState.from_dict(state.as_dict())
+    new.unreachable_count = 0  # the box answered
+    new.not_run_count += 1
+    new.not_run_at = now
+    if new.not_run_count >= bench_after:
+        new = add_event(new, CHECK_FAILED, now, failed=list(not_run), not_run_rounds=new.not_run_count)
+        return _bench(new, now, list(not_run), ladder)
+    new = add_event(new, CHECK_NOT_RUN, now, not_run=list(not_run), strike=new.not_run_count)
+    _pause_clean(new, now)
+    for uuid, card in new.cards.items():
+        if card.state == IDLE and (proved is None or uuid in proved):
+            new.cards[uuid] = CardState(CHECKING, '', now)
+    return new
+
+
+def not_run_retry_at(state: BoxState, retry_s: float = cfg.COULD_NOT_RUN_RETRY_S) -> Optional[float]:
+    """When a box with a strike may be proved again (one try a round, so three strikes take three rounds); None for a
+    box with no strike."""
+    if not state.not_run_count or state.not_run_at is None:
+        return None
+    return state.not_run_at + retry_s
 
 
 UNREACHABLE = 'ssh_unreachable'
@@ -217,6 +305,7 @@ def apply_unreachable(
     in-lease heartbeat is counted on the instance instead (``heartbeat.py``; Kimbo 9/16). Pure."""
     new = BoxState.from_dict(state.as_dict())
     new.unreachable_count += 1
+    _pause_clean(new, now)
     if new.unreachable_count >= bench_after and new.status != BENCHED:
         new = add_event(new, UNREACHABLE_BENCHED, now, rounds=new.unreachable_count)
         new.status = BENCHED
@@ -226,26 +315,35 @@ def apply_unreachable(
         new.pinned_uuids = []
         new.admitted_at = None
         new.cards = {}
+        new.not_run_count = 0
+        new.not_run_at = None
+        new.clean_paused_at = None
+        new.clean_paused_s = 0.0
     return new
 
 
-def mark_reachable(state: BoxState) -> BoxState:
-    """A visit that got an answer (an in-lease heartbeat, pass or fail) resets the unreachable count, as a verdict does.
-    Pure; the same object when there is nothing to reset."""
+def mark_reachable(state: BoxState, now: Optional[float] = None) -> BoxState:
+    """A visit that got an answer (an in-lease heartbeat, pass or fail) resets the unreachable count, as a verdict does,
+    and with ``now`` starts the clean clock again. Pure; the same object when there is nothing to reset."""
     if not state.unreachable_count:
         return state
     new = BoxState.from_dict(state.as_dict())
     new.unreachable_count = 0
+    if now is not None:
+        _resume_clean(new, now)
     return new
 
 
 RELEASED = 'released'  # the standing event of an operator ending a bench early
+HEARTBEAT_FAILED = 'heartbeat_failed'
+_BENCH_EVENTS = (CHECK_FAILED, HEARTBEAT_FAILED, UNREACHABLE_BENCHED)  # what a bench writes at ``benched_at``
 
 
-def request_release(state: BoxState, now: float, reason: str) -> BoxState:
-    """``gitt controller release``: ask for this bench to end now. Pure; ``release_from_bench`` applies it."""
+def request_release(state: BoxState, now: float, reason: str, forgive: bool = False) -> BoxState:
+    """``gitt controller release``: ask for this bench to end now; ``forgive`` also takes it off the box's record (the
+    fault was ours). Pure; ``release_from_bench`` applies it."""
     new = BoxState.from_dict(state.as_dict())
-    new.release_request = {'at': now, 'reason': reason}
+    new.release_request = {'at': now, 'reason': reason, **({'forgive': True} if forgive else {})}
     return new
 
 
@@ -271,7 +369,9 @@ def release_from_bench(state: BoxState, now: float) -> BoxState:
     standing event with the reason; the ladder rung stays). An operator's release also clears ``withheld_from`` (Kimbo
     9/16: the operator has judged the bench wrong or the test over, so the leased pay withheld over the box's UTC day
     +-1 is given back; the ledger is append-only and ``settle_window`` recomputes from the current field); the event
-    records what was cleared. An expired bench keeps its withheld window. Otherwise unchanged."""
+    records what was cleared. A release with ``forgive`` (Kimbo 9/19: the bench was our fault) also gives the rung
+    back, drops the standing event the bench wrote, and is itself neutral to standing. An expired bench keeps its
+    withheld window. Otherwise unchanged."""
     early = release_requested(state)
     if state.status != BENCHED or (not early and (state.bench_until is None or now < state.bench_until)):
         return state
@@ -280,6 +380,15 @@ def release_from_bench(state: BoxState, now: float) -> BoxState:
     new.bench_until = None
     if early:
         request = state.release_request
+        forgiven = bool(request.get('forgive'))
+        if forgiven:
+            if state.last_failed not in ([UNREACHABLE], [DEREGISTERED]):  # those benches never climbed the ladder
+                new.bench_count = max(0, new.bench_count - 1)
+            new.standing_events = [
+                e
+                for e in new.standing_events
+                if not (e.get('at') == state.benched_at and e.get('kind') in _BENCH_EVENTS)
+            ]
         new = add_event(
             new,
             RELEASED,
@@ -288,6 +397,7 @@ def release_from_bench(state: BoxState, now: float) -> BoxState:
             requested_at=request['at'],
             bench_until=state.bench_until,
             withheld_from=state.withheld_from,  # what the release gave back (None: nothing was withheld)
+            **({'forgiven': True} if forgiven else {}),
         )
         new.withheld_from = None
     return new
@@ -351,7 +461,6 @@ def identity_baseline(verdict: CheckVerdict) -> dict:
     return out
 
 
-HEARTBEAT_FAILED = 'heartbeat_failed'
 HEALTH_FAILED = 'health_failed'
 # The heartbeat's three questions (``23`` §5), as they are named in a bench reason and in ``instances.json``.
 SAME_CARD = 'same_card'

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.scrape import GpuInfo
 from gittensor.controller.proof import slot
 from tests.controller.conftest import FakeProof, container_for, job_responder, passing_runner
@@ -134,3 +135,24 @@ def test_job_is_stdlib_only_and_the_image_ships_no_binary():
         0
     ].replace('kernel/gt_gemm.cu', '')
     assert 'nvcc' not in dockerfile  # nothing is compiled into the base image
+
+
+def test_a_container_that_never_started_is_not_run_and_a_wrong_answer_is_not():
+    oci = 'Error response from daemon: failed to create task for container: OCI runtime create failed: prestart hook #0'
+    assert slot.container_never_started(1, oci) and slot.container_never_started(125, 'x\n' + oci)
+    assert not slot.container_never_started(0, oci)  # it ran
+    assert not slot.container_never_started(1, '{"error":"nothing staged"}')  # our binary ran and said no
+    never = {'passed': False, 'not_run': True, 'uuid': 'GPU-a', 'reason': 'container never started'}
+    wrong = {'passed': False, 'not_run': False, 'uuid': 'GPU-b', 'reason': 'wrong nonce'}
+    fine = {'passed': True, 'not_run': False, 'uuid': 'GPU-c', 'reason': 'ok'}
+    assert slot.ProbeResult('p', cards=[never, fine]).not_run
+    assert not slot.ProbeResult('p', cards=[never, wrong]).not_run  # one judged failure: a failed proof
+    assert not slot.ProbeResult('p', cards=[fine]).not_run
+    assert slot.ProbeResult('p', error='staging failed').not_run
+
+
+def test_clip_keeps_the_end_of_an_error():
+    assert slot.clip('  short  ') == 'short'
+    long = 'boilerplate ' * 400 + 'nvml error: driver/library version mismatch'
+    kept = slot.clip(long)
+    assert len(kept) == cfg.ERROR_CLIP + 1 and kept.startswith('…') and kept.endswith('version mismatch')

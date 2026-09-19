@@ -227,6 +227,11 @@ class SshRunner:
             raise SshTransportError(f'{self._ssh}: {e}') from e
         stdout = _text(proc.stdout)
         stderr = _text(proc.stderr)
+        if proc.returncode < 0:
+            # Our own ssh client was killed by a signal (a controller stop mid-visit): the box said nothing. A remote
+            # command's status is 0-255, so the box cannot produce this. Mainnet 9/19: a restart killed a heartbeat's
+            # nvidia-smi (exit -2), it was judged as `same_card`, and a healthy serving box was benched.
+            raise SshTransportError(f'{self.host}:{self.port}: ssh killed by signal {-proc.returncode}')
         if proc.returncode == SSH_EXIT_TRANSPORT:
             raise SshTransportError(f'{self.host}:{self.port}: {stderr.strip()[:300] or "ssh exit 255"}')
         return CommandResult(proc.returncode, stdout, stderr)

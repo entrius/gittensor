@@ -59,7 +59,9 @@ DISK_MIN_FREE_GB = 100.0  # weights + images; Lium's VerifyX floor is the same 1
 # real box, 9/14: `df /var/lib/docker` inside gt-agent -> No such file or directory).
 DISK_PATH = ''
 HOST_ROOT = '/proc/1/root'
-# Docker Hub is the registry (vault 23 §8); the weights come from Hugging Face at pre-staging.
+# Docker Hub is the registry (vault 23 §8); the weights come from Hugging Face at pre-staging. Evidence only since
+# 9/19: one Hugging Face miss benched a healthy serving box and took the fleet to zero for 4 h. A box that cannot
+# pull fails its start, which has its own path (FAILED_STARTS_BENCH_AFTER).
 NETWORK_TARGETS = ('https://registry-1.docker.io/v2/', 'https://huggingface.co/api/models/Qwen')
 NETWORK_TIMEOUT_S = 10.0
 NVIDIA_SMI_TIMEOUT_S = 15.0
@@ -68,7 +70,7 @@ SSH_COMMAND_TIMEOUT_S = 30.0
 # State machine. Every idle card is probed at the same instant every 20 min (Kimbo 9/14), and the proof binary is
 # rebuilt every round, so a forger has to crack that round's build inside the 30 s answer window; worst case is
 # one cycle of idle pay before the bench. A BENCHED box waits out the ladder before it may re-enter through ADMIT,
-# and the ladder resets after a long clean stretch.
+# and it earns the ladder back down with clean time.
 FULL_CHECK_INTERVAL_S = 1200.0
 BENCH_BACKOFF_LADDER_S = (3_600, 14_400, 57_600, 230_400)  # 1 h -> 4 h -> 16 h -> 64 h (vault `23` §5)
 # A box SSH cannot reach gets no verdict (and no idle pay for that round: idle pay needs a passing proof). After
@@ -76,7 +78,21 @@ BENCH_BACKOFF_LADDER_S = (3_600, 14_400, 57_600, 230_400)  # 1 h -> 4 h -> 16 h 
 # dead link is not a caught cheat, but a box must not dodge a bench by dropping SSH forever (Kimbo 9/14).
 UNREACHABLE_BENCH_AFTER = 3
 UNREACHABLE_BENCH_S = 12 * 3_600
-BENCH_LADDER_RESET_AFTER_S = 7 * 86_400
+# The ladder steps back down with clean time (Kimbo 9/19): time the box is admitted and answering, leased or idle.
+# The clock stops on an unreachable round or a check that could not run, and a bench starts it over. The numbers are
+# standing's (STANDING_STANDARD_AFTER_S, STANDING_TRUSTED_AFTER_S). A forged proof is caught within one round, so a
+# cheat never collects a step while cheating.
+BENCH_LADDER_STEP_DOWN_S = 6 * 3_600  # one rung down per this much clean time
+BENCH_LADDER_CLEAN_SLATE_S = 48 * 3_600  # rung 0, however many were climbed
+# A check that could not be carried out (the proof container would not start, staging failed) is not a failed check
+# (Kimbo 9/19; mainnet 9/19: a first real fault on rung 4 cost 64 h). The cards it was for go to CHECKING (unpaid, not
+# leasable), the box is tried again after COULD_NOT_RUN_RETRY_S, and this many in a row bench it on the ladder: a box
+# must not dodge a proof by breaking its own container runtime. The count starts over after a bench.
+COULD_NOT_RUN_BENCH_AFTER = 3
+COULD_NOT_RUN_RETRY_S = 0.9 * FULL_CHECK_INTERVAL_S  # about one round; under it so the next round is not skipped
+# How much of a failed command's output is kept. The reason sits at the end of a docker error (9/19: 300 characters
+# from the front cut off what NVIDIA's hook said), so the tail is what is kept.
+ERROR_CLIP = 2_000
 
 # Placement (24 §3 WS-B). A failed start (health not by `placement.max_load_s`, canary failed, artifact mismatch) is
 # slow, not caught: undeploy, CHECKING, no bench. This many in a row on one box benches it on the ladder (Kimbo 9/14).

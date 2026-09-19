@@ -634,7 +634,7 @@ class Watch:
             ]  # fmt: skip
             result = result.without({r.id for r in stopped}, {r.uuid for r in stopped})
             if box_id in self.boxes.boxes:
-                reached = mark_reachable(self.boxes.boxes[box_id])
+                reached = mark_reachable(self.boxes.boxes[box_id], now)
                 if reached is not self.boxes.boxes[box_id]:
                     self.boxes.put(reached)
             for record in records:

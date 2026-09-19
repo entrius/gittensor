@@ -33,6 +33,7 @@ from tests.controller.conftest import (
     NVML_MD5,
     UUID_5090,
     UUID_5090_B,
+    failing,
     fixture,
     passing_runner,
 )
@@ -187,13 +188,17 @@ def test_dev_image_id_satisfies_the_agent_check_and_nothing_pinned_does_not(stat
     assert ck.check_agent_image(['sha256:' + 'a' * 64], ['sha256:' + 'a' * 64]).passed  # prod path unchanged
 
 
-def test_no_provider_benches_with_the_reason_named(state):
+def test_no_provider_admits_nobody_and_is_a_strike_with_the_reason_named(state):
     admit(state)
     with runners({HK_A: box_runner()}):
         result = check(state, '--agent-image-digest', AGENT_DIGEST, '--json')
-    assert result.exit_code == 1
-    proof = next(c for c in json.loads(result.stdout)['checks'] if c['name'] == ck.GPU_PROOF)
-    assert not proof['pass'] and 'no GPU proof provider configured' in proof['evidence']['reason']
+    assert result.exit_code == 2  # no answer was judged: not a bench
+    out = json.loads(result.stdout)
+    proof = next(c for c in out['checks'] if c['name'] == ck.GPU_PROOF)
+    assert not proof['pass'] and proof['not_run'] and 'no GPU proof provider configured' in proof['evidence']['reason']
+    assert out['verdict'] == 'NOT_RUN' and out['failed'] == [] and out['not_run'] == [ck.GPU_PROOF]
+    box = store(state).get(HK_A)
+    assert box.status == ADMIT and box.not_run_count == 1 and box.bench_count == 0
 
 
 def test_transport_failure_exits_2_counts_and_benches_after_three(state):
@@ -294,6 +299,27 @@ def test_release_ends_a_bench_early_and_refuses_a_box_that_is_not_benched(state)
         assert check(state, '--proof', FAKE_PROOF, '--agent-image-digest', AGENT_DIGEST).exit_code == 0
     box = store(state).get(HK_A)
     assert box.status == IDLE and box.pinned_uuids == [UUID_5090] and len(box.standing_events) == 1
+
+
+def test_release_forgive_gives_the_rung_back(state):
+    admit(state)
+    s = store(state)
+    benched = {
+        'status': BENCHED,
+        'benched_at': 5.0,
+        'bench_until': 9e12,
+        'bench_count': 2,
+        'last_failed': ['nvml_digest'],
+    }
+    events = [{'at': 5.0, 'kind': 'check_failed', 'failed': ['nvml_digest']}]
+    s.put(BoxState.from_dict({**s.get(HK_A).as_dict(), **benched, 'standing_events': events}))
+    result = invoke('release', HK_A, '--forgive', '--reason', 'our allowlist', '--state-dir', state, '--json')
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)['forgiven'] is True
+    box = store(state).get(HK_A)
+    assert box.status == ADMIT and box.bench_count == 1
+    (event,) = box.standing_events  # the bench's own event is gone
+    assert event['kind'] == 'released' and event['forgiven'] is True
     assert invoke('release', HK_A, '--state-dir', state).exit_code == 1  # IDLE: nothing to release
 
     # the request is for that bench only: a later bench is not lifted by it
@@ -427,6 +453,70 @@ def test_a_box_without_the_proof_image_gets_no_verdict_and_its_pull_is_started(s
         result = invoke(*round_args(state, '--json'))
     rows = {b['hotkey']: b for b in json.loads(result.stdout)['boxes']}
     assert rows[HK_B]['verdict'] == 'ADMIT' and store(state).get(HK_B).status == IDLE
+
+
+OCI_ERROR = (
+    'Error response from daemon: failed to create task for container: failed to create shim task: OCI runtime create '
+    'failed: runc create failed: unable to start container process: error during container init: error running '
+    'prestart hook #0: exit status 1, stdout: , stderr: nvidia-container-cli: initialization error: nvml error: '
+    'driver/library version mismatch: unknown'
+)
+
+
+def test_a_proof_container_that_will_not_start_is_a_strike_tried_once_a_round(state):
+    """Mainnet 9/19: NVIDIA's prestart hook failed on the first outside miner's box; the proof never ran and the box
+    was benched 64 h as a failed GPU proof. Now: a strike (no bench, the box beside it proved as usual), the full
+    reason in the log, one try a round, and the third strike in a row is a bench on the ladder."""
+    events, by_box = two_boxes(state, fixture('nvidia_smi_5090.csv').replace(UUID_5090, UUID_5090_B))
+    by_box[HK_B].inner.on(regex(r'^docker start '), failing(OCI_ERROR))
+    with runners(by_box):
+        result = invoke(*round_args(state, '--json'))
+    assert result.exit_code == 2, result.output  # no answer was judged
+    rows = {b['hotkey']: b for b in json.loads(result.stdout)['boxes']}
+    assert rows[HK_A]['verdict'] == 'ADMIT'
+    b = rows[HK_B]
+    assert (b['verdict'], b['failed'], b['not_run'], b['strikes']) == ('NOT_RUN', [], [ck.GPU_PROOF], 1)
+    reason = next(c for c in b['checks'] if c['name'] == ck.GPU_PROOF)['evidence']['reason']
+    assert reason.endswith('driver/library version mismatch: unknown')  # not cut off at 300
+    box = store(state).get(HK_B)
+    assert box.status == ADMIT and box.bench_count == 0 and box.not_run_count == 1
+    assert [e['kind'] for e in box.standing_events] == ['check_not_run']
+
+    # the next round comes before the retry is due: the box is left alone
+    events.clear()
+    with runners(by_box):
+        result = invoke(*round_args(state, '--json'))
+    rows = {b['hotkey']: b for b in json.loads(result.stdout)['boxes']}
+    assert rows[HK_B]['verdict'] is None and 'strike 1 of 3' in rows[HK_B]['busy']
+    assert not any(c.startswith('docker create') for hk, c in events if hk == HK_B)
+    assert store(state).get(HK_B).not_run_count == 1
+
+    def make_due():
+        s = store(state)
+        s.put(BoxState.from_dict({**s.get(HK_B).as_dict(), 'not_run_at': 0.0}))
+
+    for strikes, status in ((2, ADMIT), (0, BENCHED)):
+        make_due()
+        with runners(by_box):
+            invoke(*round_args(state, '--json'))
+        box = store(state).get(HK_B)
+        assert (box.not_run_count, box.status) == (strikes, status)
+    assert box.bench_count == 1 and box.last_failed == [ck.GPU_PROOF]
+    assert box.standing_events[-1]['kind'] == 'check_failed'
+
+
+def test_a_strike_clears_when_the_proof_runs_again(state):
+    events, by_box = two_boxes(state, fixture('nvidia_smi_5090.csv').replace(UUID_5090, UUID_5090_B))
+    by_box[HK_B].inner.on(regex(r'^docker start '), failing(OCI_ERROR))
+    with runners(by_box):
+        invoke(*round_args(state, '--json'))
+    s = store(state)
+    s.put(BoxState.from_dict({**s.get(HK_B).as_dict(), 'not_run_at': 0.0}))
+    events2, fixed = two_boxes(state, fixture('nvidia_smi_5090.csv').replace(UUID_5090, UUID_5090_B))
+    with runners(fixed):
+        invoke(*round_args(state, '--json'))
+    box = store(state).get(HK_B)
+    assert box.status == IDLE and box.not_run_count == 0 and box.bench_count == 0
 
 
 def test_round_benches_a_uuid_claimed_by_two_boxes(state):

@@ -99,6 +99,7 @@ from gittensor.controller.checks.state import (
     StateStore,
     apply_unreachable,
     apply_verdict,
+    not_run_retry_at,
     provable_uuids,
     release_from_bench,
     release_requested,
@@ -106,7 +107,7 @@ from gittensor.controller.checks.state import (
     request_release,
     request_remove,
 )
-from gittensor.controller.checks.verdict import CheckResult, CheckVerdict
+from gittensor.controller.checks.verdict import BENCH, NOT_RUN, CheckResult, CheckVerdict
 from gittensor.controller.daemon import STATUS_FILE, Controller, Intervals
 from gittensor.controller.discovery import ChainReader, DiscoverReport, Discovery
 from gittensor.controller.heartbeat import WatchReport
@@ -121,6 +122,7 @@ from gittensor.controller.proof.slot import (
     ProofUnavailable,
     StagedProof,
     UnconfiguredProof,
+    clip,
     fire_box,
     image_ref,
     proof_image_ready,
@@ -447,6 +449,13 @@ def busy_cards(box: BoxState, uuids: Iterable[str]) -> dict[str, str]:
     return {uuid: box.card(uuid).state for uuid in uuids if uuid not in provable}
 
 
+def _strike_wait(box: BoxState, retry_at: float) -> str:
+    return (
+        f'strike {box.not_run_count} of {cfg.COULD_NOT_RUN_BENCH_AFTER} (the last check could not run): '
+        f'tried again at {_when(retry_at)}'
+    )
+
+
 def _provable_gpus(box: BoxState, gpus: Sequence[GpuInfo]) -> list[GpuInfo]:
     provable = set(provable_uuids(box, [g.uuid for g in gpus]))
     return [g for g in gpus if g.uuid in provable]
@@ -529,8 +538,10 @@ class RoundReport:
     def exit_code(self) -> int:
         if any(r.transport_error for r in self.boxes):
             return EXIT_NO_VERDICT
-        if any(r.verdict is not None and not r.verdict.admitted for r in self.boxes):
+        if any(r.verdict is not None and r.verdict.verdict == BENCH for r in self.boxes):
             return EXIT_BENCH
+        if any(r.verdict is not None and not r.verdict.admitted for r in self.boxes):
+            return EXIT_NO_VERDICT  # a check that could not run: a strike, no answer judged
         return EXIT_ADMIT
 
 
@@ -626,10 +637,14 @@ def run_round(
         r.skipped.update({u: f'{r.box.card(u).state} (instance pending)' for u in r.scrape.uuids if u in held})
         if not r.proved:
             return  # every card hosts our workload: nothing staged, nothing fired, no verdict
+        retry_at = not_run_retry_at(r.box)
+        if retry_at is not None and time.time() < retry_at:
+            r.busy = _strike_wait(r.box, retry_at)
+            return
         try:
             ready = proof_image_ready(r.runner, config.proof_image)
         except Exception as e:  # transport died asking
-            r.stage_error = f'staging failed: {type(e).__name__}: {e}'[:300]
+            r.stage_error = clip(f'staging failed: {type(e).__name__}: {e}')
             return
         if not ready:
             r.busy = PROOF_IMAGE_PULLING  # setup, not proof: no verdict this round
@@ -637,9 +652,9 @@ def run_round(
         try:
             r.staged = stage_box(r.runner, r.proved, proof, config.proof_image, config.proof_timeout_s)
         except ProofUnavailable as e:
-            r.stage_error = str(e)[:300]
+            r.stage_error = clip(str(e))
         except Exception as e:  # transport died mid-stage
-            r.stage_error = f'staging failed: {type(e).__name__}: {e}'[:300]
+            r.stage_error = clip(f'staging failed: {type(e).__name__}: {e}')
 
     def cleanup(r: BoxRound) -> None:
         if r.runner is None or r.staged is None:
@@ -681,7 +696,7 @@ def run_round(
                     try:
                         r.cards = fire_box(runner, r.proved, proof, staged, config.proof_timeout_s, clock)
                     except Exception as e:
-                        r.stage_error = f'fire failed: {type(e).__name__}: {e}'[:300]
+                        r.stage_error = clip(f'fire failed: {type(e).__name__}: {e}')
 
                 _each(armed, fire)
             marks['fired'] = clock()
@@ -795,6 +810,10 @@ def reprove_box(
             if not cards:
                 row.busy = 'no CHECKING card left: nothing to re-prove'
                 return report()
+        retry_at = not_run_retry_at(current)
+        if retry_at is not None and time.time() < retry_at:
+            row.busy = _strike_wait(current, retry_at)
+            return report()
         row.box, row.status_before = current, current.status
         row.runner = TimedRunner(_make_runner(setup.state, current, setup.ca_key, 'reprove'))
         try:
@@ -1024,10 +1043,17 @@ def _when(ts: float | None) -> str:
 # ---------------------------------------------------------------- rendering ----------------------------------------
 
 
-_MARK = {'pass': '[green]✓ pass[/green]', 'fail': '[red]✗ fail[/red]', 'skip': '[dim]— skip[/dim]'}
+_MARK = {
+    'pass': '[green]✓ pass[/green]',
+    'fail': '[red]✗ fail[/red]',
+    'skip': '[dim]— skip[/dim]',
+    'not_run': '[yellow]? not run[/yellow]',
+}
 
 
 def _status(c: CheckResult) -> str:
+    if c.not_run:
+        return 'not_run'
     return 'skip' if c.skipped else ('pass' if c.passed else 'fail')
 
 
@@ -1088,6 +1114,8 @@ def _timings_text(timings: dict[str, float]) -> str:
 def _verdict_markup(verdict: CheckVerdict | None) -> str:
     if verdict is None:
         return '[yellow]no verdict[/yellow]'
+    if verdict.verdict == NOT_RUN:
+        return '[yellow]NOT RUN[/yellow]'
     return '[green]ADMIT[/green]' if verdict.admitted else '[red]BENCH[/red]'
 
 
@@ -1329,7 +1357,7 @@ def _check_one(setup: CheckSetup, hotkey: str, force: bool, json_mode: bool, bes
             + (f' (bench until {_when(after.bench_until)})' if after.status == BENCHED else '')
         )
         console.print(f'[dim]{_timings_text(timings)}[/dim]')
-    sys.exit(EXIT_ADMIT if verdict.admitted else EXIT_BENCH)
+    sys.exit(EXIT_ADMIT if verdict.admitted else EXIT_NO_VERDICT if verdict.verdict == NOT_RUN else EXIT_BENCH)
 
 
 @controller_group.command('round')
@@ -1412,6 +1440,7 @@ def _print_round(report: RoundReport, n: int, json_mode: bool) -> None:
                         'status': {'before': r.status_before, 'after': (r.after or r.box).status},
                         'transport_error': r.transport_error,
                         'busy': r.busy,
+                        'strikes': (r.after or r.box).not_run_count,
                         'cards': {'proved': [g.uuid for g in r.proved], 'skipped': r.skipped},
                         'timings_ms': phase_timings(r.runner.log) if r.runner else {},
                         'check_ms': check_timings(r.runner.log) if r.runner else {},
@@ -1515,11 +1544,18 @@ def remove_command(hotkey, reason, state_dir, json_mode):
 @controller_group.command('release')
 @click.argument('hotkey')
 @click.option('--reason', default='', help='Why the bench ends early: recorded on the `released` standing event.')
+@click.option(
+    '--forgive',
+    is_flag=True,
+    default=False,
+    help='The bench was our fault: also give its ladder rung back and take it off the standing record.',
+)
 @_state_options
-def release_command(hotkey, reason, state_dir, json_mode):
+def release_command(hotkey, reason, forgive, state_dir, json_mode):
     """End a bench early: BENCHED → ADMIT, re-pinned by the next proof round like an expired bench, with a `released`
-    standing event carrying the reason. The ladder rung stays; the pay withheld by the bench (the box's UTC day ±1) is
-    given back: the ledger rows already written stay, the next settlement pays them.
+    standing event carrying the reason. The ladder rung stays (--forgive gives it back and drops the bench's standing
+    event); the pay withheld by the bench (the box's UTC day ±1) is given back: the ledger rows already written stay,
+    the next settlement pays them.
 
     \b
     Beside `gitt controller run` the release is recorded in boxes.json and the controller applies it on its next round;
@@ -1532,7 +1568,7 @@ def release_command(hotkey, reason, state_dir, json_mode):
         _fail(f'{hotkey} is not admitted', json_mode, EXIT_NO_VERDICT)
     if box.status != BENCHED:
         _fail(f'{hotkey} is {box.status}, not benched: nothing to release', json_mode, EXIT_BENCH)
-    store.put(request_release(box, time.time(), reason))
+    store.put(request_release(box, time.time(), reason, forgive))
     after: BoxState | None = None
     if not state.daemon_running():
         try:
@@ -1552,6 +1588,7 @@ def release_command(hotkey, reason, state_dir, json_mode):
                 'success': True,
                 'hotkey': hotkey,
                 'reason': reason,
+                'forgiven': forgive,
                 'released': released,
                 'pending': not released,
                 'bench_until': box.bench_until,
@@ -2188,8 +2225,10 @@ class _DaemonPrinter:
                     'busy': r.busy,
                     'transport_error': r.transport_error,
                     'failed': r.verdict.failed if r.verdict else [],
+                    'not_run': r.verdict.not_run if r.verdict else [],
+                    'strikes': (r.after or r.box).not_run_count,
                     # why each failed: the operator's log only (fleet.json publishes the names, never the detail)
-                    'why': {c.name: check_detail(c)[:300] for c in r.verdict.checks if not c.passed and not c.skipped}
+                    'why': {c.name: clip(check_detail(c)) for c in r.verdict.checks if not c.passed and not c.skipped}
                     if r.verdict
                     else {},
                 }

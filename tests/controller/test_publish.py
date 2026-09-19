@@ -142,7 +142,7 @@ def test_the_contract(tmp_path):
     a, b, c = (next(x for x in doc['boxes'] if x['hotkey'] == hk) for hk in (HK_A, HK_B, HK_C))
     assert set(a) == {
         'hotkey', 'uid', 'status', 'standing', 'gpu_type', 'card_count', 'last_check_at', 'last_failed',
-        'bench_until', 'benched_reason', 'pay', 'last_event', 'cards',
+        'bench_until', 'benched_reason', 'ladder_rung', 'strikes', 'pay', 'last_event', 'cards',
     }  # fmt: skip
     assert (a['status'], a['standing'], a['gpu_type'], a['card_count'], a['uid']) == (
         IDLE, 'probation', 'RTX5090', 2, 61,

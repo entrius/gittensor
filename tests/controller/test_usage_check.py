@@ -58,7 +58,7 @@ sparkinfer_active_requests 1
 """
 
 
-def gw(started=100.0, in_flight=None, **served) -> GatewayView:
+def gw(started: float = 100.0, /, *, in_flight=None, **served) -> GatewayView:
     """A gateway read: ``served`` as instance -> (completion tokens, unaccounted allowance) or a Served."""
     rows = {k: v if isinstance(v, Served) else Served(completion_tokens=v[0], unaccounted_allowance_tokens=v[1]) for k, v in served.items()}  # fmt: skip
     return GatewayView(started, rows, dict(in_flight or {}))
@@ -206,7 +206,7 @@ def test_the_baseline_takes_the_gateway_read_before_the_runtime():
     # does not: in the miner's favour, never against.
     before, after = gw(**{INST: (0, 0)}), gw(**{INST: (8000, 0)})
     track, (base,) = run(sample(8000, before, after))
-    assert base.kind == BASELINE and track.baseline.gateway_completion == 0
+    assert base.kind == BASELINE and track.baseline is not None and track.baseline.gateway_completion == 0
     _, (j,) = run(sample(8000, after), track=track)
     assert j.kind == CLEAR and j.numbers['surplus'] == -8000
 
@@ -215,7 +215,12 @@ def test_a_runtime_counter_that_went_down_starts_a_new_baseline_and_clears_strik
     track, _ = run(sample(0), sample(10_000, gw(**{INST: (0, 0)})))
     assert track.strikes == 1
     track, (j,) = run(sample(50, gw(**{INST: (0, 0)})), track=track)  # the runtime restarted: its counters start over
-    assert j.kind == REBASELINE and track.strikes == 0 and track.baseline.runtime_completion == 50
+    assert (
+        j.kind == REBASELINE
+        and track.strikes == 0
+        and track.baseline is not None
+        and track.baseline.runtime_completion == 50
+    )
     track, (j,) = run(sample(50, gw(**{INST: (0, 0)})), track=track)
     assert j.kind == CLEAR
 
@@ -225,7 +230,12 @@ def test_a_gateway_restart_starts_a_new_baseline_and_clears_strikes():
     assert track.strikes == 1
     # The gateway restarted: its totals start over at zero, the runtime's keep counting.
     track, (j,) = run(sample(20_000, gw(200.0, **{INST: (500, 0)})), track=track)
-    assert j.kind == REBASELINE and track.strikes == 0 and track.baseline.gateway_started_at == 200.0
+    assert (
+        j.kind == REBASELINE
+        and track.strikes == 0
+        and track.baseline is not None
+        and track.baseline.gateway_started_at == 200.0
+    )
     track, (j,) = run(sample(21_000, gw(200.0, **{INST: (1500, 0)})), track=track)
     assert j.kind == CLEAR and j.numbers['surplus'] == 0
     # A restart between the two reads of one sample: no baseline from it, the next visit takes one.
@@ -292,7 +302,7 @@ def test_throughput_evidence_is_below_the_fraction_over_enough_requests():
 # ---------------------------------------------------------------- the box ---------------------------------------------
 
 
-def leased_box(events=(), bench_count=0, benched_at=None) -> BoxState:
+def leased_box(events=(), bench_count=0, benched_at=None, admitted_at=None) -> BoxState:
     uuid = 'GPU-1'
     return BoxState(
         'hk1',
@@ -302,6 +312,7 @@ def leased_box(events=(), bench_count=0, benched_at=None) -> BoxState:
         standing_events=list(events),
         bench_count=bench_count,
         benched_at=benched_at,
+        admitted_at=admitted_at,
     )
 
 
@@ -341,12 +352,14 @@ def test_the_third_inside_a_week_benches_at_the_16_hour_rung_and_a_fourth_at_64(
     assert later.status == BENCHED and later.bench_until == now + day + 230_400 and later.bench_count == 4
 
 
-def test_the_bench_floor_holds_after_a_ladder_reset():
+def test_the_bench_floor_holds_after_clean_time_has_cleared_the_ladder():
     day = 86_400.0
     now = 30 * day
-    old_bench = leased_box([use(now - 2 * day), use(now - day)], bench_count=4, benched_at=now - 20 * day)
+    old_bench = leased_box(
+        [use(now - 2 * day), use(now - day)], bench_count=4, benched_at=now - 20 * day, admitted_at=now - 19 * day
+    )
     box = apply_external_use(old_bench, 'GPU-1', now)
-    assert box.bench_count == 3 and box.bench_until == now + 57_600  # the ladder reset, the floor did not
+    assert box.bench_count == 3 and box.bench_until == now + 57_600  # clean time cleared the rungs, not the floor
 
 
 def test_events_older_than_a_week_do_not_count():

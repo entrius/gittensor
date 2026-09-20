@@ -33,7 +33,6 @@ class FullCheckConfig:
     disk_min_free_gb: float = cfg.DISK_MIN_FREE_GB
     disk_path: str = cfg.DISK_PATH
     network_targets: Tuple[str, ...] = tuple(cfg.NETWORK_TARGETS)
-    card_free_enforcing: bool = cfg.CARD_FREE_ENFORCING  # False: card_free is logged as evidence and benches nobody
     proof_image: str = field(default_factory=image_ref)
     proof_timeout_s: float = cfg.PROOF_JOB_TIMEOUT_S
     ssh_timeout_s: float = cfg.SSH_COMMAND_TIMEOUT_S
@@ -100,7 +99,6 @@ def judge_identity(
         box_id,
         fleet_uuids,
         ours,
-        config.card_free_enforcing,
     )
 
 

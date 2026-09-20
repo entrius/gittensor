@@ -213,9 +213,7 @@ def foreign_holders(holders: Mapping[int, DeviceHolder], ours: Collection[str]) 
     return foreign, exited
 
 
-def check_card_free(
-    holders: str, ours: Collection[str], scrape_error: str = '', enforcing: bool = cfg.CARD_FREE_ENFORCING
-) -> CheckResult:
+def check_card_free(holders: str, ours: Collection[str], scrape_error: str = '') -> CheckResult:
     """Exclusivity, judged in the round instead of only while a workload is leased: nothing outside our own instances
     may hold an NVIDIA device node. ``holders`` is ``scrape.device_holders`` (``DEVICE_HOLDERS_COMMAND``'s raw
     stdout), ``ours`` the container IDs of our instances on the box (empty on a fully idle box).
@@ -223,27 +221,22 @@ def check_card_free(
     Idle pay buys exclusivity, and until this check the fleet only ever tested it with a workload on the card
     (``heartbeat``): a box whose GPU another session holds (a desktop, mainnet 9/19) passed the round, earned standby
     pay, and was caught only when a rotation happened to place work on it — and rotation prefers higher standing, so
-    spare capacity tested a known-bad card *less* often. Evidence only on first release
-    (``cfg.CARD_FREE_ENFORCING``, as the network check is): the verdict is logged and nothing is benched until the
-    flag is flipped. A scan that could not run is no answer to judge, never a bench (9/19)."""
+    spare capacity tested a known-bad card *less* often. A foreign holder benches the box on the ladder like any
+    other failed check; a scan that could not run is no answer to judge, so it is a strike, never a bench (9/19)."""
     parsed = parse_device_holders(holders)
     foreign, exited = foreign_holders(parsed, ours)
     evidence: Dict[str, object] = {
         'ours': sorted(c[:12] for c in ours),
         'holders': sorted(parsed),
         'exited_mid_scan': exited,
-        'enforcing': enforcing,
     }
     if scrape_error:
         return CheckResult(
-            CARD_FREE,
-            not enforcing,
-            {**evidence, 'reason': f'cannot scan device handles: {scrape_error}'},
-            not_run=enforcing,
+            CARD_FREE, False, {**evidence, 'reason': f'cannot scan device handles: {scrape_error}'}, not_run=True
         )
     if foreign:
         reason = 'foreign device holder(s): ' + '; '.join(foreign)[:400]
-        return CheckResult(CARD_FREE, not enforcing, {**evidence, 'reason': reason, 'foreign': foreign})
+        return CheckResult(CARD_FREE, False, {**evidence, 'reason': reason, 'foreign': foreign})
     return CheckResult(CARD_FREE, True, {**evidence, 'reason': f'{len(parsed)} device holder(s), none foreign'})
 
 
@@ -290,7 +283,6 @@ def identity_checks(
     box_id: str = '',
     fleet_uuids: Optional[Mapping[str, Iterable[str]]] = None,
     ours: Collection[str] = (),
-    card_free_enforcing: bool = cfg.CARD_FREE_ENFORCING,
 ) -> List[CheckResult]:
     """Everything except the GPU proof, from one scrape. ``fleet_uuids`` (``{box_id: uuids}`` of every other box)
     adds the fleet-wide uniqueness check; without it the box is judged alone. ``ours`` (our instances' container IDs
@@ -313,6 +305,6 @@ def identity_checks(
             agent_image_ids,
         ),
         check_disk_free(scrape.disk_free_gb, disk_min_free_gb, disk_path),
-        check_card_free(scrape.device_holders, ours, scrape.errors.get('device_holders', ''), card_free_enforcing),
+        check_card_free(scrape.device_holders, ours, scrape.errors.get('device_holders', '')),
         check_network(scrape.network, network_targets),
     ]

@@ -6,14 +6,14 @@
 The judge is the heartbeat's own (``checks.foreign_holders``), so a box whose card something else holds is caught on
 the pass that already runs every 20 min instead of waiting for a rotation to put work on it. The real mainnet case
 (9/19) is the fixture: a desktop session on the card, benched by the heartbeat only after the box had drawn standby
-pay. Evidence only until ``CARD_FREE_ENFORCING`` is flipped, and a scan that could not run never benches.
+pay. A foreign holder benches on the ladder like any other failed check; a scan that could not run is a strike.
 """
 
 from gittensor.controller.checks import checks as ck
-from gittensor.controller.checks.full_check import FullCheckConfig, run_full_check
+from gittensor.controller.checks.full_check import run_full_check
 from gittensor.controller.checks.runner import CommandResult
 from gittensor.controller.checks.scrape import DEVICE_HOLDERS_COMMAND, scrape_host
-from gittensor.controller.checks.verdict import ADMIT, BENCH, NOT_RUN, CheckResult, CheckVerdict
+from gittensor.controller.checks.verdict import BENCH, NOT_RUN, CheckResult, CheckVerdict
 from tests.controller.conftest import (
     CONFIG,
     NO_DEVICE_HOLDERS,
@@ -22,12 +22,6 @@ from tests.controller.conftest import (
 )
 
 OURS = 'c' * 64
-ENFORCING = FullCheckConfig(
-    agent_image_digests=CONFIG.agent_image_digests,
-    network_targets=CONFIG.network_targets,
-    proof_image=CONFIG.proof_image,
-    card_free_enforcing=True,
-)
 
 
 def check(verdict: CheckVerdict, name: str) -> CheckResult:
@@ -60,15 +54,15 @@ def test_only_the_drivers_persistence_daemon_is_free():
 
 
 def test_our_own_instances_container_is_not_foreign():
-    assert ck.check_card_free(ours_holding(), ours={OURS}, enforcing=True).passed
+    assert ck.check_card_free(ours_holding(), ours={OURS}).passed
     # the same box with no instance recorded on it: the container is not ours to exempt
-    stranger = ck.check_card_free(ours_holding(), ours=(), enforcing=True)
+    stranger = ck.check_card_free(ours_holding(), ours=())
     assert not stranger.passed and f'pid 900 (python3) in {OURS[:12]} holds' in stranger.evidence['reason']
 
 
 def test_a_desktop_session_on_the_card_is_a_foreign_holder():
     """The mainnet 9/19 bench line, judged by the round instead of the heartbeat."""
-    result = ck.check_card_free(fixture('device_holders_desktop.txt'), ours={OURS}, enforcing=True)
+    result = ck.check_card_free(fixture('device_holders_desktop.txt'), ours={OURS})
     assert not result.passed and not result.not_run
     assert result.evidence['holders'] == [1196, 1642, 2154, 2616]
     assert result.evidence['reason'] == (
@@ -81,26 +75,22 @@ def test_a_desktop_session_on_the_card_is_a_foreign_holder():
 
 def test_a_holder_whose_cgroup_was_not_read_fails_closed():
     """The fd scan saw it; no block came back for it. Unattributable is foreign: the miner controls that file."""
-    result = ck.check_card_free('/proc/1/root/proc/77/fd /dev/nvidia0\n', ours={OURS}, enforcing=True)
+    result = ck.check_card_free('/proc/1/root/proc/77/fd /dev/nvidia0\n', ours={OURS})
     assert not result.passed and not result.not_run
     assert result.evidence['reason'] == ('foreign device holder(s): pid 77 holds /dev/nvidia0: its cgroup was not read')
 
 
 def test_a_holder_that_exits_mid_scan_holds_nothing_now():
     """``MISSING``: gone between the fd scan and its cgroup read, so it is not on the card any more."""
-    result = ck.check_card_free(
-        '/proc/1/root/proc/88/fd /dev/nvidia0\n== 88 sleep\nMISSING\n', ours={OURS}, enforcing=True
-    )
+    result = ck.check_card_free('/proc/1/root/proc/88/fd /dev/nvidia0\n== 88 sleep\nMISSING\n', ours={OURS})
     assert result.passed and result.evidence['exited_mid_scan'] == [88]
     assert result.evidence['reason'] == '1 device holder(s), none foreign'
 
 
 def test_a_scan_that_could_not_run_is_no_answer_never_a_bench():
-    ran = ck.check_card_free('', ours=(), scrape_error='exit 3: no host procfs at /proc/1/root/proc', enforcing=True)
+    ran = ck.check_card_free('', ours=(), scrape_error='exit 3: no host procfs at /proc/1/root/proc')
     assert not ran.passed and ran.not_run  # NOT_RUN: a strike, not a bench (9/19)
     assert 'no host procfs' in ran.evidence['reason']
-    quiet = ck.check_card_free('', ours=(), scrape_error='exit 3: no host procfs', enforcing=False)
-    assert quiet.passed and not quiet.not_run
 
 
 # ---------------------------------------------------------------- in the round ----------------------------------------
@@ -113,29 +103,18 @@ def test_the_scrape_carries_the_raw_stdout_and_the_judge_parses_it():
     assert scrape.device_holders == desktop and scrape.errors == {}
 
 
-def test_a_desktop_box_is_benched_by_the_round_once_the_flag_is_flipped(proof, allowlist):
+def test_a_desktop_box_is_benched_by_the_round(proof, allowlist):
     runner = passing_runner(device_holders=fixture('device_holders_desktop.txt'))
-    verdict = run_full_check(runner, allowlist, proof, config=ENFORCING)
+    verdict = run_full_check(runner, allowlist, proof, config=CONFIG)
     assert verdict.verdict == BENCH and verdict.failed == [ck.CARD_FREE]
     assert verdict.skipped == [ck.GPU_PROOF]  # nothing is staged on a box that already failed identity
     assert 'gnome-shell' in check(verdict, ck.CARD_FREE).evidence['reason']
 
 
-def test_the_same_box_is_admitted_while_the_check_is_evidence_only(proof, allowlist):
-    """Evidence only on first release: the verdict is in the check's evidence and the box still passes."""
-    runner = passing_runner(device_holders=fixture('device_holders_desktop.txt'))
-    verdict = run_full_check(runner, allowlist, proof, config=CONFIG)
-    assert verdict.verdict == ADMIT and verdict.failed == [] and verdict.not_run == []
-    result = check(verdict, ck.CARD_FREE)
-    assert result.passed and result.evidence['enforcing'] is False
-    assert 'foreign device holder(s)' in result.evidence['reason']
-    assert result.evidence['foreign'][0].startswith('pid 1196 (Xorg)')
-
-
 def test_an_unscannable_box_is_a_strike_not_a_bench(proof, allowlist):
     no_procfs = CommandResult(3, '', 'no host procfs at /proc/1/root/proc')  # the agent lost --pid host
     runner = passing_runner().on(DEVICE_HOLDERS_COMMAND, no_procfs)
-    verdict = run_full_check(runner, allowlist, proof, config=ENFORCING)
+    verdict = run_full_check(runner, allowlist, proof, config=CONFIG)
     assert verdict.verdict == NOT_RUN and verdict.failed == [] and verdict.not_run == [ck.CARD_FREE]
     assert 'no host procfs' in check(verdict, ck.CARD_FREE).evidence['reason']
     assert check(verdict, ck.GPU_PROOF).passed  # nothing failed, so the proof still ran: the box is otherwise fine

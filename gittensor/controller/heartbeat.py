@@ -379,9 +379,8 @@ def _device_holders(runner: HostRunner, ours: set[str]) -> Answer:
         why = (result.stderr or result.stdout).strip()[:200]
         return Answer(False, f'cannot scan device handles: exit {result.exit_code}: {why}')
     holders = parse_device_holders(result.stdout)
-    foreign, exited, _ = foreign_holders(
-        holders, ours
-    )  # the buckets are the round's public phrase; a heartbeat bench has its own
+    # The buckets are the round's public phrase; a heartbeat bench has its own.
+    foreign, exited, _ = foreign_holders(holders, ours)
     evidence = {'holders': sorted(holders), 'exited_mid_scan': exited}
     if foreign:
         return Answer(False, 'foreign device holder(s): ' + '; '.join(foreign)[:400], evidence)

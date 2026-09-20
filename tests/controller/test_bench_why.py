@@ -89,6 +89,12 @@ def test_render_takes_a_constant_and_integers_and_nothing_else():
     # Floats and bools are not counts we would print; the first is floored, the second dropped.
     assert w.render({'code': w.DESKTOP_SESSION, 'n': 4.7}).startswith('a desktop session')
     assert w.render({'code': w.DESKTOP_SESSION, 'n': True}) == ''
+    # a number that is not one renders nothing rather than raising out of ``apply_verdict``
+    assert w.render({'code': w.DESKTOP_SESSION, 'n': float('inf')}) == ''
+    assert w.render({'code': w.DESKTOP_SESSION, 'n': float('nan')}) == ''
+    # a count the box chose is clamped: it stays a count, not a message
+    assert '(999 processes' in w.render({'code': w.DESKTOP_SESSION, 'n': 80085})
+    assert w.render({'code': w.SPEC_CARD_COUNT, 'n': -5, 'low': 1, 'high': 8}).startswith('this box reports 0 GPUs')
 
 
 def test_a_phrase_that_is_not_ours_is_not_published(tmp_path):

@@ -29,6 +29,7 @@ the 50 GB floor", never "4.1 GB free".
 from collections import Counter
 from typing import Any, Dict, Iterable, Mapping, Optional, Sequence
 
+MAX_COUNT = 999  # the largest integer a phrase prints (``render``)
 PUBLIC = 'public'  # the evidence key a check writes its classification under: {'code': ..., <name>: <int>, ...}
 
 # ---------------------------------------------------------------- the closed vocabulary -----------------------------
@@ -179,7 +180,11 @@ def render(public: Optional[Mapping[str, Any]]) -> str:
     for key, value in public.items():
         if key == 'code' or isinstance(value, bool) or not isinstance(value, (int, float)):
             continue
-        numbers[str(key)] = int(value)
+        if value != value or value in (float('inf'), float('-inf')):
+            continue  # not a number we can print; the template then has a hole and renders nothing
+        # Some counts are the box's own (how many GPUs it reports, how many processes hold one), so a miner picks
+        # them. Clamped, a count is a count and not a message.
+        numbers[str(key)] = max(0, min(int(value), MAX_COUNT))
     # ``{s}`` and ``{es}`` pluralise whatever ``{n}`` counts, so one template reads for both: 1 card / 4 cards,
     # 1 process / 4 processes. Each is one of two constants of ours, picked by an integer — the rule holds.
     one = numbers.get('n') == 1

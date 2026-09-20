@@ -3,15 +3,25 @@
 
 """The sub-checks of the full check: each judges one slice of the scrape against the pinned spec and yields a
 ``CheckResult`` with its evidence. ``check_gpu_proof`` is the one that runs something on the box — the two-phase
-GPU proof on every card at once, through whatever provider fills the slot (``gittensor.controller.proof``)."""
+GPU proof on every card at once, through whatever provider fills the slot (``gittensor.controller.proof``).
+
+``check_card_free`` asks the heartbeat's exclusivity question of an *idle* card, judging the same device-handle scan
+with the same judge (``foreign_holders``, shared with ``heartbeat._device_holders``). Idle pay buys exclusivity, so
+the round has to be able to test it without a workload on the card."""
 
 import re
 import time
-from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Callable, Collection, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import HostRunner
-from gittensor.controller.checks.scrape import GpuInfo, HostScrape
+from gittensor.controller.checks.scrape import (
+    PERSISTENCED_COMM,
+    DeviceHolder,
+    GpuInfo,
+    HostScrape,
+    parse_device_holders,
+)
 from gittensor.controller.checks.verdict import CheckResult
 from gittensor.controller.proof.slot import GpuProof, ProbeResult, clip, probe_box
 
@@ -23,6 +33,7 @@ POWER_LIMIT = 'power_limit'
 AGENT_IMAGE = 'agent_image'
 DISK_FREE = 'disk_free'
 NETWORK = 'network'
+CARD_FREE = 'card_free'
 GPU_PROOF = 'gpu_proof'
 
 _UUID = re.compile(r'^GPU-[0-9a-fA-F-]{20,}$')
@@ -180,6 +191,62 @@ def check_network(results: Dict[str, Tuple[int, float]], targets: Sequence[str])
     return CheckResult(NETWORK, True, {'targets': evidence, 'unreachable': unreachable})
 
 
+def foreign_holders(holders: Mapping[int, DeviceHolder], ours: Collection[str]) -> Tuple[List[str], List[int]]:
+    """The holders of an NVIDIA device node that are not ours, and the PIDs that exited between the fd scan and their
+    cgroup read. A holder passes when its cgroup names one of ``ours`` (our instances' container IDs on this box), or
+    when it is the driver's own ``nvidia-persistenced`` on the host and in no container (Kimbo 9/15). Shared by the
+    heartbeat (``heartbeat._device_holders``, on a leased card) and the round (``check_card_free``, on any card)."""
+    mine = set(ours)
+    foreign: List[str] = []
+    exited: List[int] = []
+    for holder in sorted(holders.values(), key=lambda h: h.pid):
+        devices = ', '.join(holder.devices)
+        if not holder.read:
+            foreign.append(f'pid {holder.pid} holds {devices}: its cgroup was not read')
+        elif holder.containers is None:
+            exited.append(holder.pid)  # gone between the fd scan and its cgroup read: it holds nothing now
+        elif holder.containers & mine or (not holder.containers and holder.comm == PERSISTENCED_COMM):
+            continue
+        else:
+            where = ', '.join(sorted(i[:12] for i in holder.containers)) or 'no container'
+            foreign.append(f'pid {holder.pid} ({holder.comm or "?"}) in {where} holds {devices}')
+    return foreign, exited
+
+
+def check_card_free(
+    holders: str, ours: Collection[str], scrape_error: str = '', enforcing: bool = cfg.CARD_FREE_ENFORCING
+) -> CheckResult:
+    """Exclusivity, judged in the round instead of only while a workload is leased: nothing outside our own instances
+    may hold an NVIDIA device node. ``holders`` is ``scrape.device_holders`` (``DEVICE_HOLDERS_COMMAND``'s raw
+    stdout), ``ours`` the container IDs of our instances on the box (empty on a fully idle box).
+
+    Idle pay buys exclusivity, and until this check the fleet only ever tested it with a workload on the card
+    (``heartbeat``): a box whose GPU another session holds (a desktop, mainnet 9/19) passed the round, earned standby
+    pay, and was caught only when a rotation happened to place work on it — and rotation prefers higher standing, so
+    spare capacity tested a known-bad card *less* often. Evidence only on first release
+    (``cfg.CARD_FREE_ENFORCING``, as the network check is): the verdict is logged and nothing is benched until the
+    flag is flipped. A scan that could not run is no answer to judge, never a bench (9/19)."""
+    parsed = parse_device_holders(holders)
+    foreign, exited = foreign_holders(parsed, ours)
+    evidence: Dict[str, object] = {
+        'ours': sorted(c[:12] for c in ours),
+        'holders': sorted(parsed),
+        'exited_mid_scan': exited,
+        'enforcing': enforcing,
+    }
+    if scrape_error:
+        return CheckResult(
+            CARD_FREE,
+            not enforcing,
+            {**evidence, 'reason': f'cannot scan device handles: {scrape_error}'},
+            not_run=enforcing,
+        )
+    if foreign:
+        reason = 'foreign device holder(s): ' + '; '.join(foreign)[:400]
+        return CheckResult(CARD_FREE, not enforcing, {**evidence, 'reason': reason, 'foreign': foreign})
+    return CheckResult(CARD_FREE, True, {**evidence, 'reason': f'{len(parsed)} device holder(s), none foreign'})
+
+
 def check_gpu_proof(
     runner: HostRunner,
     gpus: Sequence[GpuInfo],
@@ -222,9 +289,12 @@ def identity_checks(
     agent_image_ids: Sequence[str] = (),
     box_id: str = '',
     fleet_uuids: Optional[Mapping[str, Iterable[str]]] = None,
+    ours: Collection[str] = (),
+    card_free_enforcing: bool = cfg.CARD_FREE_ENFORCING,
 ) -> List[CheckResult]:
     """Everything except the GPU proof, from one scrape. ``fleet_uuids`` (``{box_id: uuids}`` of every other box)
-    adds the fleet-wide uniqueness check; without it the box is judged alone."""
+    adds the fleet-wide uniqueness check; without it the box is judged alone. ``ours`` (our instances' container IDs
+    on this box) is what ``check_card_free`` judges the box's device holders against."""
     checks = [
         check_gpu_spec(scrape.gpus, spec, scrape.errors.get('nvidia_smi', '')),
         check_uuid_pin(scrape.gpus, pinned_uuids),
@@ -243,5 +313,6 @@ def identity_checks(
             agent_image_ids,
         ),
         check_disk_free(scrape.disk_free_gb, disk_min_free_gb, disk_path),
+        check_card_free(scrape.device_holders, ours, scrape.errors.get('device_holders', ''), card_free_enforcing),
         check_network(scrape.network, network_targets),
     ]

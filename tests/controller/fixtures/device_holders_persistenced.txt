@@ -1,0 +1,4 @@
+/proc/1/root/proc/1401/fd /dev/nvidiactl
+/proc/1/root/proc/1401/fd /dev/nvidia0
+== 1401 nvidia-persiste
+0::/system.slice/nvidia-persistenced.service

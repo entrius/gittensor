@@ -204,6 +204,15 @@ class InstanceStore:
     def on_box(self, box_id: str) -> list[InstanceRecord]:
         return [r for r in self.instances.values() if r.box == box_id]
 
+    def containers_by_box(self) -> dict[str, set[str]]:
+        """Per box, our instances' container IDs: what ``checks.check_card_free`` judges the box's open NVIDIA device
+        handles against (the heartbeat asks ``on_box`` for the same thing, one box at a time)."""
+        out: dict[str, set[str]] = {}
+        for record in self.instances.values():
+            if record.container_id:
+                out.setdefault(record.box, set()).add(record.container_id)
+        return out
+
     def save(self) -> None:
         tmp = self.path.with_suffix(self.path.suffix + '.tmp')
         tmp.write_text(json.dumps({k: asdict(v) for k, v in sorted(self.instances.items())}, indent=1))

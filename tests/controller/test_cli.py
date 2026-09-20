@@ -153,6 +153,7 @@ def test_check_admits_the_passing_box_and_pins_it(state):
         ck.POWER_LIMIT,
         ck.AGENT_IMAGE,
         ck.DISK_FREE,
+        ck.CARD_FREE,
         ck.NETWORK,
         ck.GPU_PROOF,
     ]

@@ -23,7 +23,9 @@ about the workload and asks three questions:
   ``/dev/nvidia-uvm`` open and maps each to containers the same way. Any holder outside our instances' containers
   fails, bar the driver's own ``nvidia-persistenced`` running on the host (Kimbo 9/15). Never killed: benched. The scan
   is skipped (and a scan the box's lock was taken during is discarded) while a start, drain or proof holds the box:
-  their containers are ours but not yet, or no longer, recorded.
+  their containers are ours but not yet, or no longer, recorded. The round asks the same question of a card with no
+  lease on it (``checks.check_card_free``, over the same command and the same judge, ``checks.foreign_holders``): a
+  box whose card something else holds must not draw standby pay until a rotation happens to put work on it.
 
 Any failure benches the box on the fraud ladder, withholds its pay from that instant (``BoxState.withheld_from``, which
 WS-F consumes) and undeploys every instance on it with a kill. A visit that gets no answer (SSH down, docker erroring)
@@ -66,8 +68,17 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from gittensor.controller.checks import config as cfg
+from gittensor.controller.checks.checks import foreign_holders
 from gittensor.controller.checks.runner import HostRunner
-from gittensor.controller.checks.scrape import NVML_MD5_COMMAND, nvidia_smi_command, parse_md5, parse_nvidia_smi
+from gittensor.controller.checks.scrape import (
+    CONTAINER_ID,
+    DEVICE_HOLDERS_COMMAND,
+    NVML_MD5_COMMAND,
+    nvidia_smi_command,
+    parse_device_holders,
+    parse_md5,
+    parse_nvidia_smi,
+)
 from gittensor.controller.checks.state import (
     BENCHED,
     CARD_OURS_ALONE,
@@ -117,21 +128,8 @@ from gittensor.controller.usage_check import (
 )
 
 _TRANSPORT = (SshTransportError, CertificateError)
-_CONTAINER_ID = re.compile(r'[0-9a-f]{64}')
 COMPUTE_APPS_COMMAND = 'nvidia-smi --query-compute-apps=pid,gpu_uuid --format=csv,noheader'
 _APP_LINE = re.compile(r'^\s*(\d+)\s*,\s*(GPU-[0-9A-Za-z-]+)\s*$')
-# Every host process with an NVIDIA device node open (one `find` over the host's /proc/*/fd), then each holder's comm
-# and cgroup. Exit 3 when the host procfs is not where we look; a holder that exits mid-scan prints MISSING.
-DEVICE_HOLDERS_COMMAND = (
-    rf'H={cfg.HOST_ROOT}/proc; [ -r "$H/1/cgroup" ] || {{ echo "no host procfs at $H" >&2; exit 3; }}; '
-    r"""L=$(find "$H"/[0-9]*/fd -maxdepth 1 -lname '/dev/nvidia*' -printf '%h %l\n' 2>/dev/null); printf '%s\n' "$L"; """
-    r"""for p in $(printf '%s\n' "$L" | sed -n 's#^.*/proc/\([0-9]*\)/fd .*#\1#p' | sort -un); do """
-    r"""printf '== %s %s\n' "$p" "$(cat "$H/$p/comm" 2>/dev/null)"; cat "$H/$p/cgroup" 2>/dev/null || echo MISSING; """
-    r'done; exit 0'
-)
-_HOLDER_FD = re.compile(r'/proc/(\d+)/fd (/dev/\S+)$')
-_GPU_DEVICE = re.compile(r'^/dev/nvidia(\d+|ctl|-uvm)$')  # the nodes a CUDA or `--gpus` process holds
-PERSISTENCED_COMM = 'nvidia-persiste'  # /proc/<pid>/comm stops at 15 bytes: nvidia-persistenced
 
 
 def cgroup_command(pids: list[int]) -> str:
@@ -173,44 +171,8 @@ def parse_cgroups(stdout: str) -> dict[int, set[str] | None]:
         if line.strip() == 'MISSING':
             out[pid] = None
         elif (ids := out.get(pid)) is not None:
-            ids.update(_CONTAINER_ID.findall(line))
+            ids.update(CONTAINER_ID.findall(line))
     return out
-
-
-@dataclass
-class DeviceHolder:
-    pid: int
-    devices: list[str] = field(default_factory=list)
-    comm: str = ''
-    read: bool = False  # its comm + cgroup block came back
-    containers: set[str] | None = field(default_factory=set)  # IDs in its cgroup paths; None: exited mid-scan
-
-
-def parse_device_holders(stdout: str) -> dict[int, DeviceHolder]:
-    """``DEVICE_HOLDERS_COMMAND``'s output: the fd lines (only the GPU nodes we judge), then a block per holder."""
-    holders: dict[int, DeviceHolder] = {}
-    current: DeviceHolder | None = None
-    in_blocks = False
-    for raw in stdout.splitlines():
-        line = raw.strip()
-        if line.startswith('== '):
-            in_blocks = True
-            pid_text, _, comm = line[3:].partition(' ')
-            current = holders.get(int(pid_text)) if pid_text.isdigit() else None
-            if current is not None:
-                current.comm, current.read, current.containers = comm.strip(), True, set()
-        elif not in_blocks:
-            m = _HOLDER_FD.search(line)
-            if m and _GPU_DEVICE.match(m.group(2)):
-                holder = holders.setdefault(int(m.group(1)), DeviceHolder(int(m.group(1))))
-                if m.group(2) not in holder.devices:
-                    holder.devices.append(m.group(2))
-        elif current is not None:
-            if line == 'MISSING':
-                current.containers = None
-            elif current.containers is not None:
-                current.containers.update(_CONTAINER_ID.findall(line))
-    return holders
 
 
 # ---------------------------------------------------------------- one heartbeat ---------------------------------------
@@ -417,18 +379,7 @@ def _device_holders(runner: HostRunner, ours: set[str]) -> Answer:
         why = (result.stderr or result.stdout).strip()[:200]
         return Answer(False, f'cannot scan device handles: exit {result.exit_code}: {why}')
     holders = parse_device_holders(result.stdout)
-    foreign, exited = [], []
-    for holder in sorted(holders.values(), key=lambda h: h.pid):
-        devices = ', '.join(holder.devices)
-        if not holder.read:
-            foreign.append(f'pid {holder.pid} holds {devices}: its cgroup was not read')
-        elif holder.containers is None:
-            exited.append(holder.pid)  # gone between the fd scan and its cgroup read: it holds nothing now
-        elif holder.containers & ours or (not holder.containers and holder.comm == PERSISTENCED_COMM):
-            continue
-        else:
-            where = ', '.join(sorted(i[:12] for i in holder.containers)) or 'no container'
-            foreign.append(f'pid {holder.pid} ({holder.comm or "?"}) in {where} holds {devices}')
+    foreign, exited = foreign_holders(holders, ours)
     evidence = {'holders': sorted(holders), 'exited_mid_scan': exited}
     if foreign:
         return Answer(False, 'foreign device holder(s): ' + '; '.join(foreign)[:400], evidence)

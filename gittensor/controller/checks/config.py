@@ -64,6 +64,11 @@ HOST_ROOT = '/proc/1/root'
 # pull fails its start, which has its own path (FAILED_STARTS_BENCH_AFTER).
 NETWORK_TARGETS = ('https://registry-1.docker.io/v2/', 'https://huggingface.co/api/models/Qwen')
 NETWORK_TIMEOUT_S = 10.0
+# "Is anything else using this GPU?" in the round (``checks.check_card_free``), not only under a lease (``heartbeat``).
+# Exclusivity is the one property idle pay buys, and a box whose card another session holds (a desktop, mainnet 9/19)
+# used to pass the round and earn standby pay until a rotation happened to place work on it. False = the verdict is
+# logged as evidence and benches nobody; flip to True to enforce it, after watching a day of round logs.
+CARD_FREE_ENFORCING = False
 NVIDIA_SMI_TIMEOUT_S = 15.0
 SSH_COMMAND_TIMEOUT_S = 30.0
 

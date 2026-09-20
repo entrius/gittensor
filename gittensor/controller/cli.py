@@ -470,9 +470,11 @@ def check_box(
     config: FullCheckConfig,
     now: float,
     cards: Sequence[str] | None = None,
+    ours: Collection[str] = (),
 ) -> CheckOutcome:
     """``run_full_check`` with a transport gate: a box SSH cannot reach gets no verdict instead of a BENCH. ``cards``
-    limits the proof to those cards (the re-prove of CHECKING cards); identity is judged on the whole box either way."""
+    limits the proof to those cards (the re-prove of CHECKING cards); identity is judged on the whole box either way.
+    ``ours``: our instances' container IDs on the box, for ``check_card_free``."""
     try:
         runner.run(PREFLIGHT_COMMAND, timeout=config.ssh_timeout_s)
     except (SshTransportError, CertificateError) as e:
@@ -481,7 +483,7 @@ def check_box(
     lost = transport_failure(scrape)
     if lost:
         return CheckOutcome(None, lost)
-    checks = judge_identity(scrape, allowlist, box.pinned_uuids or None, config, box.box_id, fleet_uuids)
+    checks = judge_identity(scrape, allowlist, box.pinned_uuids or None, config, box.box_id, fleet_uuids, ours)
     proved: list[str] = []
     if identity_passed(checks):
         gpus = _provable_gpus(box, scrape.gpus)
@@ -562,10 +564,12 @@ def run_round(
     box_locks: BoxLocks | None = None,
     lock_wait_s: float = cfg.ROUND_BOX_LOCK_WAIT_S,
     pending: Mapping[str, Collection[str]] | None = None,
+    ours: Mapping[str, Collection[str]] | None = None,
 ) -> RoundReport:
     """One probe cycle over every ADMIT / IDLE box (``23`` §3b). Benches that have expired are released first.
     ``pending``: per box, cards an instance record still names (a lease ended while the box was unreachable, its
-    container not yet undeployed): skipped this round like a busy card.
+    container not yet undeployed): skipped this round like a busy card. ``ours``: per box, our instances' container
+    IDs, which ``check_card_free`` judges the box's open NVIDIA device handles against.
 
     Phase 1: connect and scrape every box in parallel; judge identity with fleet-wide UUID uniqueness over every pin
     and every card reported this round; stage the proof on every box that passed, in parallel. Phase 2: one start
@@ -679,7 +683,13 @@ def run_round(
             for r in rows:
                 if r.scrape is not None:
                     r.checks = judge_identity(
-                        r.scrape, allowlist, r.box.pinned_uuids or None, config, r.box.box_id, fleet
+                        r.scrape,
+                        allowlist,
+                        r.box.pinned_uuids or None,
+                        config,
+                        r.box.box_id,
+                        fleet,
+                        (ours or {}).get(r.box.box_id, ()),
                     )
             _each([r for r in rows if r.scrape is not None and identity_passed(r.checks)], stage)
             marks['staged'] = clock()
@@ -772,6 +782,7 @@ def reprove_box(
     box_locks: BoxLocks,
     lock_wait_s: float = cfg.ROUND_BOX_LOCK_WAIT_S,
     exclude: Collection[str] = (),
+    ours: Collection[str] = (),
 ) -> RoundReport:
     """One box proved at once, inside `gitt controller run`, instead of at the next 20-min round: an IDLE box's CHECKING
     cards (Kimbo 9/15; not ``exclude``, the cards an instance record still names), or every card of a box at ADMIT,
@@ -818,7 +829,7 @@ def reprove_box(
         row.runner = TimedRunner(_make_runner(setup.state, current, setup.ca_key, 'reprove'))
         try:
             outcome = check_box(
-                row.runner, current, fleet, proof, setup.allowlist(), setup.config, time.time(), cards=cards
+                row.runner, current, fleet, proof, setup.allowlist(), setup.config, time.time(), cards=cards, ours=ours
             )
         finally:
             row.runner.close()
@@ -1308,9 +1319,10 @@ def _check_one(setup: CheckSetup, hotkey: str, force: bool, json_mode: bool, bes
     fleet: dict[str, Iterable[str]] = {
         b.box_id: list(b.pinned_uuids) for b in store.boxes.values() if b.box_id != hotkey
     }
+    ours = {r.container_id for r in InstanceStore(setup.state.instances).on_box(hotkey) if r.container_id}
     runner = TimedRunner(_make_runner(setup.state, released, setup.ca_key, 'check'))
     try:
-        outcome = check_box(runner, released, fleet, proof, setup.allowlist(), setup.config, now)
+        outcome = check_box(runner, released, fleet, proof, setup.allowlist(), setup.config, now, ours=ours)
     finally:
         runner.close()
     timings = phase_timings(runner.log)
@@ -1396,7 +1408,7 @@ def round_command(loop, interval, build_cmd, max_rounds, state_dir, json_mode, *
                 _fail(str(e), json_mode, EXIT_NO_VERDICT)
             err_console.print(f'[yellow]Round {n}: keeping the previous proof — {escape(str(e))}[/yellow]')
         with _one_shot_lock(setup.state, json_mode):
-            report = run_round(setup, proof)
+            report = run_round(setup, proof, ours=InstanceStore(setup.state.instances).containers_by_box())
         _print_round(report, n, json_mode)
         if not loop or (max_rounds and n >= max_rounds):
             break

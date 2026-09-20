@@ -263,7 +263,7 @@ class Controller:
                 write_lock=self.write_lock,
                 box_locks=self.box_locks,
                 pending=self._pending_cards(),
-                ours=self._our_containers(),
+                ours=self._our_containers,
             )
         except Exception as e:  # before any box was visited (the allowlist fetch, our own link): nobody's fault
             self.reporter.error('round', f'round {n} failed before any box was visited: {type(e).__name__}: {e}')
@@ -472,11 +472,13 @@ class Controller:
                 out.setdefault(record.box, set()).add(record.uuid)
             return out
 
-    def _our_containers(self) -> dict[str, set[str]]:
-        """Per box, our instances' container IDs: what the round's ``check_card_free`` judges the box's open NVIDIA
-        device handles against, so a card carrying our own workload is not read as a foreign holder."""
+    def _our_containers(self, box_id: str) -> set[str]:
+        """One box's instances' container IDs: what ``check_card_free`` judges its open NVIDIA device handles against,
+        so a card carrying our own workload is not read as a foreign holder. The round calls this once it holds the
+        box's lock, never before: a rotation mints a new container ID, so a set taken earlier can miss the container
+        a start wrote while the round waited for the lock."""
         with self.write_lock:
-            return self.instances.containers_by_box()
+            return self.instances.containers_on(box_id)
 
     def reprove_once(self) -> list[str]:
         """Launch the one-box probe on every box that is due one and not already being probed (or waiting to retry
@@ -487,7 +489,6 @@ class Controller:
             return []
         now = time.time()
         pending = self._pending_cards()
-        ours = self._our_containers()
         with self.write_lock:
             running = {box_id for box_id, thread in self._reproving.items() if thread.is_alive()}
             due = sorted(
@@ -521,7 +522,7 @@ class Controller:
         for box_id in due:
             thread = threading.Thread(
                 target=self._reprove_box,
-                args=(proof, box_id, pending.get(box_id, set()), ours.get(box_id, set())),
+                args=(proof, box_id, pending.get(box_id, set())),
                 name=f'reprove-{box_id[:16]}',
                 daemon=True,
             )
@@ -530,7 +531,7 @@ class Controller:
             thread.start()
         return due
 
-    def _reprove_box(self, proof: Any, box_id: str, exclude: set[str], ours: set[str]) -> None:
+    def _reprove_box(self, proof: Any, box_id: str, exclude: set[str]) -> None:
         reprove = self._reprove
         if reprove is None:
             return
@@ -542,7 +543,7 @@ class Controller:
                 write_lock=self.write_lock,
                 box_locks=self.box_locks,
                 exclude=exclude,
-                ours=ours,
+                ours=self._our_containers,
             )
         except Exception as e:  # never kill the thread silently; the next tick after the retry delay tries again
             with self.write_lock:

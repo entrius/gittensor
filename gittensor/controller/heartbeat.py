@@ -568,7 +568,7 @@ class Watch:
         started, now = self.clock(), self.wall()
         scan = not self._box_busy(box_id)
         with self.lock:
-            ours = {r.container_id for r in self.instances.on_box(box_id) if r.container_id} if scan else None
+            ours = self.instances.containers_on(box_id) if scan else None
         try:
             result = run_heartbeat(runner, box, records, manifests, now, ours)
         except (*_TRANSPORT, NoAnswer) as e:

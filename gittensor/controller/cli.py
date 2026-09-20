@@ -523,6 +523,7 @@ class BoxRound:
     verdict: CheckVerdict | None = None
     after: BoxState | None = None
     locked: bool = False  # this round holds the box's lock
+    ours: set[str] = field(default_factory=set)  # our instances' container IDs, read under the box's lock
     busy: str = ''  # not probed this round: its lock stayed held (a start or drain), or it was benched meanwhile
 
 
@@ -564,12 +565,15 @@ def run_round(
     box_locks: BoxLocks | None = None,
     lock_wait_s: float = cfg.ROUND_BOX_LOCK_WAIT_S,
     pending: Mapping[str, Collection[str]] | None = None,
-    ours: Mapping[str, Collection[str]] | None = None,
+    ours: Callable[[str], Collection[str]] | None = None,
 ) -> RoundReport:
     """One probe cycle over every ADMIT / IDLE box (``23`` §3b). Benches that have expired are released first.
     ``pending``: per box, cards an instance record still names (a lease ended while the box was unreachable, its
-    container not yet undeployed): skipped this round like a busy card. ``ours``: per box, our instances' container
-    IDs, which ``check_card_free`` judges the box's open NVIDIA device handles against.
+    container not yet undeployed): skipped this round like a busy card. ``ours(box_id)``: our instances' container
+    IDs on that box, which ``check_card_free`` judges its open NVIDIA device handles against. It is read once the
+    box's lock is held, never before: a rotation mints a new container ID, so a set taken before the lock can miss
+    the container a start wrote while this round waited for it, and the scan would read our own workload as a
+    foreign holder (the heartbeat rebuilds it per visit for the same reason).
 
     Phase 1: connect and scrape every box in parallel; judge identity with fleet-wide UUID uniqueness over every pin
     and every card reported this round; stage the proof on every box that passed, in parallel. Phase 2: one start
@@ -608,6 +612,7 @@ def run_round(
         r.locked = True
         with write_lock:
             current = store.boxes.get(r.box.box_id)
+            r.ours = set(ours(r.box.box_id)) if ours is not None else set()
         if current is None or current.status not in (ADMIT, IDLE):
             r.busy = f'{current.status if current else "removed"} meanwhile: not probed'
             return
@@ -689,7 +694,7 @@ def run_round(
                         config,
                         r.box.box_id,
                         fleet,
-                        (ours or {}).get(r.box.box_id, ()),
+                        r.ours,
                     )
             _each([r for r in rows if r.scrape is not None and identity_passed(r.checks)], stage)
             marks['staged'] = clock()
@@ -782,13 +787,14 @@ def reprove_box(
     box_locks: BoxLocks,
     lock_wait_s: float = cfg.ROUND_BOX_LOCK_WAIT_S,
     exclude: Collection[str] = (),
-    ours: Collection[str] = (),
+    ours: Callable[[str], Collection[str]] | None = None,
 ) -> RoundReport:
     """One box proved at once, inside `gitt controller run`, instead of at the next 20-min round: an IDLE box's CHECKING
     cards (Kimbo 9/15; not ``exclude``, the cards an instance record still names), or every card of a box at ADMIT,
     its first proof (Kimbo 9/16). Identity on the box and the same
     two-phase probe (``probe_box``: stage, fire, clean up) on those cards only, holding the box's lock, then
-    ``apply_verdict`` (pinning an ADMIT box; returning only the proved cards to IDLE). A BENCH verdict benches the box
+    ``apply_verdict`` (pinning an ADMIT box; returning only the proved cards to IDLE). ``ours(box_id)`` is read
+    with the box's lock held, for the same reason the round reads it there. A BENCH verdict benches the box
     as the round would. No verdict (the lock stayed held, no CHECKING card left, SSH down) changes nothing: the daemon
     retries later, and unreachable boxes are counted by the round."""
     provider = str(getattr(proof, 'version', '?'))
@@ -809,6 +815,7 @@ def reprove_box(
             fleet: dict[str, Iterable[str]] = {
                 b.box_id: list(b.pinned_uuids) for b in store.boxes.values() if b.box_id != box_id
             }
+            row.ours = set(ours(box_id)) if ours is not None else set()
         if current is None or current.status not in (ADMIT, IDLE) or not current.host or current.endpoint_changed:
             why = 'endpoint changed' if current is not None and current.endpoint_changed else None
             row.busy = f'{why or (current.status if current else "removed")} meanwhile: not re-proved'
@@ -829,7 +836,15 @@ def reprove_box(
         row.runner = TimedRunner(_make_runner(setup.state, current, setup.ca_key, 'reprove'))
         try:
             outcome = check_box(
-                row.runner, current, fleet, proof, setup.allowlist(), setup.config, time.time(), cards=cards, ours=ours
+                row.runner,
+                current,
+                fleet,
+                proof,
+                setup.allowlist(),
+                setup.config,
+                time.time(),
+                cards=cards,
+                ours=row.ours,
             )
         finally:
             row.runner.close()
@@ -1319,7 +1334,7 @@ def _check_one(setup: CheckSetup, hotkey: str, force: bool, json_mode: bool, bes
     fleet: dict[str, Iterable[str]] = {
         b.box_id: list(b.pinned_uuids) for b in store.boxes.values() if b.box_id != hotkey
     }
-    ours = {r.container_id for r in InstanceStore(setup.state.instances).on_box(hotkey) if r.container_id}
+    ours = InstanceStore(setup.state.instances).containers_on(hotkey)
     runner = TimedRunner(_make_runner(setup.state, released, setup.ca_key, 'check'))
     try:
         outcome = check_box(runner, released, fleet, proof, setup.allowlist(), setup.config, now, ours=ours)
@@ -1408,7 +1423,9 @@ def round_command(loop, interval, build_cmd, max_rounds, state_dir, json_mode, *
                 _fail(str(e), json_mode, EXIT_NO_VERDICT)
             err_console.print(f'[yellow]Round {n}: keeping the previous proof — {escape(str(e))}[/yellow]')
         with _one_shot_lock(setup.state, json_mode):
-            report = run_round(setup, proof, ours=InstanceStore(setup.state.instances).containers_by_box())
+            report = run_round(
+                setup, proof, ours=lambda box_id: InstanceStore(setup.state.instances).containers_on(box_id)
+            )
         _print_round(report, n, json_mode)
         if not loop or (max_rounds and n >= max_rounds):
             break

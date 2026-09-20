@@ -40,6 +40,7 @@ ALL_CHECKS = [
     ck.POWER_LIMIT,
     ck.AGENT_IMAGE,
     ck.DISK_FREE,
+    ck.CARD_FREE,
     ck.NETWORK,
     ck.GPU_PROOF,
 ]

@@ -204,6 +204,13 @@ class InstanceStore:
     def on_box(self, box_id: str) -> list[InstanceRecord]:
         return [r for r in self.instances.values() if r.box == box_id]
 
+    def containers_on(self, box_id: str) -> set[str]:
+        """One box's instances' container IDs: what ``checks.check_card_free`` judges its open NVIDIA device handles
+        against. Per box and read afresh at every use, never snapshotted for a whole pass — a rotation mints a new
+        container ID, and a set taken before the box's lock can miss the container a start wrote while the caller
+        waited for it (the heartbeat rebuilds it per visit for the same reason)."""
+        return {r.container_id for r in self.instances.values() if r.box == box_id and r.container_id}
+
     def save(self) -> None:
         tmp = self.path.with_suffix(self.path.suffix + '.tmp')
         tmp.write_text(json.dumps({k: asdict(v) for k, v in sorted(self.instances.items())}, indent=1))

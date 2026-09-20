@@ -661,3 +661,36 @@ def test_the_gateway_reader_reaches_the_drain_and_the_accounting_check(tmp_path)
 
     controller, _ = _tick_controller(tmp_path, [0.0], lambda proof, **kw: None, gateway_state=read)
     assert controller.reconciler.gateway_state is read and controller.watch.gateway_state is read
+
+
+def test_the_round_reads_our_container_ids_with_the_box_lock_held(world):
+    """``card_free`` judges the box's device holders against our instances' container IDs, and a rotation mints a new
+    one every lease. Read that set once for the whole round and a start landing while the round waits out the box's
+    lock (up to ``ROUND_BOX_LOCK_WAIT_S``) is missing from it, so the scan reads our own workload as a foreign
+    holder. The heartbeat rebuilds it per visit; the round has to read it under the lock for the same reason."""
+    root, registry = world
+    shutil.copy(FIXTURES / 'nvml_allowlist.json', root / 'nvml_allowlist.json')
+    seed(root, idle_box('hkA', uuids=(UUID_5090,)), replicas=1)
+    docker = FakeDocker(gpus=(UUID_5090,))
+    prover = box_runner()
+    setup = ctl._setup(
+        root, None, FAKE_PROOF, (), (AGENT_DIGEST,), (), 'entrius/gt-proof:test', None, NETWORK_TARGETS, 100
+    )
+    controller = Controller(
+        ctl.StateDir(root),
+        registry,
+        make_runner=lambda box, purpose: docker.runner,
+        run_round=lambda proof, **shared: ctl.run_round(setup, proof, **shared),
+        load_proof=FakeProof,
+    )
+    reads: list[tuple[str, bool]] = []
+    inner = controller._our_containers
+
+    def spy(box_id: str) -> set[str]:
+        reads.append((box_id, controller.box_locks.held(box_id)))
+        return inner(box_id)
+
+    controller._our_containers = spy
+    with patch.object(ctl, '_make_runner', side_effect=lambda st, box, ca, purpose: prover):
+        controller.round_once()
+    assert reads == [('hkA', True)]  # once for the box, and only once its lock was held

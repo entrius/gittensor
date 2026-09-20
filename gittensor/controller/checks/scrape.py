@@ -67,6 +67,21 @@ def network_command(url: str, timeout_s: float = cfg.NETWORK_TIMEOUT_S) -> str:
     return f"curl -sS -o /dev/null -m {int(timeout_s)} -w '%{{http_code}} %{{speed_download}}' {shlex.quote(url)}"
 
 
+# Every host process with an NVIDIA device node open (one `find` over the host's /proc/*/fd), then each holder's comm
+# and cgroup. Exit 3 when the host procfs is not where we look; a holder that exits mid-scan prints MISSING.
+DEVICE_HOLDERS_COMMAND = (
+    rf'H={cfg.HOST_ROOT}/proc; [ -r "$H/1/cgroup" ] || {{ echo "no host procfs at $H" >&2; exit 3; }}; '
+    r"""L=$(find "$H"/[0-9]*/fd -maxdepth 1 -lname '/dev/nvidia*' -printf '%h %l\n' 2>/dev/null); printf '%s\n' "$L"; """
+    r"""for p in $(printf '%s\n' "$L" | sed -n 's#^.*/proc/\([0-9]*\)/fd .*#\1#p' | sort -un); do """
+    r"""printf '== %s %s\n' "$p" "$(cat "$H/$p/comm" 2>/dev/null)"; cat "$H/$p/cgroup" 2>/dev/null || echo MISSING; """
+    r'done; exit 0'
+)
+CONTAINER_ID = re.compile(r'[0-9a-f]{64}')
+_HOLDER_FD = re.compile(r'/proc/(\d+)/fd (/dev/\S+)$')
+_GPU_DEVICE = re.compile(r'^/dev/nvidia(\d+|ctl|-uvm)$')  # the nodes a CUDA or `--gpus` process holds
+PERSISTENCED_COMM = 'nvidia-persiste'  # /proc/<pid>/comm stops at 15 bytes: nvidia-persistenced
+
+
 @dataclass
 class GpuInfo:
     uuid: str
@@ -181,6 +196,42 @@ def parse_curl(stdout: str) -> Tuple[int, float]:
 
 
 @dataclass
+class DeviceHolder:
+    pid: int
+    devices: list[str] = field(default_factory=list)
+    comm: str = ''
+    read: bool = False  # its comm + cgroup block came back
+    containers: set[str] | None = field(default_factory=set)  # IDs in its cgroup paths; None: exited mid-scan
+
+
+def parse_device_holders(stdout: str) -> dict[int, DeviceHolder]:
+    """``DEVICE_HOLDERS_COMMAND``'s output: the fd lines (only the GPU nodes we judge), then a block per holder."""
+    holders: dict[int, DeviceHolder] = {}
+    current: DeviceHolder | None = None
+    in_blocks = False
+    for raw in stdout.splitlines():
+        line = raw.strip()
+        if line.startswith('== '):
+            in_blocks = True
+            pid_text, _, comm = line[3:].partition(' ')
+            current = holders.get(int(pid_text)) if pid_text.isdigit() else None
+            if current is not None:
+                current.comm, current.read, current.containers = comm.strip(), True, set()
+        elif not in_blocks:
+            m = _HOLDER_FD.search(line)
+            if m and _GPU_DEVICE.match(m.group(2)):
+                holder = holders.setdefault(int(m.group(1)), DeviceHolder(int(m.group(1))))
+                if m.group(2) not in holder.devices:
+                    holder.devices.append(m.group(2))
+        elif current is not None:
+            if line == 'MISSING':
+                current.containers = None
+            elif current.containers is not None:
+                current.containers.update(CONTAINER_ID.findall(line))
+    return holders
+
+
+@dataclass
 class HostScrape:
     gpus: List[GpuInfo] = field(default_factory=list)
     nvml_md5: str = ''
@@ -190,6 +241,7 @@ class HostScrape:
     agent_image_id: str = ''
     disk_free_gb: Optional[float] = None
     network: Dict[str, Tuple[int, float]] = field(default_factory=dict)
+    device_holders: str = ''  # DEVICE_HOLDERS_COMMAND's raw stdout; ``checks.check_card_free`` parses and judges it
     errors: Dict[str, str] = field(default_factory=dict)  # scrape step -> what went wrong (fails that check)
 
     @property
@@ -247,6 +299,9 @@ def scrape_host(
     out = _run(runner, scrape, 'disk_free', disk_free_command(disk_path), timeout)
     if out is not None:
         scrape.disk_free_gb = parse_df_available_gb(out)
+    out = _run(runner, scrape, 'device_holders', DEVICE_HOLDERS_COMMAND, timeout)
+    if out is not None:
+        scrape.device_holders = out
     for url in network_targets:
         out = _run(runner, scrape, f'network:{url}', network_command(url), cfg.NETWORK_TIMEOUT_S + 5)
         scrape.network[url] = parse_curl(out) if out is not None else (0, 0.0)

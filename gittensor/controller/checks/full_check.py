@@ -10,7 +10,7 @@ box state; ``state.apply_verdict`` does that.
 """
 
 from dataclasses import dataclass, field
-from typing import Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Collection, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.checks import GPU_PROOF, check_gpu_proof, identity_checks
@@ -47,11 +47,13 @@ def run_full_check(
     now: Optional[float] = None,
     box_id: str = '',
     fleet_uuids: Optional[Mapping[str, Iterable[str]]] = None,
+    ours: Collection[str] = (),
 ) -> CheckVerdict:
     """``pinned_uuids`` is what ADMIT pinned (None for a box at ADMIT). ``proof`` is the provider in the slot; the
-    default admits nobody. ``fleet_uuids`` (every other box's UUIDs) adds the fleet-wide uniqueness check."""
+    default admits nobody. ``fleet_uuids`` (every other box's UUIDs) adds the fleet-wide uniqueness check; ``ours``
+    (our instances' container IDs on this box) is what ``check_card_free`` judges its device holders against."""
     scrape = scrape_box(runner, config)
-    checks = judge_identity(scrape, allowlist, pinned_uuids, config, box_id, fleet_uuids)
+    checks = judge_identity(scrape, allowlist, pinned_uuids, config, box_id, fleet_uuids, ours)
     if identity_passed(checks):
         checks.append(check_gpu_proof(runner, scrape.gpus, proof, config.proof_image, config.proof_timeout_s))
     else:
@@ -80,6 +82,7 @@ def judge_identity(
     config: FullCheckConfig,
     box_id: str = '',
     fleet_uuids: Optional[Mapping[str, Iterable[str]]] = None,
+    ours: Collection[str] = (),
 ) -> List[CheckResult]:
     """Every check except the GPU proof, from one scrape."""
     return identity_checks(
@@ -95,15 +98,19 @@ def judge_identity(
         config.agent_image_ids,
         box_id,
         fleet_uuids,
+        ours,
     )
 
 
 def identity_passed(checks: Sequence[CheckResult]) -> bool:
-    return all(c.passed for c in checks)
+    """Nothing failed. A check that could not be carried out (``not_run``: ``card_free`` when the host procfs is not
+    where we look) named no failure, so it does not skip the proof either — the box is otherwise fine and the verdict
+    resolves to NOT_RUN, a strike (9/19), rather than a bench with nothing named."""
+    return all(c.passed or c.not_run for c in checks)
 
 
 def proof_skipped(checks: Sequence[CheckResult]) -> CheckResult:
-    failed = [c.name for c in checks if not c.passed]
+    failed = [c.name for c in checks if not c.passed and not c.not_run]
     return CheckResult(GPU_PROOF, False, {'reason': f'skipped: {", ".join(failed)} failed'}, True)
 
 

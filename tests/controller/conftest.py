@@ -17,6 +17,7 @@ from gittensor.controller.checks.full_check import FullCheckConfig
 from gittensor.controller.checks.nvml_allowlist import NvmlAllowlist
 from gittensor.controller.checks.runner import CommandResult, FakeRunner, HostRunner, regex
 from gittensor.controller.checks.scrape import (
+    DEVICE_HOLDERS_COMMAND,
     KERNEL_DRIVER_COMMAND,
     NVML_MD5_COMMAND,
     agent_image_command,
@@ -50,6 +51,9 @@ FILLED_BYTES = int(FILL_RATIO * VRAM_TOTAL_BYTES)
 GOOD_WALL_MS = 1500.0
 NETWORK_TARGETS = ('https://registry.example/v2/', 'https://hub.example/api')
 PROOF_IMAGE = 'entrius/gt-proof:test'
+# DEVICE_HOLDERS_COMMAND on a box nothing holds a GPU node on: the `find` matched nothing, so `printf` prints one
+# empty line and no holder block follows.
+NO_DEVICE_HOLDERS = '\n'
 CONFIG = FullCheckConfig(agent_image_digests=(AGENT_DIGEST,), network_targets=NETWORK_TARGETS, proof_image=PROOF_IMAGE)
 FAKE_BINARY = b'\x7fELF-fake-sealed-proof'
 
@@ -211,6 +215,7 @@ def passing_runner(
     agent_image: str = AGENT_IMAGE_OUT,
     agent_image_id: str = AGENT_IMAGE_ID + '\n',
     df: str = fixture('df_docker.txt'),
+    device_holders: str = NO_DEVICE_HOLDERS,
     network_targets=NETWORK_TARGETS,
     job=None,
 ) -> FakeRunner:
@@ -223,6 +228,7 @@ def passing_runner(
             agent_image_command(): agent_image,
             agent_image_id_command(): agent_image_id,
             disk_free_command(): df,
+            DEVICE_HOLDERS_COMMAND: device_holders,
         }
     )
     for url in network_targets:

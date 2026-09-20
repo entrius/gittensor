@@ -263,6 +263,7 @@ class Controller:
                 write_lock=self.write_lock,
                 box_locks=self.box_locks,
                 pending=self._pending_cards(),
+                ours=self._our_containers,
             )
         except Exception as e:  # before any box was visited (the allowlist fetch, our own link): nobody's fault
             self.reporter.error('round', f'round {n} failed before any box was visited: {type(e).__name__}: {e}')
@@ -471,6 +472,14 @@ class Controller:
                 out.setdefault(record.box, set()).add(record.uuid)
             return out
 
+    def _our_containers(self, box_id: str) -> set[str]:
+        """One box's instances' container IDs: what ``check_card_free`` judges its open NVIDIA device handles against,
+        so a card carrying our own workload is not read as a foreign holder. The round calls this once it holds the
+        box's lock, never before: a rotation mints a new container ID, so a set taken earlier can miss the container
+        a start wrote while the round waited for the lock."""
+        with self.write_lock:
+            return self.instances.containers_on(box_id)
+
     def reprove_once(self) -> list[str]:
         """Launch the one-box probe on every box that is due one and not already being probed (or waiting to retry
         one that got no verdict): an IDLE box with a CHECKING card, and a box at ADMIT (its first proof, at once).
@@ -528,7 +537,13 @@ class Controller:
             return
         try:
             report = reprove(
-                proof, box_id, store=self.boxes, write_lock=self.write_lock, box_locks=self.box_locks, exclude=exclude
+                proof,
+                box_id,
+                store=self.boxes,
+                write_lock=self.write_lock,
+                box_locks=self.box_locks,
+                exclude=exclude,
+                ours=self._our_containers,
             )
         except Exception as e:  # never kill the thread silently; the next tick after the retry delay tries again
             with self.write_lock:

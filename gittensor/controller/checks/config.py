@@ -64,6 +64,7 @@ HOST_ROOT = '/proc/1/root'
 # pull fails its start, which has its own path (FAILED_STARTS_BENCH_AFTER).
 NETWORK_TARGETS = ('https://registry-1.docker.io/v2/', 'https://huggingface.co/api/models/Qwen')
 NETWORK_TIMEOUT_S = 10.0
+# "Is anything else using this GPU?" in the round (``checks.check_card_free``), not only under a lease (``heartbeat``).
 NVIDIA_SMI_TIMEOUT_S = 15.0
 SSH_COMMAND_TIMEOUT_S = 30.0
 

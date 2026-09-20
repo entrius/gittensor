@@ -90,19 +90,19 @@ UUID_CLAIMED_ELSEWHERE = 'uuid_claimed_elsewhere'
 PHRASES: Dict[str, str] = {
     # card_free. ``n`` is every foreign holder, whatever bucket it landed in; the code is the bucket that holds most
     # of them, so the phrase names the one thing most worth acting on and the count still adds up.
-    DESKTOP_SESSION: 'a desktop session is using this GPU ({n} processes outside our containers)',
-    ANOTHER_CONTAINER: 'a container we did not start is using this GPU ({n} processes outside our containers)',
-    GPU_WORKLOAD: 'another GPU workload is running on this box ({n} processes outside our containers)',
-    HOST_PROCESS: 'another process on this host is using this GPU ({n} processes outside our containers)',
-    UNREADABLE_HOLDER: 'something is holding this GPU and we could not tell what ({n} processes outside our containers)',  # noqa: E501
+    DESKTOP_SESSION: 'a desktop session is using this GPU ({n} process{es} outside our containers)',
+    ANOTHER_CONTAINER: 'a container we did not start is using this GPU ({n} process{es} outside our containers)',
+    GPU_WORKLOAD: 'another GPU workload is running on this box ({n} process{es} outside our containers)',
+    HOST_PROCESS: 'another process on this host is using this GPU ({n} process{es} outside our containers)',
+    UNREADABLE_HOLDER: 'something is holding this GPU and we could not tell what ({n} process{es} outside our containers)',  # noqa: E501
     CARD_FREE_UNSCANNABLE: 'we could not scan this box for processes holding the GPU',
     # gpu_proof
     PROOF_STAGING: 'we could not set up the GPU proof on this box',
     PROOF_NO_ANSWER: 'no card answered the GPU proof',
-    PROOF_RUNTIME_NVIDIA: 'the NVIDIA container runtime would not start our GPU proof container ({n} cards)',
-    PROOF_CONTAINER: 'our GPU proof container would not start on this box ({n} cards)',
-    PROOF_WRONG_CARD: 'a card answered the GPU proof for a different GPU ({n} cards)',
-    PROOF_BAD_ANSWER: 'the GPU proof did not check out on {n} card(s) of this box',
+    PROOF_RUNTIME_NVIDIA: 'the NVIDIA container runtime would not start our GPU proof container ({n} card{s})',
+    PROOF_CONTAINER: 'our GPU proof container would not start on this box ({n} card{s})',
+    PROOF_WRONG_CARD: 'a card answered the GPU proof for a different GPU ({n} card{s})',
+    PROOF_BAD_ANSWER: 'the GPU proof did not check out on {n} card{s} of this box',
     # disk_free
     DISK_BELOW_FLOOR: 'free disk space is below the {floor_gb} GB floor on the disk Docker uses',
     DISK_UNREADABLE: 'we could not read how much disk space is free on this box',
@@ -119,18 +119,18 @@ PHRASES: Dict[str, str] = {
     NVML_DIGEST_MISMATCH: "this box's NVIDIA management library is not the one published for its driver",
     # gpu_spec
     SPEC_UNREADABLE: 'nvidia-smi did not answer on this box',
-    SPEC_CARD_COUNT: 'this box reports {n} GPUs, the pool admits {low} to {high}',
-    SPEC_MODEL: 'the GPU model on this box is not the one the pool admits ({n} cards)',
-    SPEC_COMPUTE_CAP: 'the GPU compute capability on this box is not the one the pool admits ({n} cards)',
-    SPEC_VRAM: 'the GPU memory on this box is outside the range the pool admits ({n} cards)',
-    SPEC_BAD_UUID: 'this box reported a malformed GPU UUID ({n} cards)',
+    SPEC_CARD_COUNT: 'this box reports {n} GPU{s}, the pool admits {low} to {high}',
+    SPEC_MODEL: 'the GPU model on this box is not the one the pool admits ({n} card{s})',
+    SPEC_COMPUTE_CAP: 'the GPU compute capability on this box is not the one the pool admits ({n} card{s})',
+    SPEC_VRAM: 'the GPU memory on this box is outside the range the pool admits ({n} card{s})',
+    SPEC_BAD_UUID: 'this box reported a malformed GPU UUID ({n} card{s})',
     # gpu_uuid_pin
     UUID_DUPLICATE: 'this box reported the same GPU UUID twice',
     UUID_CHANGED: 'the GPUs on this box are not the ones pinned when it was admitted ({missing} gone, {extra} new)',
     # power_limit
     POWER_NO_GPUS: 'this box reported no GPUs',
-    POWER_BELOW_FLOOR: 'the power limit is set below the pool floor on {n} card(s)',
-    POWER_UNREPORTED: 'this box did not report a power limit on {n} card(s)',
+    POWER_BELOW_FLOOR: 'the power limit is set below the pool floor on {n} card{s}',
+    POWER_UNREPORTED: 'this box did not report a power limit on {n} card{s}',
     # fleet_uuid_unique
     UUID_CLAIMED_ELSEWHERE: 'another box in the pool claims {n} of the GPUs this box reports',
 }
@@ -180,8 +180,12 @@ def render(public: Optional[Mapping[str, Any]]) -> str:
         if key == 'code' or isinstance(value, bool) or not isinstance(value, (int, float)):
             continue
         numbers[str(key)] = int(value)
+    # ``{s}`` and ``{es}`` pluralise whatever ``{n}`` counts, so one template reads for both: 1 card / 4 cards,
+    # 1 process / 4 processes. Each is one of two constants of ours, picked by an integer — the rule holds.
+    one = numbers.get('n') == 1
+    fields: Dict[str, object] = {**numbers, 's': '' if one else 's', 'es': '' if one else 'es'}
     try:
-        return template.format(**numbers)
+        return template.format(**fields)
     except (KeyError, IndexError, ValueError):
         return ''
 

@@ -128,10 +128,19 @@ def test_a_desktop_session_is_named_as_one():
     assert phrase_of(result) == 'a desktop session is using this GPU (4 processes outside our containers)'
 
 
+def test_one_of_a_thing_reads_as_one():
+    """``{s}`` / ``{es}`` pluralise what ``{n}`` counts, so one template covers both — still two constants of ours
+    picked by an integer."""
+    assert w.render({'code': w.HOST_PROCESS, 'n': 1}).endswith('(1 process outside our containers)')
+    assert w.render({'code': w.HOST_PROCESS, 'n': 2}).endswith('(2 processes outside our containers)')
+    assert w.render({'code': w.PROOF_CONTAINER, 'n': 1}).endswith('(1 card)')
+    assert w.render({'code': w.PROOF_CONTAINER, 'n': 3}).endswith('(3 cards)')
+
+
 def test_a_container_that_is_not_ours_is_named_as_one():
     other = 'd' * 64
     result = ck.check_card_free(holders((900, 'python3', f'0::/system.slice/docker-{other}.scope')), ours={OURS})
-    assert phrase_of(result) == ('a container we did not start is using this GPU (1 processes outside our containers)')
+    assert phrase_of(result) == ('a container we did not start is using this GPU (1 process outside our containers)')
 
 
 def test_an_unrecognised_comm_falls_into_the_generic_bucket():
@@ -175,18 +184,18 @@ def test_gpu_proof_says_which_half_of_it_broke():
                          'initialization error'}]  # fmt: skip
     probe = ck.ProbeResult(provider='p', cards=nvidia)
     assert phrase_of(ck.proof_result(probe)) == (
-        'the NVIDIA container runtime would not start our GPU proof container (1 cards)'
+        'the NVIDIA container runtime would not start our GPU proof container (1 card)'
     )
     plain = [{'uuid': 'GPU-a', 'passed': False, 'not_run': True,
               'reason': 'container never started: exit 125: Error response from daemon: no space left'}]  # fmt: skip
     assert phrase_of(ck.proof_result(ck.ProbeResult(provider='p', cards=plain))) == (
-        'our GPU proof container would not start on this box (1 cards)'
+        'our GPU proof container would not start on this box (1 card)'
     )
     wrong = [{'uuid': 'GPU-a', 'answered_uuid': 'GPU-b', 'passed': False, 'reason': 'answered for another card'}]
     assert phrase_of(ck.proof_result(ck.ProbeResult(provider='p', cards=wrong))).startswith('a card answered')
     bad = [{'uuid': 'GPU-a', 'answered_uuid': 'GPU-a', 'passed': False, 'reason': 'filled 1 GiB of 32 GiB'}]
     assert phrase_of(ck.proof_result(ck.ProbeResult(provider='p', cards=bad))) == (
-        'the GPU proof did not check out on 1 card(s) of this box'
+        'the GPU proof did not check out on 1 card of this box'
     )
     assert phrase_of(ck.proof_result(ck.ProbeResult(provider='p', error='staging failed: no route to host'))) == (
         'we could not set up the GPU proof on this box'
@@ -238,7 +247,7 @@ def test_gpu_spec_and_the_uuid_pin_count_cards_and_name_nothing():
     assert phrase_of(ck.check_gpu_spec([], RTX_5090)) == 'this box reports 0 GPUs, the pool admits 1 to 8'
     gpus = parse_nvidia_smi(fixture('nvidia_smi_4090.csv'))
     wrong_model = ck.check_gpu_spec(gpus, RTX_5090)
-    assert phrase_of(wrong_model) == 'the GPU model on this box is not the one the pool admits (1 cards)'
+    assert phrase_of(wrong_model) == 'the GPU model on this box is not the one the pool admits (1 card)'
     assert '4090' in wrong_model.evidence['reason'] and '4090' not in phrase_of(wrong_model)
 
     pinned = ['GPU-' + 'a' * 32, 'GPU-' + 'b' * 32]
@@ -253,9 +262,9 @@ def test_power_limit_and_fleet_uniqueness():
 
     gpus = parse_nvidia_smi(fixture('nvidia_smi_5090.csv'))
     gpus[0].power_limit_w = 100.0
-    assert phrase_of(ck.check_power_limit(gpus)) == 'the power limit is set below the pool floor on 1 card(s)'
+    assert phrase_of(ck.check_power_limit(gpus)) == 'the power limit is set below the pool floor on 1 card'
     gpus[0].power_limit_w = None
-    assert phrase_of(ck.check_power_limit(gpus)) == 'this box did not report a power limit on 1 card(s)'
+    assert phrase_of(ck.check_power_limit(gpus)) == 'this box did not report a power limit on 1 card'
     assert phrase_of(ck.check_power_limit([])) == 'this box reported no GPUs'
 
     clash = ck.check_fleet_uuid_unique('hk1', ['GPU-x'], {'hk2': ['GPU-x']})

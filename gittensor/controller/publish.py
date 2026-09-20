@@ -8,8 +8,10 @@ and image ids, raw GPU UUIDs, error text that embeds an address). This module bu
 the same sources ``gitt controller status`` reads and writes it atomically to ``<state-dir>/public/fleet.json``;
 das-gittensor serves that one file through a read-only mount of ``public/`` only. Nothing here is copied through
 wholesale: every published field is named below, and every string is either ours (a state, a standing level) or held
-to a strict pattern (a check name, an event kind, an entry id), so a new private field on a record cannot leak by
-default. The validator does not read this file; pay comes from the signed scorecard alone.
+to a strict pattern (a check name, an event kind, an entry id, a bench phrase), so a new private field on a record
+cannot leak by default. The one field that reads as free text, ``last_failed_why``, is not: ``checks/why.py`` builds
+every phrase out of string constants in our own source plus integers, so no substring of anything a box reported can
+reach this document — and ``_PHRASE`` checks the result again on the way out. The validator does not read this file; pay comes from the signed scorecard alone.
 
 The pay assembly ``status`` and this document share (the last scorecard as the validator would check it, what the
 ledger settled since it) lives here too, so both read it one way.
@@ -22,7 +24,7 @@ import json
 import os
 import re
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +40,15 @@ SCHEMA = 1
 PUBLIC_DIR = 'public'
 FLEET_FILE = 'fleet.json'
 
-_NAME = re.compile(r'^[a-z0-9_]{1,64}$')  # a check name, a standing event kind
+_NAME = re.compile(r'^[a-z0-9_]{1,64}$')  # a standing event kind
+# A failed check's name. The heartbeat's three questions are stored under a ``heartbeat:`` prefix
+# (``state.apply_heartbeat_failure``), and the colon failed ``_NAME``: every in-lease bench — the most serious class
+# there is — published ``last_failed: []`` and the page showed nothing at all for it (Kimbo 9/20).
+_CHECK_NAME = re.compile(r'^[a-z0-9_]{1,64}(:[a-z0-9_]{1,64})?$')
+# A published bench phrase. ``checks/why.py`` assembles these from its own constants and integers and nothing else,
+# so this pattern is a second lock on the same door, not the one holding it shut: no colon, no angle bracket, no
+# ampersand, no quote, nothing a box reported could round-trip through even if the first layer were bypassed.
+_PHRASE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ,.()'/-]{0,199}$")
 _ENTRY = re.compile(r'^[a-z0-9][a-z0-9._-]{0,127}@[0-9]{1,9}$')  # a registry entry id, name@version
 _IMAGE = re.compile(
     r'^[a-z0-9][a-z0-9._/-]{0,199}(:[A-Za-z0-9_][A-Za-z0-9._-]{0,127})?$'
@@ -134,8 +144,22 @@ def public_image(image: str | None) -> str | None:
     return ref if _IMAGE.match(ref) else None
 
 
-def _names(values: Any) -> list[str]:
-    return [v for v in (values or []) if isinstance(v, str) and _NAME.match(v)]
+def _names(values: Any, pattern: re.Pattern[str] = _NAME) -> list[str]:
+    return [v for v in (values or []) if isinstance(v, str) and pattern.match(v)]
+
+
+def _phrases(why: Any, names: Sequence[str]) -> dict[str, str]:
+    """Per published failed check name, the phrase ``checks/why.py`` rendered for it: one sentence a miner can act
+    on, in place of a check name that only names the check. A name whose phrase is missing or does not match
+    ``_PHRASE`` is simply absent, and the page falls back to naming the check."""
+    if not isinstance(why, Mapping):
+        return {}
+    out = {}
+    for name in names:
+        text = why.get(name)
+        if isinstance(text, str) and _PHRASE.match(text):
+            out[name] = text
+    return out
 
 
 def _num(value: Any) -> float | None:
@@ -237,6 +261,7 @@ def build_fleet(
             }
         benched = box.status == BENCHED
         bench_event = _last_event(box.standing_events, _BENCH_KINDS) if benched else None
+        failed = _names(box.last_failed, _CHECK_NAME)
         rows.append(
             {
                 'hotkey': box.box_id,
@@ -246,7 +271,10 @@ def build_fleet(
                 'gpu_type': gpu_type_of(box.card_name) if box.card_name else None,
                 'card_count': len(cards),
                 'last_check_at': box.last_check_at,
-                'last_failed': _names(box.last_failed),
+                'last_failed': failed,
+                # Why, in words, assembled from our own constants alone: no substring of anything the box reported
+                # appears here (``checks/why.py``). The full reason stays in ``controller.jsonl``.
+                'last_failed_why': _phrases(box.last_failed_why, failed),
                 'bench_until': box.bench_until if benched else None,
                 'benched_reason': bench_event['kind'] if bench_event else None,
                 # The rungs clean time has left (the next bench is rung + 1), and checks in a row that could not run.

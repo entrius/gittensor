@@ -16,6 +16,7 @@ import pytest
 import gittensor.cli.main  # noqa: F401  (the CLI package must load before gittensor.controller.cli: circular import)
 from gittensor.controller import cli as ctl
 from gittensor.controller.checks import config as cfg
+from gittensor.controller.checks import why
 from gittensor.controller.checks.state import (
     ADMIT,
     BENCHED,
@@ -49,6 +50,7 @@ HK_A = '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY'
 HK_B = '5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty'
 HK_C = '5FLSigC9HGRKVhB9FiEo4Y3koPsNmBmLJbpXg2mp1hXcS59Y'
 NOW = 1_789_000_000.0
+WHY_PINNED = why.BY_NAME['gpu_uuid_pin']
 IMAGE = 'entrius/qwen3.8-27b-nvfp4:6@sha256:' + 'd5' * 32
 
 # Every value here is private: none may appear anywhere in the published document.
@@ -79,6 +81,7 @@ def fleet(now: float = NOW) -> tuple[dict[str, BoxState], dict[str, InstanceReco
             endpoint_changed={'host': PRIVATE['moved_host'], 'port': 2222, 'host_key': PRIVATE['host_key'], 'at': now},
             cards={UUID_A: CardState(LEASED, 'i-1', now - 2_400), UUID_B: CardState(DRAINING, 'i-2', now - 30)},
             last_failed=['gpu_uuid_pin', PRIVATE['transport']],
+            last_failed_why={'gpu_uuid_pin': WHY_PINNED, PRIVATE['transport']: PRIVATE['transport']},
             standing_events=[
                 {'at': now - 9_000, 'kind': 'released', 'reason': PRIVATE['reason']},
                 {'at': now - 5_000, 'kind': CLEAN_LEASE, 'instance': 'i-0', 'uuid': UUID_A, 'leased_s': 2_785.4},
@@ -87,6 +90,7 @@ def fleet(now: float = NOW) -> tuple[dict[str, BoxState], dict[str, InstanceReco
         HK_B: BoxState(
             HK_B, status=BENCHED, card_name='NVIDIA GeForce RTX 5090', host='203.0.113.78', port=2200,
             last_check_at=now - 1_500, bench_until=now + 3_600, benched_at=now - 1_500, last_failed=['gpu_uuid_pin'],
+            last_failed_why={'gpu_uuid_pin': WHY_PINNED},
             standing_events=[{'at': now - 1_500, 'kind': CHECK_FAILED, 'failed': ['gpu_uuid_pin']}],
         ),
         HK_C: BoxState(HK_C, status=ADMIT, host='203.0.113.79', port=2200, source='chain'),
@@ -142,7 +146,7 @@ def test_the_contract(tmp_path):
     a, b, c = (next(x for x in doc['boxes'] if x['hotkey'] == hk) for hk in (HK_A, HK_B, HK_C))
     assert set(a) == {
         'hotkey', 'uid', 'status', 'standing', 'gpu_type', 'card_count', 'last_check_at', 'last_failed',
-        'bench_until', 'benched_reason', 'ladder_rung', 'strikes', 'pay', 'last_event', 'cards',
+        'last_failed_why', 'bench_until', 'benched_reason', 'ladder_rung', 'strikes', 'pay', 'last_event', 'cards',
     }  # fmt: skip
     assert (a['status'], a['standing'], a['gpu_type'], a['card_count'], a['uid']) == (
         IDLE, 'probation', 'RTX5090', 2, 61,
@@ -169,6 +173,7 @@ def test_the_contract(tmp_path):
     # a benched box: no cards, the reason is the bench's standing event, the failed check by name
     assert (b['status'], b['cards'], b['card_count']) == (BENCHED, [], 0)
     assert (b['bench_until'], b['benched_reason'], b['last_failed']) == (NOW + 3_600, CHECK_FAILED, ['gpu_uuid_pin'])
+    assert b['last_failed_why'] == {'gpu_uuid_pin': WHY_PINNED}  # ... and why, in words the miner can act on
     # a box with no cards yet
     assert (c['status'], c['cards'], c['gpu_type'], c['last_check_at'], c['pay']) == (ADMIT, [], None, None, None)
 
@@ -183,6 +188,8 @@ def test_nothing_private_reaches_the_document(tmp_path):
         assert value not in text, value
     a = next(x for x in json.loads(text)['boxes'] if x['hotkey'] == HK_A)
     assert a['last_failed'] == ['gpu_uuid_pin']  # the check name stays, the error text that rode with it does not
+    # ... and a phrase keyed by a name that is not a check name goes with it, however it got into the state file
+    assert a['last_failed_why'] == {'gpu_uuid_pin': WHY_PINNED}
 
 
 def test_a_card_is_named_by_a_hash_and_an_image_by_repo_and_tag(tmp_path):

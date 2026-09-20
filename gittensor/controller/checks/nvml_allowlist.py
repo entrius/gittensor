@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 from typing import Dict, Iterable, Mapping, Optional, Set
 
+from gittensor.controller.checks import why as w
 from gittensor.controller.checks.verdict import CheckResult
 
 CHECK_NAME = 'nvml_digest'
@@ -65,20 +66,52 @@ class NvmlAllowlist:
         md5 = (md5 or '').strip().lower()
         evidence = {'driver': driver, 'kernel_driver': kernel_driver, 'md5': md5, 'allowlist': self.source}
         if not driver:
-            return CheckResult(CHECK_NAME, False, {**evidence, 'reason': 'empty driver string'})
+            return CheckResult(
+                CHECK_NAME,
+                False,
+                {**evidence, 'reason': 'empty driver string', w.PUBLIC: {'code': w.NVML_DRIVER_MISSING}},  # fmt: skip
+            )
         if kernel_driver and kernel_driver != driver:
             return CheckResult(
-                CHECK_NAME, False, {**evidence, 'reason': 'nvidia-smi driver disagrees with the kernel module'}
+                CHECK_NAME,
+                False,
+                {
+                    **evidence,
+                    'reason': 'nvidia-smi driver disagrees with the kernel module',
+                    w.PUBLIC: {'code': w.NVML_DRIVER_DISAGREES},
+                },
             )
         if not md5:
-            return CheckResult(CHECK_NAME, False, {**evidence, 'reason': 'libnvidia-ml.so.1 not found or unhashed'})
+            return CheckResult(
+                CHECK_NAME,
+                False,
+                {
+                    **evidence,
+                    'reason': 'libnvidia-ml.so.1 not found or unhashed',
+                    w.PUBLIC: {'code': w.NVML_LIBRARY_MISSING},
+                },  # fmt: skip
+            )
         expected = self.by_driver.get(driver)
         if expected is None:
+            # The driver version is the box's, and naming it on a public page tells the internet what to target.
             return CheckResult(
-                CHECK_NAME, False, {**evidence, 'reason': 'unknown driver (fails closed; vet and add to allowlist)'}
+                CHECK_NAME,
+                False,
+                {
+                    **evidence,
+                    'reason': 'unknown driver (fails closed; vet and add to allowlist)',
+                    w.PUBLIC: {'code': w.NVML_DRIVER_UNKNOWN},
+                },
             )
         if md5 not in expected:
             return CheckResult(
-                CHECK_NAME, False, {**evidence, 'reason': 'digest mismatch', 'expected': sorted(expected)}
+                CHECK_NAME,
+                False,
+                {
+                    **evidence,
+                    'reason': 'digest mismatch',
+                    'expected': sorted(expected),
+                    w.PUBLIC: {'code': w.NVML_DIGEST_MISMATCH},
+                },
             )
         return CheckResult(CHECK_NAME, True, evidence)

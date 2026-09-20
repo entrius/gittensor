@@ -18,10 +18,11 @@ next passing proof returns a CHECKING card to IDLE. The proof round only proves 
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Mapping, Optional, Sequence
 
 from gittensor.agent.config import WORKLOAD_PORT_RANGE
 from gittensor.controller.checks import config as cfg
+from gittensor.controller.checks import why as w
 from gittensor.controller.checks.verdict import NOT_RUN, CheckVerdict
 
 ADMIT = 'ADMIT'
@@ -82,6 +83,10 @@ class BoxState:
     bench_until: Optional[float] = None
     last_check_at: Optional[float] = None
     last_failed: List[str] = field(default_factory=list)
+    # Per failed check name, the phrase the public fleet page shows for it, already rendered (``checks/why.py``):
+    # one place decides what is public, and ``publish.py`` only has to copy it. Written wherever ``last_failed`` is.
+    # Files written before this field existed load with it empty; the page then names the check, as it used to.
+    last_failed_why: Dict[str, str] = field(default_factory=dict)
     admitted_at: Optional[float] = None
     unreachable_count: int = 0  # consecutive rounds with no verdict because SSH failed; reset by any verdict
     # Consecutive checks that could not be carried out (``apply_not_run``), and when the last one was. A pass or a
@@ -199,14 +204,17 @@ def _bench(
     failed: Sequence[str],
     ladder: Sequence[int] = cfg.BENCH_BACKOFF_LADDER_S,
     floor: int = 0,
+    why: Optional[Mapping[str, str]] = None,
 ) -> BoxState:
     """Climb the ladder from the rung clean time has left, clear the pin and the cards, wait it out. With ``floor``
-    the rung is at least that before it climbs, whatever it was."""
+    the rung is at least that before it climbs, whatever it was. ``why`` is the public phrase per failed name for a
+    bench that has evidence to classify (a check verdict); without it the name alone picks the phrase, which is all a
+    heartbeat bench, an unreachable box or too many failed starts has to say anyway."""
     new.bench_count = max(ladder_rung(new, now), floor) + 1
     new.status = BENCHED
     new.benched_at = now
     new.bench_until = now + backoff_seconds(new.bench_count, ladder)
-    new.last_failed = list(failed)
+    _set_failed(new, failed, why)
     new.pinned_uuids = []
     new.admitted_at = None
     new.cards = {}
@@ -216,6 +224,14 @@ def _bench(
     new.clean_paused_at = None
     new.clean_paused_s = 0.0
     return new
+
+
+def _set_failed(new: BoxState, failed: Sequence[str], why: Optional[Mapping[str, str]] = None) -> None:
+    """``last_failed`` and its public phrases together — they are one fact and must never drift apart. A name with
+    no phrase is simply absent from the map; the page names the check for it."""
+    new.last_failed = list(failed)
+    rendered = dict(why) if why is not None else w.for_names(list(failed))
+    new.last_failed_why = {name: rendered[name] for name in new.last_failed if rendered.get(name)}
 
 
 def apply_verdict(
@@ -229,11 +245,12 @@ def apply_verdict(
     a pass at IDLE returns CHECKING cards to IDLE and leaves busy cards alone. With ``proved`` (the cards the proof
     actually ran on) only those return: a card that reached CHECKING mid-round was not proved. A verdict with nothing
     failed and a check that could not run is a strike (``apply_not_run``)."""
+    why = w.from_results(verdict.checks)
     if verdict.verdict == NOT_RUN:
-        return apply_not_run(state, verdict.not_run, now, ladder=ladder, proved=proved)
+        return apply_not_run(state, verdict.not_run, now, ladder=ladder, proved=proved, why=why)
     new = BoxState.from_dict(state.as_dict())
     new.last_check_at = now
-    new.last_failed = list(verdict.failed)
+    _set_failed(new, verdict.failed, why)
     new.unreachable_count = 0
     if verdict.admitted:
         new.identity = identity_baseline(verdict) or new.identity
@@ -254,7 +271,7 @@ def apply_verdict(
         new.status = IDLE
         return new
     new = add_event(new, CHECK_FAILED, now, failed=list(verdict.failed))
-    return _bench(new, now, verdict.failed, ladder)
+    return _bench(new, now, verdict.failed, ladder, why=why)
 
 
 def apply_not_run(
@@ -264,6 +281,7 @@ def apply_not_run(
     bench_after: int = cfg.COULD_NOT_RUN_BENCH_AFTER,
     ladder: Sequence[int] = cfg.BENCH_BACKOFF_LADDER_S,
     proved: Optional[Sequence[str]] = None,
+    why: Optional[Mapping[str, str]] = None,
 ) -> BoxState:
     """The state after a check that could not be carried out (Kimbo 9/19): a strike. No answer was judged, so it is no
     caught cheat, and no proof either: ``last_check_at`` does not move, and the cards the proof was for (``proved``;
@@ -276,7 +294,7 @@ def apply_not_run(
     new.not_run_at = now
     if new.not_run_count >= bench_after:
         new = add_event(new, CHECK_FAILED, now, failed=list(not_run), not_run_rounds=new.not_run_count)
-        return _bench(new, now, list(not_run), ladder)
+        return _bench(new, now, list(not_run), ladder, why=why)
     new = add_event(new, CHECK_NOT_RUN, now, not_run=list(not_run), strike=new.not_run_count)
     _pause_clean(new, now)
     for uuid, card in new.cards.items():
@@ -313,7 +331,7 @@ def apply_unreachable(
         new.status = BENCHED
         new.benched_at = now
         new.bench_until = now + bench_s
-        new.last_failed = [UNREACHABLE]
+        _set_failed(new, [UNREACHABLE])
         new.pinned_uuids = []
         new.admitted_at = None
         new.cards = {}
@@ -593,7 +611,7 @@ def apply_deregistered(state: BoxState, now: float) -> BoxState:
     new.status = BENCHED
     new.benched_at = now
     new.bench_until = None
-    new.last_failed = [DEREGISTERED]
+    _set_failed(new, [DEREGISTERED])
     new.pinned_uuids = []
     new.admitted_at = None
     new.cards = {}

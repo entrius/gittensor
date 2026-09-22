@@ -811,6 +811,22 @@ def test_a_leftover_mid_start_container_is_undeployed(world):
     assert StateStore(root / 'boxes.json').get('hk1').cards[UUID_5090].state == CHECKING
 
 
+def test_a_start_that_never_reached_docker_run_is_lost_not_left_starting(world):
+    # UID 86, 9/22: ssh timed out mid-start before `docker run`, so there was a record with no container id and no
+    # container. The card sat STARTING (unpaid, never re-proved) for 3 h, until the state was edited by hand.
+    root, registry = world
+    seed(root, transition_card(idle_box(), UUID_5090, STARTING, 1.0, 'i-00000000dead'), replicas=0)
+    InstanceStore(root / 'instances.json').put(InstanceRecord('i-00000000dead', ENTRY, 'hk1', UUID_5090))
+    box = FakeDocker()
+    report = reconciler(root, registry, {'hk1': box}, visit_all=True).run_pass()
+    (lost,) = [a for a in report.actions if a.kind == 'lost']
+    assert lost.instance == 'i-00000000dead' and lost.states == [STARTING, CHECKING]
+    assert lost.detail == 'start never reached docker run'
+    assert 'i-00000000dead' not in InstanceStore(root / 'instances.json').instances
+    assert StateStore(root / 'boxes.json').get('hk1').cards[UUID_5090].state == CHECKING
+    assert box.commands('docker run') == []
+
+
 def test_an_unverifiable_entry_is_never_run(world):
     root, registry = world
     seed(root, idle_box(), replicas=1)

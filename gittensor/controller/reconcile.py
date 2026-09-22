@@ -475,13 +475,17 @@ class Reconciler:
                 container = by_instance.get(record.id)
                 if container is not None and container.running and container.container_id == record.container_id:
                     continue
-                if record.container_id == '' and box.card(record.uuid).state == STARTING and container is None:
-                    continue  # recorded before docker run; the start is resolved below as a mid-start leftover
+                # A record with no container id on a STARTING card is a start that lost the box before `docker run`
+                # answered. The box is not busy, so no thread is still on it: it is lost like any other, or the card
+                # stays STARTING, unpaid and never re-proved, until someone edits the state by hand (UID 86, 9/22).
                 state = box.card(record.uuid).state if box.status == IDLE else box.status
                 action = Action('lost', box_id, record.id, record.entry, record.uuid, False, states=[state])
-                action.detail = (
-                    f'container {container.state} ({container.container_id[:12]})' if container else 'container gone'
-                )
+                if container is not None:
+                    action.detail = f'container {container.state} ({container.container_id[:12]})'
+                elif record.container_id == '':
+                    action.detail = 'start never reached docker run'
+                else:
+                    action.detail = 'container gone'
                 if state == LEASED and not record.draining:
                     if record.heartbeat_misses > 0:
                         action.kind = 'stopped'
@@ -954,7 +958,7 @@ class Reconciler:
                 raise PlacementError(f'first probe after the canary: {first.detail}')
         except _TRANSPORT as e:
             # Lost the box mid-start: nothing can be undeployed now. The card stays STARTING and the next pass that
-            # reaches the box finds the leftover and undeploys it.
+            # reaches the box settles it: a leftover container is undeployed, a record with none behind it is lost.
             action.detail = f'transport: {type(e).__name__}: {e}'[:300]
             action.timings_ms = _durations(marks)
             return action

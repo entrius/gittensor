@@ -1,0 +1,11 @@
+{
+ "at": 1790356170.6,
+ "box": "compute3 (UID 111), 2x RTX 5090 32607 MiB, Ubuntu 22.04.5, docker 29.7.2, toolkit 1.20.0",
+ "driver": "595.84",
+ "load_s": 22.3,
+ "health_ok": true,
+ "canary_ok": true,
+ "vram_gb": 26.7,
+ "decode_tps_single": 128,
+ "notes": "v8 = v7 (same env, concurrency 2) on sparkinfer 0.5.11 (ghcr digest 5395a9d3), health probe /v1/models -> /health. Fixes sparkinfer#1133 via #1134 (stale whole-prefill CUDA graph replayed against freed arena scratch); our own production cores 09-24/25 unwind to prefill_batched_run -> cudaGraphLaunch, the path #1134 changes. Qualified 09-25 on compute3: canary 4/4, /health 200. A/B stress vs 0.5.10 on the same box, cards swapped per cycle, 5 fresh instances each, 10 trigger rounds each (fresh 20k same-length prompts, cache resumes to 46k, DSpark prefills to 16k): 0.5.11 served 1478 with 0 crashes and only 429 backpressure; 0.5.10 served 1364 with 0 crashes and 4x 503. The harness did not reproduce the crash on 0.5.10, so the stress run shows no regression, not the fix itself."
+}

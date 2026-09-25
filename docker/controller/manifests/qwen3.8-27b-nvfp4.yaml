@@ -18,10 +18,10 @@
 #   * TODO before bless (qualification on our own card, `deploy --box`): min_vram_gb at
 #     65536 with the drafter, profile, concurrency (upstream fixed the serialised 4 × 8k case).
 name: qwen3.8-27b-nvfp4
-version: 7
-description: Qwen3.8-27B (NVFP4) chat with the DSpark drafter on sparkinfer v0.5.10's release container, one RTX 5090 per instance
+version: 8
+description: Qwen3.8-27B (NVFP4) chat with the DSpark drafter on sparkinfer v0.5.11's release container, one RTX 5090 per instance
 runtime: sparkinfer
-image: ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:0.5.10@sha256:d519d6ed995cf24f4a00c224733082166cfcb56ebaefe45ff94f80e9f518bbe1  # tag v0.5.10 (ab936d9, 9/17): v0.5.9 (#1098 baked) + assistant messages accept every field the server emits (0.5.9 rejected its own `reasoning` on turn 2) (gittensor-entrypoint.sh, /manifest.yaml); bless copies it under entrius/
+image: ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:0.5.11@sha256:5395a9d39100d856201e8b38a4ef29f84cc4452814258fb8187a1f41683b3814  # tag 0.5.11 (a5c8d3e, 9/24): v0.5.10 + #1134 drop the whole-prefill graph when its scratch moved (the libcuda segfault, sparkinfer#1133) + #1123 concurrent recurrent-state width + #1135 lost context -> /health 503; bless copies it under entrius/
 placement:
   gpu_types: {include: [RTX5090]}
   cards_per_instance: 1
@@ -52,7 +52,8 @@ artifacts:
     revision: eba1ac5a66c74902eaa95a4000a7c5eda96d8e95
     sha256: 506d2ebdc91de82bb5fcd8413490eafb484731d765d7b509ee7a60dad002c865
 health:
-  http: {path: /v1/models, port: 8080, expect_status: 200}
+  # /health, not /v1/models: /v1/models answers 200 after the CUDA context is lost; /health answers 503 (0.5.11 #1135)
+  http: {path: /health, port: 8080, expect_status: 200}
   interval_s: 60
   failure_threshold: 3
 entry_canary:                # one picked at random each start; sent at front_door.concurrency (warmup)

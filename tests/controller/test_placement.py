@@ -993,8 +993,10 @@ def test_the_committed_27b_manifest_agrees_with_itself_and_with_the_release_cont
     # 9/17 soak: min_vram_gb 32 sat above our 5090 spec floor (31.25 GB) and the entry could never place
     assert manifest.placement.min_vram_gb <= RTX_5090.vram_total_mib_min / 1024
     assert spec.network == 'gt-noegress' and manifest.image.startswith(
-        'ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:0.5.10@sha256:d519d6ed'
+        'ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:0.5.11@sha256:5395a9d3'
     )
+    # 0.5.11 (#1135): /health answers 503 once the CUDA context is lost; /v1/models kept answering 200
+    assert manifest.health.http is not None and manifest.health.http.path == '/health'
 
 
 # ---------------------------------------------------------------- workload ports ------------------------------------

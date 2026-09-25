@@ -1,5 +1,5 @@
-# The Qwen3.8-27B (NVFP4) chat workload as blessed for the compute pool, v6 (9/16): sparkinfer's own release
-# container (ghcr.io/gittensor-ai-lab/sparkinfer-qwen38, built and published from their repo), blessed by digest.
+# The Qwen3.8-27B (NVFP4) chat workload for the compute pool, v8: sparkinfer's own release
+# container (ghcr.io/gittensor-ai-lab/sparkinfer-qwen38, built and published from their repo), to be blessed by digest.
 # The same document is PR'd to gittensor-ai-lab/sparkinfer as docker/gittensor-manifest.yaml (the author-owned copy,
 # baked at /manifest.yaml); at bless time the controller mounts THIS signed copy over it and pins the digest.
 #
@@ -18,7 +18,7 @@
 #   * TODO before bless (qualification on our own card, `deploy --box`): min_vram_gb at
 #     65536 with the drafter, profile, concurrency (upstream fixed the serialised 4 × 8k case).
 name: qwen3.8-27b-nvfp4
-version: 7
+version: 8
 description: Qwen3.8-27B (NVFP4) chat with the DSpark drafter on sparkinfer v0.5.10's release container, one RTX 5090 per instance
 runtime: sparkinfer
 image: ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:0.5.10@sha256:d519d6ed995cf24f4a00c224733082166cfcb56ebaefe45ff94f80e9f518bbe1  # tag v0.5.10 (ab936d9, 9/17): v0.5.9 (#1098 baked) + assistant messages accept every field the server emits (0.5.9 rejected its own `reasoning` on turn 2) (gittensor-entrypoint.sh, /manifest.yaml); bless copies it under entrius/
@@ -39,6 +39,7 @@ run:
     SPARKINFER_ADMISSION_WAIT_S: '0'
     SPARKINFER_DRAIN_GRACE_S: '0'
     SPARKINFER_DETERMINISTIC: '0'     # no output audits; on costs TTFT
+    SPARKINFER_MUSE_PREFILL_GRAPH: '0' # v0.5.10 can replay a graph against freed scratch (sparkinfer#1134)
   volumes: [{name: models, mount: /models, read_only: true}]
 network:
   egress: []                 # none: the controller pre-stages every file the entrypoint looks for

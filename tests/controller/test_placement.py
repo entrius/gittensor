@@ -984,6 +984,7 @@ def test_the_committed_27b_manifest_agrees_with_itself_and_with_the_release_cont
     env = dict(spec.env)
     assert [a.path for a in manifest.artifacts] == [env['MODEL_DIR'], env['DRAFT_DIR']]
     assert env['SPARKINFER_NO_DOWNLOAD'] == '1' and env['SPARKINFER_MODE'] == 'serve-dspark'
+    assert env['SPARKINFER_MUSE_PREFILL_GRAPH'] == '0'  # v0.5.10 stale-scratch graph crash workaround
     assert env['SPARKINFER_MAX_QUEUE_DEPTH'] == str(manifest.front_door.concurrency)
     assert env['SPARKINFER_ADMISSION_WAIT_S'] == '0' and env['SPARKINFER_DRAIN_GRACE_S'] == '0'
     assert 'SPARKINFER_MAX_OUTPUT_TOKENS' not in env  # the runtime's own cap (16384 in their container), never ours

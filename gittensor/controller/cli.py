@@ -494,10 +494,13 @@ def check_box(
             return CheckOutcome(
                 None, busy='every card busy: ' + ', '.join(f'{u[:12]}… {s}' for u, s in skipped.items())
             )
-        if not proof_image_ready(runner, config.proof_image):
-            return CheckOutcome(None, busy=PROOF_IMAGE_PULLING)
-        proved = [g.uuid for g in gpus]
-        checks.append(ck.check_gpu_proof(runner, gpus, proof, config.proof_image, config.proof_timeout_s))
+        try:
+            if not proof_image_ready(runner, config.proof_image):
+                return CheckOutcome(None, busy=PROOF_IMAGE_PULLING)
+            proved = [g.uuid for g in gpus]
+            checks.append(ck.check_gpu_proof(runner, gpus, proof, config.proof_image, config.proof_timeout_s))
+        except SshTransportError as e:
+            return CheckOutcome(None, f'{type(e).__name__}: {e}'[:500])
     else:
         checks.append(proof_skipped(checks))
     return CheckOutcome(finish_verdict(checks, scrape, now), proved=proved)
@@ -652,6 +655,9 @@ def run_round(
             return
         try:
             ready = proof_image_ready(r.runner, config.proof_image)
+        except SshTransportError as e:
+            r.transport_error = clip(f'{type(e).__name__}: {e}')
+            return
         except Exception as e:  # transport died asking
             r.stage_error = clip(f'staging failed: {type(e).__name__}: {e}')
             return
@@ -660,6 +666,8 @@ def run_round(
             return
         try:
             r.staged = stage_box(r.runner, r.proved, proof, config.proof_image, config.proof_timeout_s)
+        except SshTransportError as e:
+            r.transport_error = clip(f'{type(e).__name__}: {e}')
         except ProofUnavailable as e:
             r.stage_error = clip(str(e))
         except Exception as e:  # transport died mid-stage
@@ -733,9 +741,11 @@ def run_round(
                 if current is None or current.status != r.box.status:
                     r.after = current  # benched by the watch mid-round: the bench stands, no verdict applied
                     continue
-                if r.scrape is None:
-                    if r.transport_error and not (no_box_answered and r.runner is not None):
+                if r.transport_error:
+                    if not (no_box_answered and r.runner is not None):
                         r.after = store.boxes[r.box.box_id] = apply_unreachable(current, now)
+                    continue
+                if r.scrape is None:
                     continue
                 if not identity_passed(r.checks):
                     r.checks.append(proof_skipped(r.checks))

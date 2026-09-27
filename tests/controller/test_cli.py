@@ -563,6 +563,38 @@ def test_a_round_no_box_answers_counts_nobody_unreachable_and_one_dead_box_still
     assert store(state).get(HK_B).status == IDLE
 
 
+@pytest.mark.parametrize('command', [r'^if docker image inspect ', r'^docker create ', r'^docker cp - '])
+def test_staging_transport_failure_does_not_climb_the_proof_ladder(state, command):
+    events, by_box = two_boxes(state, fixture('nvidia_smi_5090.csv').replace(UUID_5090, UUID_5090_B))
+    by_box[HK_B].inner.on(regex(command), SshTransportError('ssh upload timed out'))
+    for count in (1, 2, 3):
+        with runners(by_box):
+            result = invoke(*round_args(state, '--json'))
+        assert result.exit_code == 2, result.output
+        rows = {b['hotkey']: b for b in json.loads(result.stdout)['boxes']}
+        assert rows[HK_B]['verdict'] is None and 'ssh upload timed out' in rows[HK_B]['transport_error']
+        box = store(state).get(HK_B)
+        assert box.unreachable_count == count and box.not_run_count == 0
+        assert box.bench_count == 0
+        assert box.status == (BENCHED if count == 3 else ADMIT)
+        assert store(state).get(HK_A).status == IDLE
+    assert not any(c.startswith('docker start') for hk, c in events if hk == HK_B)
+    assert box.last_failed == ['ssh_unreachable']
+    assert box.bench_until - box.benched_at == 12 * 3600
+
+
+@pytest.mark.parametrize('command', [r'^if docker image inspect ', r'^docker cp - '])
+def test_one_box_check_preserves_staging_transport_failure(state, command):
+    admit(state)
+    runner = box_runner().on(regex(command), SshTransportError('ssh upload timed out'))
+    with runners({HK_A: runner}):
+        result = check(state, '--proof', FAKE_PROOF, '--agent-image-digest', AGENT_DIGEST, '--json')
+    assert result.exit_code == 2, result.output
+    assert 'ssh upload timed out' in result.stdout
+    box = store(state).get(HK_A)
+    assert box.status == ADMIT and box.not_run_count == 0 and box.bench_count == 0
+
+
 def test_round_loop_runs_the_build_between_rounds_and_reloads_the_proof(state, tmp_path, monkeypatch):
     (tmp_path / 'fake_loop_provider.py').write_text(
         'from tests.controller.conftest import FakeProof\n\nmade = []\n\n\n'

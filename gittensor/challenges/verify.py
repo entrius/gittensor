@@ -13,10 +13,10 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import datetime, timezone
 from functools import cache
-from typing import Any
+from typing import Any, Callable
 
 import click
 
@@ -29,6 +29,7 @@ ATTESTATION = 'attestation.json'
 NEEDS_REVIEW = 'needs-review'
 WRITERS = ('admin', 'maintain', 'write')
 BLOCK_SECONDS = 12
+FILES_JQ = '.[] | [.filename, .previous_filename // ""] | @tsv'
 CLA_TEXT = 'I agree to the Contributor License Agreement in CLA.md and that this solver is licensed under LICENSING.md.'
 CLA = re.compile(r'- \[[xX]\] ' + re.escape(CLA_TEXT))
 NO_CLA = 'CLA not accepted: tick the agreement box and resubmit as a new PR'
@@ -64,14 +65,24 @@ class PullRequest:
     actor: str  # who triggered the event
     actor_writes: bool
     state: str  # open, closed or merged
-    ever_closed: bool
+    reopened: bool
+    force_pushed: bool
     commits: int
-    files: list[str]
     created_at: datetime
+    head: str = ''  # the head commit sha
+    base: str = MAIN
+    draft: bool = False
     body: str = ''
     labels: list[str] = field(default_factory=list)
+    changed_files: int = 0
+    files: list[str] = field(default_factory=list)
+    renamed_from: list[str] = field(default_factory=list)  # a rename's old paths: changed too
     attestation: str | None = None  # attestation.json at the head, as committed
     solver_sha: str | None = None  # the head's tree sha of the solver dir
+
+    @property
+    def paths(self) -> list[str]:
+        return self.files + self.renamed_from
 
 
 @dataclass(frozen=True)
@@ -82,7 +93,7 @@ class Repo:
     king_sha: str
     leaderboard: str
     taken: list[str]  # the author's solver dirs already on main
-    earlier_open: list[int]  # earlier PRs still in the queue
+    pending: list[int]  # PRs to finish first: earlier open ones in the queue, merged crowns not yet recorded
 
 
 @dataclass(frozen=True)
@@ -112,8 +123,9 @@ class Verdict:
         return json.dumps(asdict(self))
 
 
-def decide(pr: PullRequest, repo: Repo, chain: Chain, config: Config) -> Verdict:
-    """The G.3 checks in order: the first that fails decides; all passing crowns."""
+def decide(pr: PullRequest, repo: Repo, chain: Callable[[int], Chain], config: Config) -> Verdict:
+    """The G.3 checks in order: the first that fails decides; all passing crowns. ``chain(seed_block)`` is called
+    only once the queue, scope and signature pass. A merged PR whose crown is not recorded yet is finished."""
     checks: list[Check] = []
 
     def passed(name: str, ok: bool, detail: str) -> bool:
@@ -125,18 +137,30 @@ def decide(pr: PullRequest, repo: Repo, chain: Chain, config: Config) -> Verdict
 
     if not passed('actor', not is_maintainer(pr.actor, pr.actor_writes, config), f'event by {pr.actor}'):
         return stop('ignore')
+    if pr.state == 'merged':
+        if not passed(
+            'unrecorded crown',
+            unrecorded_crown(pr, repo, config),
+            'merged: recorded on LEADERBOARD.md, or not a submission',
+        ):
+            return stop('ignore')
+        passed('crown', True, f'merged: finish the crown of {solver_dir(pr.paths, pr.author)}')
+        return stop('crown', round=next_round(repo.leaderboard), **attested_numbers(pr))
     if not passed('eligible', not (why := ineligible(pr, config)), why or f'opened by {pr.author}, open'):
         return stop('ignore')
-    single = f'{pr.commits} commit(s)' + ('' if pr.commits == 1 else ': a push after opening; resubmit as a new PR')
-    if not passed('one commit', pr.commits == 1, single):
+    single = pr.commits == 1 and not pr.force_pushed
+    pushes = f'{pr.commits} commit(s)' + ('' if single else ', pushed after opening: resubmit as a new PR')
+    if not passed('one commit', single, pushes):
         return stop('close')
+    if not passed('ready', not pr.draft, 'a draft' if pr.draft else 'ready for review'):
+        return stop('wait')
     cla = any(CLA.fullmatch(line.strip()) for line in pr.body.splitlines())
     if not passed('cla', cla, 'CLA accepted' if cla else NO_CLA):
         return stop('close')
-    if not passed('queue', not repo.earlier_open, f'earlier PRs first: {repo.earlier_open}'):
+    if not passed('queue', not repo.pending, f'waiting on PRs {repo.pending}'):
         return stop('wait')
-    solver = solver_dir(pr.files, pr.author)
-    scoped = solver is not None and solver not in repo.taken
+    solver = solver_dir(pr.paths, pr.author)
+    scoped = solver is not None and solver not in repo.taken and len(pr.files) == pr.changed_files
     scope = solver if scoped else f'may change only solvers/{pr.author}/<unused n>/'
     if not passed('scope', scoped, f'{scope} and {ATTESTATION}'):
         return stop('close')
@@ -149,9 +173,9 @@ def decide(pr: PullRequest, repo: Repo, chain: Chain, config: Config) -> Verdict
         return stop('close')
     if not passed('image', att.signer['kind'] == DEV or att.image == config.image, f'ran image {att.image}'):
         return stop('close')
-    result = att.result
-    age = chain.created_block - att.seed_block
-    on_chain = chain.seed_block_hash is not None and chain.seed_block_hash == result.get('seed_block_hash')
+    result, facts = att.result, chain(att.seed_block)
+    age = facts.created_block - att.seed_block
+    on_chain = facts.seed_block_hash is not None and facts.seed_block_hash == result.get('seed_block_hash')
     fresh = on_chain and 0 <= age <= config.freshness_blocks
     if not passed('seed', fresh, f'seed block {att.seed_block}, {age} blocks before the PR, its hash as on chain'):
         return stop('close')
@@ -194,11 +218,37 @@ def ineligible(pr: PullRequest, config: Config) -> str | None:
     """Why the PR never enters the queue, if it doesn't."""
     if is_maintainer(pr.author, pr.author_writes, config):
         return f'opened by maintainer {pr.author}'
+    if pr.base != MAIN:
+        return f'targets {pr.base}, not {MAIN}'
     if pr.state != 'open':
         return pr.state
-    if pr.ever_closed:
+    if pr.reopened:
         return 'reopened: a closed PR is never judged'
     return None
+
+
+def unrecorded_crown(pr: PullRequest, repo: Repo, config: Config) -> bool:
+    """A merged submission (the bot's crown, or a human's after review) whose KING and leaderboard row are not in."""
+    ours = not is_maintainer(pr.author, pr.author_writes, config) and pr.base == MAIN
+    return (
+        pr.state == 'merged'
+        and ours
+        and solver_dir(pr.paths, pr.author) is not None
+        and not recorded(repo.leaderboard, pr.number)
+    )
+
+
+def recorded(leaderboard: str, number: int) -> bool:
+    """``LEADERBOARD.md`` has PR ``number``'s row."""
+    return re.search(rf'^\|.*\|\s*#{number}\s*\|', leaderboard, re.M) is not None
+
+
+def attested_numbers(pr: PullRequest) -> dict:
+    try:
+        result = Attestation.from_json(pr.attestation or '').result
+    except ValueError:
+        return {}
+    return {'gain': result.get('mean_gain'), 'lower_99': result.get('lower_99')}
 
 
 def solver_dir(files: list[str], author: str) -> str | None:
@@ -267,11 +317,10 @@ def writes(repo: str, login: str) -> bool:
 
 
 def pull_request(repo: str, number: int, actor: str | None = None) -> PullRequest:
+    """The PR's metadata, who may write, and its timeline; ``with_files`` adds what it submits."""
     meta = api(f'repos/{repo}/pulls/{number}')
-    author, head = meta['user']['login'], meta['head']['sha']
-    files = lines(f'repos/{repo}/pulls/{number}/files', '.[].filename')
-    solver = solver_dir(files, author)
-    parent, name = solver.rsplit('/', 1) if solver else ('', '')
+    author = meta['user']['login']
+    events = lines(f'repos/{repo}/issues/{number}/timeline', '.[].event')
     return PullRequest(
         number=number,
         author=author,
@@ -279,58 +328,89 @@ def pull_request(repo: str, number: int, actor: str | None = None) -> PullReques
         actor=actor or author,
         actor_writes=writes(repo, actor or author),
         state='merged' if meta['merged'] else meta['state'],
-        ever_closed='closed' in lines(f'repos/{repo}/issues/{number}/timeline', '.[].event'),
+        reopened='reopened' in events,
+        force_pushed='head_ref_force_pushed' in events,
         commits=meta['commits'],
-        files=files,
         created_at=datetime.fromisoformat(meta['created_at']),
+        head=meta['head']['sha'],
+        base=meta['base']['ref'],
+        draft=meta['draft'],
         body=meta['body'] or '',
         labels=[label['name'] for label in meta['labels']],
-        attestation=raw(repo, ATTESTATION, head),
-        solver_sha=subdirs(repo, parent, head).get(name) if solver else None,
+        changed_files=meta['changed_files'],
+    )
+
+
+def with_files(repo: str, pr: PullRequest) -> PullRequest:
+    rows = [line.split('\t') for line in lines(f'repos/{repo}/pulls/{pr.number}/files', FILES_JQ)]
+    files, renamed_from = [row[0] for row in rows], [row[1] for row in rows if row[1]]
+    solver = solver_dir(files + renamed_from, pr.author)
+    parent, name = solver.rsplit('/', 1) if solver else ('', '')
+    return replace(
+        pr,
+        files=files,
+        renamed_from=renamed_from,
+        attestation=raw(repo, ATTESTATION, pr.head),
+        solver_sha=subdirs(repo, parent, pr.head).get(name) if solver else None,
     )
 
 
 def repo_facts(repo: str, pr: PullRequest, config: Config) -> Repo:
     king = (raw(repo, 'KING', MAIN) or '').strip()
     parent, name = king.rsplit('/', 1)
-    open_prs = sorted(int(n) for n in lines(f'repos/{repo}/pulls?state=open&per_page=100', '.[].number'))
-    return Repo(
+    facts = Repo(
         king=king,
         king_sha=subdirs(repo, parent, MAIN)[name],
         leaderboard=raw(repo, 'LEADERBOARD.md', MAIN) or '',
         taken=[f'solvers/{pr.author}/{n}' for n in subdirs(repo, f'solvers/{pr.author}', MAIN)],
-        earlier_open=[n for n in open_prs if n < pr.number and not ineligible(pull_request(repo, n), config)],
+        pending=[],
     )
+    earlier = [n for n in open_prs(repo) if n < pr.number]
+    queued = [n for n in earlier if not ineligible(other := pull_request(repo, n), config) and not other.draft]
+    merged = [
+        n
+        for n, author in merged_prs(repo)
+        if n != pr.number and not recorded(facts.leaderboard, n) and not is_maintainer(author, False, config)
+    ]
+    unfinished = [n for n in merged if unrecorded_crown(with_files(repo, pull_request(repo, n)), facts, config)]
+    return replace(facts, pending=queued + unfinished)
 
 
-def chain_facts(subtensor: Any, pr: PullRequest) -> Chain:
+def open_prs(repo: str) -> list[int]:
+    return sorted(int(n) for n in lines(f'repos/{repo}/pulls?state=open&per_page=100', '.[].number'))
+
+
+def merged_prs(repo: str) -> list[tuple[int, str]]:
+    """``(number, author)`` of the latest 100 merged PRs: where an unrecorded crown sits."""
+    path = f'repos/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100'
+    rows = gh('api', path, '--jq', '.[] | select(.merged_at != null) | [.number, .user.login] | @tsv').splitlines()
+    return [(int(number), author) for number, author in (row.split('\t') for row in rows)]
+
+
+def chain_facts(subtensor: Any, created_at: datetime, seed_block: int) -> Chain:
     """The PR's creation block and the attested seed block's hash, from a ``bittensor.Subtensor``."""
-    created = block_at(subtensor, pr.created_at)
-    try:
-        seed_block = Attestation.from_json(pr.attestation or '').seed_block
-    except ValueError:
-        return Chain(created, None)
+    created = block_at(subtensor, created_at)
     block_hash = subtensor.get_block_hash(seed_block) if 0 <= seed_block <= created else None
     return Chain(created, block_hash.lower().removeprefix('0x') if block_hash else None)
 
 
 def block_at(subtensor: Any, when: datetime) -> int:
     """The last block stamped at or before ``when``."""
-    block = subtensor.get_current_block()
+    head = block = subtensor.get_current_block()
     for _ in range(8):  # jump by the ~12 s block time, then walk the last steps
         step = round((subtensor.get_timestamp(block) - when).total_seconds() / BLOCK_SECONDS)
         if not step:
             break
-        block -= step
+        block = min(block - step, head)
     while subtensor.get_timestamp(block) > when:
         block -= 1
-    while subtensor.get_timestamp(block + 1) <= when:
+    while block < head and subtensor.get_timestamp(block + 1) <= when:
         block += 1
     return block
 
 
 def apply(v: Verdict, name: str, pr: PullRequest, repo: Repo, config: Config) -> None:
-    """Carry the verdict out; a rerun changes nothing more (a closed or merged PR is ignored from then on)."""
+    """Carry the verdict out. Idempotent: a crown resumes where it stopped (merge, label, then KING and the row)."""
     number = str(pr.number)
     if v.decision == 'close':
         gh('pr', 'close', number, '--repo', name, '--comment', f'Closed by `gitt challenge verify`: {v.reason}')
@@ -338,14 +418,16 @@ def apply(v: Verdict, name: str, pr: PullRequest, repo: Repo, config: Config) ->
         add_label(name, number, NEEDS_REVIEW)
         gh('pr', 'comment', number, '--repo', name, '--body', f'Held for a maintainer: {v.reason}')
     elif v.decision == 'crown':
-        solver = solver_dir(pr.files, pr.author)
+        if pr.state != 'merged':
+            gh('pr', 'merge', number, '--repo', name, '--squash', '--match-head-commit', pr.head)
         add_label(name, number, config.crown_label.format(round=v.round))
-        gh('pr', 'merge', number, '--repo', name, '--squash')
-        gain, lower = (f'{x:+.2%}' if x is not None else '-' for x in (v.gain, v.lower_99))
-        today = datetime.now(timezone.utc).date()
-        row = f'| {v.round} | {solver} | {pr.author} | #{pr.number} | {gain} | {lower} | {today} |\n'
-        files = {'KING': f'{solver}\n', 'LEADERBOARD.md': repo.leaderboard.rstrip('\n') + '\n' + row}
-        commit_to_main(name, files, f'crown: round {v.round} goes to {solver} (#{pr.number})')
+        if not recorded(repo.leaderboard, pr.number):
+            solver = solver_dir(pr.paths, pr.author)
+            gain, lower = (f'{x:+.2%}' if x is not None else '-' for x in (v.gain, v.lower_99))
+            today = datetime.now(timezone.utc).date()
+            row = f'| {v.round} | {solver} | {pr.author} | #{pr.number} | {gain} | {lower} | {today} |\n'
+            files = {'KING': f'{solver}\n', 'LEADERBOARD.md': repo.leaderboard.rstrip('\n') + '\n' + row}
+            commit_to_main(name, files, f'crown: round {v.round} goes to {solver} (#{pr.number})')
 
 
 def add_label(name: str, number: str, label: str) -> None:
@@ -371,18 +453,20 @@ def commit_to_main(repo: str, files: dict[str, str], message: str) -> None:
 def verify_command(name, number, actor, network, act):
     """Judge a challenge PR by its attestation alone and print the verdict JSON.
 
-    [dim]Decisions: crown, close, wait (an earlier PR goes first), needs_review (a human looks) or ignore (a
+    [dim]Decisions: crown, close, wait (another PR goes first), needs_review (a human looks) or ignore (a
     maintainer's event, or a PR that never enters the queue). Reads only, unless --apply. Never runs submitted code.[/dim]
     """
     import bittensor as bt
 
     try:
         config = Config.from_json(raw(name, '.gittensor/challenge.json', MAIN) or '')
-        pr = pull_request(name, number, actor)
+        pr = with_files(name, pull_request(name, number, actor))
         repo = repo_facts(name, pr, config)
-        v = decide(pr, repo, chain_facts(bt.Subtensor(network=network), pr), config)
+        v = decide(pr, repo, lambda seed: chain_facts(bt.Subtensor(network=network), pr.created_at, seed), config)
         if act:
             apply(v, name, pr, repo, config)
     except subprocess.CalledProcessError as e:
         raise click.ClickException(f'{" ".join(e.cmd)}: {e.stderr.strip()}') from e
+    except (KeyError, ValueError) as e:
+        raise click.ClickException(f'unexpected shape: {e!r}') from e
     click.echo(v.to_json())

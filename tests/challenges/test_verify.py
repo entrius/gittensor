@@ -5,12 +5,14 @@
 
 import json
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+import click
 import pytest
+from click.testing import CliRunner
 
 from gittensor.challenges.attestation import sign_dev
-from gittensor.challenges.verify import CLA_TEXT, Chain, Config, PullRequest, Repo, decide
+from gittensor.challenges.verify import CLA_TEXT, Chain, Config, PullRequest, Repo, block_at, decide, verify_command
 
 KING = [0.8, 1.0, 1.2, 0.9, 1.1, 1.0, 0.7, 1.3] * 4
 HASH, KING_SHA, SOLVER_SHA = 'ab' * 32, 'k' * 40, 'c' * 40
@@ -45,15 +47,17 @@ PR = PullRequest(
     actor='miner',
     actor_writes=False,
     state='open',
-    ever_closed=False,
+    reopened=False,
+    force_pushed=False,
     commits=1,
-    files=['attestation.json', 'solvers/miner/1/solve', 'solvers/miner/1/lib/util.py'],
     created_at=datetime(2026, 9, 29, tzinfo=timezone.utc),
     body=f'My solver.\r\n\r\n- [X] {CLA_TEXT}\r\n',
+    changed_files=3,
+    files=['attestation.json', 'solvers/miner/1/solve', 'solvers/miner/1/lib/util.py'],
     solver_sha=SOLVER_SHA,
 )
-LEADERBOARD = '| round | solver |\n|---|---|\n| 0 | baselines/cow |\n| 1 | solvers/a/1 |\n'
-REPO = Repo(king='solvers/a/1', king_sha=KING_SHA, leaderboard=LEADERBOARD, taken=['solvers/miner/2'], earlier_open=[])
+LEADERBOARD = '| round | solver | pr |\n|---|---|---|\n| 0 | baselines/cow | - |\n| 1 | solvers/a/1 | #3 |\n'
+REPO = Repo(king='solvers/a/1', king_sha=KING_SHA, leaderboard=LEADERBOARD, taken=['solvers/miner/2'], pending=[])
 
 
 @pytest.fixture(scope='module')
@@ -65,7 +69,7 @@ def judge(key, pr=None, repo=None, chain=None, result=None, config=None, seed_bl
     att = sign_dev(key, RESULT | (result or {}), seed_block)
     pr = replace(PR, attestation=att.to_json(), **(pr or {}))
     config = replace(CONFIG, **({'dev_attestation_pubkey': att.signer['pubkey']} | (config or {})))
-    return decide(pr, replace(REPO, **(repo or {})), replace(Chain(1100, HASH), **(chain or {})), config)
+    return decide(pr, replace(REPO, **(repo or {})), lambda _: replace(Chain(1100, HASH), **(chain or {})), config)
 
 
 def scored(factor):
@@ -78,11 +82,19 @@ def scored(factor):
         ({'pr': {'actor': 'Entrius'}}, 'ignore', 'actor'),
         ({'pr': {'actor': 'helper', 'actor_writes': True}}, 'ignore', 'actor'),
         ({'pr': {'author': 'entrius', 'actor': 'bystander'}}, 'ignore', 'eligible'),
-        ({'pr': {'ever_closed': True}}, 'ignore', 'eligible'),
+        ({'pr': {'reopened': True}}, 'ignore', 'eligible'),
+        ({'pr': {'base': 'dev'}}, 'ignore', 'eligible'),
+        ({'pr': {'state': 'merged', 'author': 'entrius', 'actor': 'bystander'}}, 'ignore', 'unrecorded crown'),
+        ({'pr': {'state': 'merged', 'number': 3}}, 'ignore', 'unrecorded crown'),
         ({'pr': {'commits': 2}}, 'close', 'one commit'),
+        ({'pr': {'force_pushed': True}}, 'close', 'one commit'),
+        ({'pr': {'draft': True}}, 'wait', 'ready'),
         ({'pr': {'body': f'- [ ] {CLA_TEXT}'}}, 'close', 'cla'),
-        ({'repo': {'earlier_open': [5]}}, 'wait', 'queue'),
-        ({'pr': {'files': [*PR.files, 'README.md']}}, 'close', 'scope'),
+        ({'repo': {'pending': [5]}}, 'wait', 'queue'),
+        ({'repo': {'pending': [9]}}, 'wait', 'queue'),  # a later PR merged but not yet recorded
+        ({'pr': {'files': [*PR.files, 'README.md'], 'changed_files': 4}}, 'close', 'scope'),
+        ({'pr': {'renamed_from': ['README.md']}}, 'close', 'scope'),
+        ({'pr': {'changed_files': 3001}}, 'close', 'scope'),
         ({'pr': {'files': ['attestation.json', 'solvers/miner/2/solve']}}, 'close', 'scope'),
         ({'config': {'dev_attestation_pubkey': '00' * 32}}, 'close', 'signature'),
         ({'seed_block': 900}, 'close', 'seed'),
@@ -112,3 +124,34 @@ def test_all_checks_passing_crown_the_next_round_with_the_recomputed_bound(key):
     assert verdict['decision'] == 'crown' and verdict['round'] == 2
     assert verdict['gain'] == pytest.approx(0.05) and verdict['lower_99'] == pytest.approx(0.05)
     assert all(check['ok'] for check in verdict['checks'])
+
+
+def test_a_merged_submission_not_yet_on_the_leaderboard_is_crowned_to_finish_it(key):
+    verdict = judge(key, pr={'state': 'merged', 'actor': 'miner'})
+
+    assert (verdict.decision, verdict.round, verdict.checks[-1].name) == ('crown', 2, 'crown')
+
+
+def test_block_at_finds_the_last_block_at_or_before_a_time_without_passing_the_head():
+    t0 = datetime(2026, 9, 29, tzinfo=timezone.utc)
+
+    class Subtensor:
+        def get_current_block(self):
+            return 1000
+
+        def get_timestamp(self, block):
+            assert block <= 1000
+            return t0 + timedelta(seconds=12 * block + (block % 3))  # ~12 s blocks with jitter
+
+    chain = Subtensor()
+    assert [block_at(chain, t0 + timedelta(seconds=s)) for s in (6001, 6002, 6011, 6012)] == [499, 500, 500, 501]
+    assert block_at(chain, t0 + timedelta(days=1)) == 1000
+
+
+def test_verify_registers_as_a_click_command():
+    group = click.Group()
+    group.add_command(verify_command)
+
+    result = CliRunner().invoke(group, ['verify', '--help'])
+
+    assert result.exit_code == 0 and '--apply' in result.output

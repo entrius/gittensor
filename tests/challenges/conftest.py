@@ -1,6 +1,9 @@
 # The MIT License (MIT)
 # Copyright © 2026 Entrius
 
+import json
+import shutil
+
 import pytest
 
 from gittensor.challenges.runner import sandbox_error
@@ -35,5 +38,32 @@ def solver(tmp_path):
         (path / 'solve').write_text(f'#!/bin/sh\n{SOLVERS[name]}\n')
         (path / 'solve').chmod(0o755)
         return path
+
+    return make
+
+
+CHALLENGE_JSON = {
+    'challenge_id': 'fake-echo',
+    'module': FAKE_MODULE,
+    'tier': 'small',
+    'seeds': 3,
+    'margin': 0.01,
+    'freshness_blocks': 150,
+    'dev_attestation_pubkey': None,
+}
+
+
+@pytest.fixture
+def challenge_repo(tmp_path, solver):
+    """``challenge_repo(king)``: a challenge checkout whose ``KING`` is ``baselines/<king>``, a ``SOLVERS`` script."""
+
+    def make(king: str = 'good'):
+        root = tmp_path / 'gt-challenge-fake'
+        (root / '.gittensor').mkdir(parents=True)
+        (root / '.gittensor' / 'challenge.json').write_text(json.dumps(CHALLENGE_JSON))
+        shutil.copytree(solver(king), root / 'baselines' / king)
+        (root / 'KING').write_text(f'baselines/{king}\n')
+        (root / 'README.md').write_text('# gt-challenge-fake\n\nEcho the number back.\n\n## More\n')
+        return root
 
     return make

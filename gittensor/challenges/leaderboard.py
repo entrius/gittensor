@@ -20,6 +20,7 @@ class Submission:
     submission_sha256: str
     score: float
     commit_block: int
+    cpus: int = 0  # CPUs the solver was pinned to; 0 when it never ran
 
 
 @dataclass

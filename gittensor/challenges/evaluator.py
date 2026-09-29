@@ -61,11 +61,12 @@ def run_round(
             continue
         try:
             module = import_challenge(challenge)
-            score = runner.evaluate(module, c.solver_dir, challenge.tier, public_seed, challenge.seeds).score
+            result = runner.evaluate(module, c.solver_dir, challenge.tier, public_seed, challenge.seeds)
+            score, cpus = result.score, result.cpus
         except Exception as e:  # one bad candidate never costs the round
             log.warning(f'{c.challenge_id}: {c.hotkey} {c.submission_sha256[:16]} scores 0: {type(e).__name__}: {e}')
-            score = 0.0
-        submission = Submission(c.hotkey, c.submission_sha256, score, c.commit_block)
+            score, cpus = 0.0, 0
+        submission = Submission(c.hotkey, c.submission_sha256, score, c.commit_block, cpus)
         board.offer(c.challenge_id, submission, challenge.dethrone_margin)
     board.save(board_path)
     doc = build_scorecard(board, registry, now)

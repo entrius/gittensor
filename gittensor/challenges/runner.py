@@ -14,7 +14,8 @@ paths (its prefixes and every ``sys.path`` directory, never one holding the temp
 ``python3`` imports the challenge package and its deps. Nothing else of the host is mounted. The environment is only
 ``PATH=<sys.prefix>/bin:/usr/bin:/bin``, ``HOME=/work``, ``TMPDIR=/tmp`` and ``LANG=C.UTF-8``. Limits: the tier's wall
 time (the sandbox is killed, and every process in its pid namespace with it), ``RLIMIT_AS`` at the tier's
-``memory_mb`` (address space, not RSS), ``RLIMIT_FSIZE`` and ``RLIMIT_NPROC``. Writes to ``/output`` and ``/work`` and
+``memory_mb`` (address space, not RSS), ``RLIMIT_FSIZE``, ``RLIMIT_NPROC``, and pinned to the first ``SOLVER_CPUS``
+available CPUs (fewer where fewer exist; the count used is recorded with every evaluation). Writes to ``/output`` and ``/work`` and
 the memory of several processes are bounded only per file and per process until the attested container adds a cgroup.
 Without a working ``bwrap`` every seed scores 0 ("sandbox unavailable"): never an unsandboxed run. A timeout, crash,
 garbage or unreadable output, or a ``check`` that raises scores 0 for that seed, never an exception.
@@ -47,6 +48,7 @@ REASON_CHARS = 200
 LOG_TAIL_CHARS = 160  # the end of the solver's output, after the 'exit N: ' prefix
 FSIZE_BYTES = 1 << 30
 NPROC = 512
+SOLVER_CPUS = 4  # time budgets mean something only on a fixed CPU count
 HOST_ROOTS = ('/bin', '/sbin', '/lib', '/lib32', '/lib64')  # a symlink into /usr on merged-/usr hosts
 HOST_FILES = ('/etc/ld.so.cache', '/etc/alternatives', '/etc/localtime')
 ENV = {'PATH': f'{sys.prefix}/bin:/usr/bin:/bin', 'HOME': '/work', 'TMPDIR': '/tmp', 'LANG': 'C.UTF-8'}
@@ -67,6 +69,7 @@ class Evaluation:
     version: str
     tier: str
     public_seed: str
+    cpus: int
     results: list[SeedResult]
 
     @property
@@ -139,16 +142,21 @@ def sandbox_error() -> str:
     return ''
 
 
+def solver_cpus() -> list[int]:
+    return sorted(os.sched_getaffinity(0))[:SOLVER_CPUS]
+
+
 def run_solver(box: Path, log: Path, time_limit_s: float, memory_mb: int) -> str:
     """Run ``box/solver/solve`` on ``box/instance`` into ``box/output``: '' when it exited 0 within the limit, else why
     not."""
-    memory = memory_mb << 20
+    memory, cpus = memory_mb << 20, solver_cpus()
 
     def limit() -> None:
         resource.setrlimit(resource.RLIMIT_AS, (memory, memory))
         resource.setrlimit(resource.RLIMIT_FSIZE, (FSIZE_BYTES, FSIZE_BYTES))
         resource.setrlimit(resource.RLIMIT_NPROC, (NPROC, NPROC))
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        os.sched_setaffinity(0, cpus)
 
     mounts = ['--ro-bind', box / 'instance', '/instance', '--bind', box / 'output', '/output']
     mounts += ['--bind', box / 'solver', '/work', '--chdir', '/work', '--remount-ro', '/']
@@ -240,4 +248,4 @@ def run_seed(challenge: ModuleType, solver_dir: Path, tier: str, seed: bytes) ->
 def evaluate(challenge: ModuleType, solver_dir: str | Path, tier: str, public_seed: str, seeds: int) -> Evaluation:
     solver_dir = Path(solver_dir).resolve()
     results = [run_seed(challenge, solver_dir, tier, seed) for seed in derive_seeds(public_seed, seeds)]
-    return Evaluation(challenge.CHALLENGE_ID, challenge.VERSION, tier, public_seed, results)
+    return Evaluation(challenge.CHALLENGE_ID, challenge.VERSION, tier, public_seed, len(solver_cpus()), results)

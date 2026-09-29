@@ -72,6 +72,15 @@ def test_the_solvers_python3_is_the_evaluators_with_its_packages(solver):
 
 
 @requires_sandbox
+def test_the_solver_is_pinned_to_solver_cpus_and_the_count_is_recorded(solver, monkeypatch):
+    monkeypatch.setattr(runner, 'SOLVER_CPUS', 1)
+
+    result = evaluate(fake_challenge, solver('one-cpu'), 'small', 'block-0xabc', 1)
+
+    assert (result.score, result.cpus) == (1.0, 1)
+
+
+@requires_sandbox
 def test_a_process_the_solver_detaches_dies_with_the_sandbox(solver):
     assert evaluate(fake_challenge, solver('escapee'), 'small', 'block-0xabc', 1).score == 1.0
 

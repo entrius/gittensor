@@ -8,13 +8,16 @@ score. ``generate`` writes into private dirs (instance and secret, each its own 
 third: the instance (read-only), an empty output dir, and its own directory (a fresh copy per seed, so no state
 carries). ``check`` reads the private originals plus the output, and output holding a link or a special file scores 0.
 
-The solver runs under bubblewrap: new user, pid, net, ipc and uts namespaces (no network), ``/usr`` and the loader
-read-only, a size-capped ``/tmp``, and nothing else of the host (the secret is never mounted). The environment is only
-``PATH=/usr/bin:/bin``, ``HOME=/work`` and ``TMPDIR=/tmp``: a shim sets its own ``PYTHONPATH``. Limits: the tier's wall
+The solver runs under bubblewrap: new user, pid, net, ipc and uts namespaces (no network), a read-only root with
+``/usr`` and the loader, size-capped ``/tmp`` and ``/dev/shm``, and the evaluator's own Python read-only at the same
+paths (its prefixes and every ``sys.path`` directory, never one holding the temp dir where the secrets live), so
+``python3`` imports the challenge package and its deps. Nothing else of the host is mounted. The environment is only
+``PATH=<sys.prefix>/bin:/usr/bin:/bin``, ``HOME=/work``, ``TMPDIR=/tmp`` and ``LANG=C.UTF-8``. Limits: the tier's wall
 time (the sandbox is killed, and every process in its pid namespace with it), ``RLIMIT_AS`` at the tier's
-``memory_mb`` (address space, not RSS), ``RLIMIT_FSIZE`` and ``RLIMIT_NPROC``. Without a working ``bwrap`` every seed
-scores 0 ("sandbox unavailable"): never an unsandboxed run. A timeout, crash, garbage output or a ``check`` that raises
-scores 0 for that seed, never an exception.
+``memory_mb`` (address space, not RSS), ``RLIMIT_FSIZE`` and ``RLIMIT_NPROC``. Writes to ``/output`` and ``/work`` and
+the memory of several processes are bounded only per file and per process until the attested container adds a cgroup.
+Without a working ``bwrap`` every seed scores 0 ("sandbox unavailable"): never an unsandboxed run. A timeout, crash,
+garbage or unreadable output, or a ``check`` that raises scores 0 for that seed, never an exception.
 
 Same-uid namespaces are defense in depth, not the trust anchor: until the attested evaluator image (Polaris) runs this
 runner, every registry ``emission_share`` stays 0.
@@ -31,6 +34,7 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 from contextlib import ExitStack
@@ -45,7 +49,7 @@ FSIZE_BYTES = 1 << 30
 NPROC = 512
 HOST_ROOTS = ('/bin', '/sbin', '/lib', '/lib32', '/lib64')  # a symlink into /usr on merged-/usr hosts
 HOST_FILES = ('/etc/ld.so.cache', '/etc/alternatives', '/etc/localtime')
-ENV = {'PATH': '/usr/bin:/bin', 'HOME': '/work', 'TMPDIR': '/tmp', 'LANG': 'C.UTF-8'}
+ENV = {'PATH': f'{sys.prefix}/bin:/usr/bin:/bin', 'HOME': '/work', 'TMPDIR': '/tmp', 'LANG': 'C.UTF-8'}
 
 
 @dataclass(frozen=True)
@@ -74,6 +78,23 @@ def derive_seeds(public_seed: str, n: int) -> list[bytes]:
     return [hashlib.sha256(f'{public_seed}:{i}'.encode()).digest() for i in range(n)]
 
 
+@functools.cache
+def python_runtime() -> tuple[str, ...]:
+    """The evaluator's Python for the sandbox, parents first: its prefixes, the interpreter's install dir and every
+    ``sys.path`` directory; not what ``/usr`` already covers, nor any directory holding the temp dir."""
+    tmp = os.path.realpath(tempfile.gettempdir())
+    install = os.path.dirname(os.path.dirname(os.path.realpath(sys.executable)))
+    keep = set()
+    for path in {sys.prefix, sys.base_prefix, install, *sys.path}:
+        real = os.path.realpath(path)
+        if not os.path.isabs(path) or not os.path.isdir(path):
+            continue
+        if os.path.commonpath([real, '/usr']) == '/usr' or os.path.commonpath([real, tmp]) == real:
+            continue
+        keep.add(path)
+    return tuple(sorted(keep, key=len))
+
+
 def sandbox(memory_mb: int) -> list[str]:
     """The bwrap command up to the solver's own mounts."""
     command = ['bwrap', '--unshare-all', '--die-with-parent', '--new-session', '--ro-bind', '/usr', '/usr']
@@ -84,7 +105,24 @@ def sandbox(memory_mb: int) -> list[str]:
             command += ['--ro-bind', path, path]
     for path in HOST_FILES:
         command += ['--ro-bind-try', path, path]
-    return command + ['--proc', '/proc', '--dev', '/dev', '--size', str(memory_mb << 20), '--tmpfs', '/tmp']
+    size = str(memory_mb << 20)
+    command += [
+        '--proc',
+        '/proc',
+        '--dev',
+        '/dev',
+        '--size',
+        size,
+        '--tmpfs',
+        '/tmp',
+        '--size',
+        size,
+        '--tmpfs',
+        '/dev/shm',
+    ]
+    for path in python_runtime():
+        command += ['--ro-bind', path, path]
+    return command
 
 
 @functools.cache
@@ -113,7 +151,7 @@ def run_solver(box: Path, log: Path, time_limit_s: float, memory_mb: int) -> str
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
     mounts = ['--ro-bind', box / 'instance', '/instance', '--bind', box / 'output', '/output']
-    mounts += ['--bind', box / 'solver', '/work', '--chdir', '/work']
+    mounts += ['--bind', box / 'solver', '/work', '--chdir', '/work', '--remount-ro', '/']
     command = [*sandbox(memory_mb), *map(str, mounts), '--', f'/work/{SOLVE}', '/instance', '/output']
     with log.open('wb') as out:
         proc = subprocess.Popen(
@@ -138,11 +176,21 @@ def run_solver(box: Path, log: Path, time_limit_s: float, memory_mb: int) -> str
 
 
 def output_link(output_dir: Path) -> str:
-    """The first entry that is a symlink, a hard link or not a regular file or directory; '' when there is none."""
-    for root, dirs, files in os.walk(output_dir):
+    """The first entry that is a symlink, a hard link or not a regular file or directory; '' when there is none. The
+    evaluator owns the tree, so each directory gets u+rwx back before it is read (a solver cannot hide an entry behind
+    ``chmod 111``); anything still unreadable raises ``OSError``."""
+
+    def fail(error: OSError):
+        raise error
+
+    os.chmod(output_dir, 0o700)
+    for root, dirs, files in os.walk(output_dir, onerror=fail):
         for name in dirs + files:
-            st = os.lstat(os.path.join(root, name))
-            if not stat.S_ISDIR(st.st_mode) and not (stat.S_ISREG(st.st_mode) and st.st_nlink == 1):
+            path = os.path.join(root, name)
+            st = os.lstat(path)
+            if stat.S_ISDIR(st.st_mode):
+                os.chmod(path, 0o700)
+            elif not (stat.S_ISREG(st.st_mode) and st.st_nlink == 1):
                 return name
     return ''
 
@@ -171,8 +219,12 @@ def run_seed(challenge: ModuleType, solver_dir: Path, tier: str, seed: bytes) ->
         started = time.monotonic()
         failure = run_solver(box, private / 'solve.log', spec.time_limit_s, spec.memory_mb)
         seconds = round(time.monotonic() - started, 3)
-        if not failure and (link := output_link(box / 'output')):
-            failure = f'output holds a link or special file: {link}'
+        if not failure:
+            try:
+                if link := output_link(box / 'output'):
+                    failure = f'output holds a link or special file: {link}'
+            except OSError as e:
+                failure = f'output unreadable: {e}'
         if failure:
             return zero(failure)
         try:

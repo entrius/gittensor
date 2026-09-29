@@ -52,6 +52,26 @@ def cmdlines():
 
 
 @requires_sandbox
+@pytest.mark.parametrize(
+    'name, reason',
+    [
+        ('hidden-link', 'output holds a link or special file: answer.txt'),
+        ('hidden-dir-link', 'output holds a link or special file: l'),
+        ('deep-nest', 'output unreadable: [Errno 36] File name too long'),
+    ],
+)
+def test_output_cannot_hide_a_link_behind_permissions_or_depth(solver, name, reason):
+    [seed] = evaluate(fake_challenge, solver(name), 'small', 'block-0xabc', 1).results
+
+    assert seed.score == 0.0 and seed.reason.startswith(reason)
+
+
+@requires_sandbox
+def test_the_solvers_python3_is_the_evaluators_with_its_packages(solver):
+    assert evaluate(fake_challenge, solver('evaluator-python'), 'small', 'block-0xabc', 1).score == 1.0
+
+
+@requires_sandbox
 def test_a_process_the_solver_detaches_dies_with_the_sandbox(solver):
     assert evaluate(fake_challenge, solver('escapee'), 'small', 'block-0xabc', 1).score == 1.0
 

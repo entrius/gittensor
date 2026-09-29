@@ -18,6 +18,10 @@ SOLVERS = {
     'hog': 'exec python3 -c "bytearray(1 << 30)"',
     'link': 'ln -s "$1/number.txt" "$2/answer.txt"',
     'online': 'exec python3 -c "import socket; socket.create_connection((\'1.1.1.1\', 53), timeout=2)"',
+    'hidden-link': 'ln -s "$1/number.txt" "$2/answer.txt"; chmod 111 "$2"',
+    'hidden-dir-link': 'mkdir "$2/sub"; ln -s /instance "$2/sub/l"; chmod 111 "$2/sub"; cat "$1/number.txt" > "$2/answer.txt"',
+    'deep-nest': 'cd "$2"; exec python3 -c "import os\nfor _ in range(2100): os.mkdir(\'a\'); os.chdir(\'a\')"',
+    'evaluator-python': 'python3 -c "import click" && cat "$1/number.txt" > "$2/answer.txt"',
     'escapee': 'setsid -f sleep 31.4159 </dev/null >/dev/null 2>&1; cat "$1/number.txt" > "$2/answer.txt"',
 }
 

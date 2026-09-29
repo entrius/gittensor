@@ -2,7 +2,7 @@
 # Copyright © 2026 Entrius
 
 """``gitt challenge eval`` through the root CLI: a copy of the king gains nothing, the same inputs write the same
-bytes, and without a sandbox nothing runs."""
+bytes, the hashed snapshot is what runs, and without a sandbox nothing runs."""
 
 import json
 import shutil
@@ -10,6 +10,7 @@ import shutil
 from click.testing import CliRunner
 
 from gittensor.challenges import runner
+from gittensor.challenges.head_to_head import solver_sha
 from gittensor.cli.main import cli
 from tests.challenges.conftest import FAKE_MODULE, requires_sandbox
 
@@ -35,6 +36,22 @@ def test_a_copy_of_the_king_gains_nothing_and_the_same_inputs_write_the_same_byt
     assert (doc['seed_block_hash'], doc['n'], doc['challenger']['valid']) == ('00ff', 3, 3)
     assert doc['king']['sha'] == doc['challenger']['sha'] and doc['king']['scores'] == [1.0, 1.0, 1.0]
     assert (doc['mean_gain'], doc['lower_99'], doc['crown']) == (0.0, 0.0, False)
+
+
+@requires_sandbox
+def test_the_code_hashed_is_the_code_that_ran_even_if_the_directory_changes_meanwhile(solver, tmp_path, monkeypatch):
+    challenger, evaluate = solver('good'), runner.evaluate
+    sha = solver_sha(challenger)
+
+    def swap_then_evaluate(*args):
+        (challenger / 'solve').write_text('#!/bin/sh\nexit 3\n')
+        return evaluate(*args)
+
+    monkeypatch.setattr(runner, 'evaluate', swap_then_evaluate)
+    CliRunner().invoke(cli, eval_args(challenger, solver('evaluator-python'), tmp_path / 'out.json'))
+
+    doc = json.loads((tmp_path / 'out.json').read_text())
+    assert (doc['challenger']['sha'], doc['challenger']['valid']) == (sha, 3)
 
 
 def test_without_a_sandbox_nothing_runs(solver, tmp_path, monkeypatch):

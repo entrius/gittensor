@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import importlib
 import re
+import shutil
+import tempfile
 from pathlib import Path
 
 import click
@@ -17,7 +19,7 @@ from rich.markup import escape
 from rich.table import Table
 
 from gittensor.challenges import runner
-from gittensor.challenges.head_to_head import Entry, canonical, report, solver_sha
+from gittensor.challenges.head_to_head import Entry, canonical, report, snapshot, solver_sha
 from gittensor.cli.help import StyledGroup
 from gittensor.cli.helpers import console
 
@@ -63,9 +65,14 @@ def eval_command(module, challenger_dir, king_dir, tier, seeds, seed_block_hash,
         raise click.BadParameter(f'{tier!r} is not one of {", ".join(challenge.TIERS)}', param_hint='--tier')
     if error := runner.sandbox_error():
         raise click.ClickException(f'no sandbox here ({error}): nothing was run')
-    dirs = [challenger_dir, king_dir]
-    results = runner.evaluate(challenge, tier, seed_block_hash, seeds, dirs)
-    challenger, king = (Entry(solver_sha(d), r) for d, r in zip(dirs, results))
+    with tempfile.TemporaryDirectory(prefix='gt-snapshot-') as private:
+        try:
+            dirs = [snapshot(challenger_dir, Path(private, 'challenger')), snapshot(king_dir, Path(private, 'king'))]
+        except (OSError, shutil.Error) as e:
+            raise click.ClickException(f'cannot copy the solvers: {e}') from e
+        shas = [solver_sha(d) for d in dirs]
+        results = runner.evaluate(challenge, tier, seed_block_hash, seeds, dirs)
+    challenger, king = (Entry(sha, r) for sha, r in zip(shas, results))
     doc = report(module, challenge, tier, seed_block_hash, margin, challenger, king)
     if json_path:
         json_path.write_text(canonical(doc))

@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,6 +48,11 @@ class Entry:
 def solver_sha(solver_dir: Path) -> str:
     """The git tree sha1 of the directory (``git rev-parse HEAD:<dir>``), without ``SKIPPED`` names or empty dirs."""
     return git_tree(str(solver_dir)).hex()
+
+
+def snapshot(solver_dir: Path, dest: Path) -> Path:
+    """A private copy of the solver, taken once: what is hashed and what every seed runs, without ``SKIPPED``."""
+    return Path(shutil.copytree(solver_dir, dest, symlinks=True, ignore=shutil.ignore_patterns(*SKIPPED)))
 
 
 def git_tree(path: str) -> bytes:

@@ -73,9 +73,13 @@ def eval_command(module, challenger_dir, king_dir, tier, seeds, seed_block_hash,
         shas = [solver_sha(d) for d in dirs]
         results = runner.evaluate(challenge, tier, seed_block_hash, seeds, dirs)
     challenger, king = (Entry(sha, r) for sha, r in zip(shas, results))
-    doc = report(module, challenge, tier, seed_block_hash, margin, challenger, king)
+    try:
+        doc = report(module, challenge, tier, seed_block_hash, margin, challenger, king)
+        text = canonical(doc)
+    except ValueError as e:  # a non-finite mean, gain or bound: nothing is written
+        raise click.ClickException(f'cannot report: {e}') from e
     if json_path:
-        json_path.write_text(canonical(doc))
+        json_path.write_text(text)
 
     title = f'{doc["challenge_id"]} {doc["version"]} · tier {tier} · {seeds} seeds · block {seed_block_hash}'
     table = Table(title=f'{title} · {doc["cpus"]} CPUs')

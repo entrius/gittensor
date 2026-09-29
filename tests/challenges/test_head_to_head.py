@@ -7,6 +7,7 @@ a king that scored nothing leaves no ratio; the solver hash is git's tree sha.""
 import json
 import subprocess
 
+import numpy as np
 import pytest
 
 from gittensor.challenges.head_to_head import Entry, canonical, report, solver_sha
@@ -20,8 +21,8 @@ def entry(scores: list[float], invalid: tuple[int, ...] = ()) -> Entry:
     return Entry('0' * 64, [SeedResult(i not in invalid, s, 0.0) for i, s in enumerate(scores)])
 
 
-def judge(challenger: Entry, king: Entry) -> dict:
-    return json.loads(canonical(report('fake', fake_challenge, 'small', '00ff', 0.01, challenger, king)))
+def judge(challenger: Entry, king: Entry, seed_block_hash: str = 'ab' * 32, margin: float = 0.01) -> dict:
+    return json.loads(canonical(report('fake', fake_challenge, 'small', seed_block_hash, margin, challenger, king)))
 
 
 def test_a_clearly_better_challenger_takes_the_crown():
@@ -29,6 +30,18 @@ def test_a_clearly_better_challenger_takes_the_crown():
 
     assert verdict['mean_gain'] == pytest.approx(0.05) and verdict['lower_99'] == pytest.approx(0.05)
     assert verdict['crown']
+
+
+def test_on_noisy_scores_the_bound_sits_below_the_gain_and_is_fixed_by_the_seed_block_hash():
+    rng = np.random.default_rng(7)
+    king = rng.uniform(0.5, 1.5, 200)
+    challenger, king = entry(list(king * rng.normal(1.02, 0.05, 200))), entry(list(king))
+
+    first, again, other = (judge(challenger, king, h)['lower_99'] for h in ('ab' * 32, 'ab' * 32, 'cd' * 32))
+    gain = judge(challenger, king)['mean_gain']
+
+    assert first < gain and first == again and first != other
+    assert judge(challenger, king, margin=first)['crown'] and not judge(challenger, king, margin=first + 1e-9)['crown']
 
 
 def test_one_invalid_challenger_seed_costs_the_crown_whatever_the_gain():

@@ -4,12 +4,14 @@
 """A challenger head to head against the king (the current crown) on the same seeds, and whether it takes the crown.
 
 On the paired per-seed scores c and k (an invalid seed or a timeout scores 0): ``mean_gain = mean(c - k) / mean(k)``,
-and ``lower_99`` is the 1st percentile of that ratio over ``RESAMPLES`` bootstrap resamples of the seeds, drawn by
-numpy's default generator seeded with the seed block hash. The challenger takes the crown when every one of its seeds
+and ``lower_99`` is the 1st percentile of that ratio over ``RESAMPLES`` bootstrap resamples of the seeds: indices from
+``np.random.default_rng(int(seed_block_hash, 16)).integers(0, n, (RESAMPLES, n))`` (PCG64), the percentile by
+``np.quantile(ratios, 0.01, method='inverted_cdf')`` (always one resample's ratio, never interpolated). The challenger takes the crown when every one of its seeds
 is valid and ``lower_99 >= margin``. A king that scores 0 on every seed leaves no ratio: ``mean_gain`` and ``lower_99``
 are null, and a fully valid challenger with a positive mean takes the crown.
 
-The report is canonical JSON (sorted keys, compact separators, no NaN), so the same inputs give the same bytes.
+The report is canonical JSON (sorted keys, compact separators, no NaN or infinity: a score that overflows raises),
+so the same inputs give the same bytes; it names the resamples and the gittensor and numpy versions that produced it.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ import os
 import shutil
 import stat
 from dataclasses import dataclass
+from importlib.metadata import version
 from pathlib import Path
 from types import ModuleType
 
@@ -86,7 +89,7 @@ def verdict(challenger: Entry, king: Entry, seed_block_hash: str, margin: float)
     if not k.any():
         return {'mean_gain': None, 'lower_99': None, 'crown': all_valid and bool(c.any())}
     picks = np.random.default_rng(int(seed_block_hash, 16)).integers(0, len(c), (RESAMPLES, len(c)))
-    with np.errstate(divide='ignore', invalid='ignore'):
+    with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
         ratios = (c - k)[picks].mean(axis=1) / k[picks].mean(axis=1)
     # a resample of only k = 0 seeds: no gain when c is 0 too, else unbounded; under 1/e of them, so the bound is finite
     ratios = np.nan_to_num(ratios, nan=0.0, posinf=np.inf)
@@ -106,6 +109,9 @@ def report(
         'seed_block_hash': seed_block_hash,
         'margin': margin,
         'cpus': len(solver_cpus()),
+        'resamples': RESAMPLES,
+        'gittensor_version': version('gittensor'),
+        'numpy_version': np.__version__,
         'challenger': challenger.summary(),
         'king': king.summary(),
         **verdict(challenger, king, seed_block_hash, margin),

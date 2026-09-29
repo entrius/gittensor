@@ -5,12 +5,17 @@
 on is refused with the reason."""
 
 import dataclasses
+from datetime import datetime
 
 import pytest
 
 from gittensor.challenges.attestation import sign_dev
-from gittensor.challenges.checkout import submission_error
-from tests.challenges.conftest import CHALLENGE_JSON
+from gittensor.challenges.checkout import ATTESTATION, pr_body, submission_error
+from gittensor.challenges.head_to_head import Entry, report
+from gittensor.challenges.runner import SeedResult
+from gittensor.challenges.verify import Chain, Config, PullRequest, Repo, decide
+from tests.challenges import fake_challenge
+from tests.challenges.conftest import CHALLENGE_JSON, FAKE_MODULE
 
 CHALLENGER, KING = 'c' * 40, 'k' * 40
 RESULT = {
@@ -32,7 +37,7 @@ def refusal(*args) -> str:
 @pytest.fixture
 def signed(tmp_path):
     att = sign_dev(tmp_path / 'dev.key', RESULT, 1000)
-    return att, {**CHALLENGE_JSON, 'dev_attestation_pubkey': att.signer['pubkey']}
+    return att, Config(**{**CHALLENGE_JSON, 'dev_attestation_pubkey': att.signer['pubkey']})
 
 
 def test_a_fresh_crown_against_todays_king_passes(signed):
@@ -69,8 +74,32 @@ def test_an_unaccepted_signer_a_tampered_result_a_loser_or_another_run_is_refuse
     fewer = sign_dev(tmp_path / 'dev.key', {**RESULT, 'n': 2}, 1000)
     other = sign_dev(tmp_path / 'dev.key', {**RESULT, 'challenge_id': 'other'}, 1000)
 
-    assert 'not the challenge' in refusal(att, CHALLENGE_JSON, CHALLENGER, KING, 1001, 'ab' * 32)
+    assert 'not the challenge' in refusal(att, Config(**CHALLENGE_JSON), CHALLENGER, KING, 1001, 'ab' * 32)
     assert 'does not verify' in refusal(tampered, config, CHALLENGER, KING, 1001, 'ab' * 32)
     assert 'not a crown' in refusal(loser, config, CHALLENGER, KING, 1001, 'ab' * 32)
-    assert 'n 2 != 3' in refusal(fewer, config, CHALLENGER, KING, 1001, 'ab' * 32)
-    assert "challenge_id 'other'" in refusal(other, config, CHALLENGER, KING, 1001, 'ab' * 32)
+    truthy = sign_dev(tmp_path / 'dev.key', {**RESULT, 'crown': 'yes'}, 1000)
+    assert 'not a crown' in refusal(truthy, config, CHALLENGER, KING, 1001, 'ab' * 32)
+    assert "'n': 2" in refusal(fewer, config, CHALLENGER, KING, 1001, 'ab' * 32)
+    assert "'challenge_id': 'other'" in refusal(other, config, CHALLENGER, KING, 1001, 'ab' * 32)
+
+
+def test_what_submit_accepts_the_maintainer_crowns(tmp_path):
+    """The seam: an attested crown, submitted with submit's own PR body, passes both sides' checks."""
+    challenger = Entry(CHALLENGER, [SeedResult(True, 1.1, 0.0)] * 3)
+    king = Entry(KING, [SeedResult(True, 1.0, 0.0)] * 3)
+    result = report(FAKE_MODULE, fake_challenge, 'small', 'ab' * 32, 0.01, challenger, king)
+    att = sign_dev(tmp_path / 'dev.key', result, 1000)
+    config = Config(**{**CHALLENGE_JSON, 'dev_attestation_pubkey': att.signer['pubkey']})
+    pr = PullRequest(
+        **{'number': 5, 'author': 'alice', 'author_writes': False, 'actor': 'alice', 'actor_writes': False},
+        **{'state': 'open', 'reopened': False, 'force_pushed': False, 'commits': 1, 'created_at': datetime.now()},
+        body=pr_body('solvers/alice/1', 'baselines/good', 1000),
+        changed_files=2,
+        files=[ATTESTATION, 'solvers/alice/1/solve'],
+        attestation=att.to_json(),
+        solver_sha=CHALLENGER,
+    )
+    repo = Repo('baselines/good', KING, '| round |\n|---|\n| 0 |\n', taken=[], queued=[], unrecorded=[])
+
+    assert submission_error(att, config, CHALLENGER, KING, 1010, 'ab' * 32) is None
+    assert decide(pr, repo, lambda seed_block: Chain(1010, 'ab' * 32), config).decision == 'crown'

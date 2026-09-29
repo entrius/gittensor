@@ -57,7 +57,9 @@ PR = PullRequest(
     solver_sha=SOLVER_SHA,
 )
 LEADERBOARD = '| round | solver | pr |\n|---|---|---|\n| 0 | baselines/cow | - |\n| 1 | solvers/a/1 | #3 |\n'
-REPO = Repo(king='solvers/a/1', king_sha=KING_SHA, leaderboard=LEADERBOARD, taken=['solvers/miner/2'], pending=[])
+REPO = Repo(
+    king='solvers/a/1', king_sha=KING_SHA, leaderboard=LEADERBOARD, taken=['solvers/miner/2'], queued=[], unrecorded=[]
+)
 
 
 @pytest.fixture(scope='module')
@@ -90,8 +92,8 @@ def scored(factor):
         ({'pr': {'force_pushed': True}}, 'close', 'one commit'),
         ({'pr': {'draft': True}}, 'wait', 'ready'),
         ({'pr': {'body': f'- [ ] {CLA_TEXT}'}}, 'close', 'cla'),
-        ({'repo': {'pending': [5]}}, 'wait', 'queue'),
-        ({'repo': {'pending': [9]}}, 'wait', 'queue'),  # a later PR merged but not yet recorded
+        ({'repo': {'queued': [5]}}, 'wait', 'queue'),
+        ({'repo': {'unrecorded': [9]}}, 'wait', 'queue'),
         ({'pr': {'files': [*PR.files, 'README.md'], 'changed_files': 4}}, 'close', 'scope'),
         ({'pr': {'renamed_from': ['README.md']}}, 'close', 'scope'),
         ({'pr': {'changed_files': 3001}}, 'close', 'scope'),
@@ -112,6 +114,12 @@ def test_the_first_failing_check_decides(key, changes, decision, check):
 
     assert (verdict.decision, verdict.checks[-1].name, verdict.checks[-1].ok) == (decision, check, False)
     assert verdict.reason == verdict.checks[-1].detail and verdict.round is None
+
+
+def test_the_wait_says_which_prs_are_open_and_which_merged_crowns_to_record(key):
+    verdict = judge(key, repo={'queued': [5], 'unrecorded': [9]})
+
+    assert verdict.reason == 'waiting on open PRs [5]; merged crowns to record [9]'
 
 
 def test_a_moved_king_closes_as_stale(key):

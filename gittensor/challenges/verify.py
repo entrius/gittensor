@@ -21,16 +21,24 @@ from typing import Any, Callable
 import click
 
 from gittensor.challenges.attestation import DEV, Attestation, verify
+from gittensor.challenges.checkout import (
+    ATTESTATION,
+    CLA_TEXT,
+    CONFIG,
+    KING_FILE,
+    MAIN,
+    SOLVER_N,
+    normalize_hash,
+    run_mismatch,
+    side,
+)
 from gittensor.challenges.head_to_head import Entry, verdict
 from gittensor.challenges.runner import SeedResult
 
-MAIN = 'main'
-ATTESTATION = 'attestation.json'
 NEEDS_REVIEW = 'needs-review'
 WRITERS = ('admin', 'maintain', 'write')
 BLOCK_SECONDS = 12
 FILES_JQ = '.[] | [.filename, .previous_filename // ""] | @tsv'
-CLA_TEXT = 'I agree to the Contributor License Agreement in CLA.md and that this solver is licensed under LICENSING.md.'
 CLA = re.compile(r'- \[[xX]\] ' + re.escape(CLA_TEXT))
 NO_CLA = 'CLA not accepted: tick the agreement box and resubmit as a new PR'
 
@@ -93,7 +101,8 @@ class Repo:
     king_sha: str
     leaderboard: str
     taken: list[str]  # the author's solver dirs already on main
-    pending: list[int]  # PRs to finish first: earlier open ones in the queue, merged crowns not yet recorded
+    queued: list[int]  # earlier open PRs in the queue
+    unrecorded: list[int]  # merged crowns whose KING and leaderboard row are not in yet
 
 
 @dataclass(frozen=True)
@@ -157,7 +166,8 @@ def decide(pr: PullRequest, repo: Repo, chain: Callable[[int], Chain], config: C
     cla = any(CLA.fullmatch(line.strip()) for line in pr.body.splitlines())
     if not passed('cla', cla, 'CLA accepted' if cla else NO_CLA):
         return stop('close')
-    if not passed('queue', not repo.pending, f'waiting on PRs {repo.pending}'):
+    waiting = f'waiting on open PRs {repo.queued}; merged crowns to record {repo.unrecorded}'
+    if not passed('queue', not (repo.queued or repo.unrecorded), waiting):
         return stop('wait')
     solver = solver_dir(pr.paths, pr.author)
     scoped = solver is not None and solver not in repo.taken and len(pr.files) == pr.changed_files
@@ -185,11 +195,8 @@ def decide(pr: PullRequest, repo: Repo, chain: Callable[[int], Chain], config: C
         return stop('close')
     if not passed('challenger', sha == pr.solver_sha, f'ran {sha}, the PR holds {pr.solver_sha}'):
         return stop('close')
-    wanted = dict(
-        challenge_id=config.challenge_id, module=config.module, tier=config.tier, n=config.seeds, margin=config.margin
-    )
-    ran = {key: result.get(key) for key in wanted}
-    if not passed('config', ran == wanted, f'ran {ran}'):
+    mismatch = run_mismatch(result, config)
+    if not passed('config', not mismatch, mismatch or 'ran as challenge.json says'):
         return stop('close')
     scores = [side(result, name).get('scores', []) for name in ('challenger', 'king')]
     valid = side(result, 'challenger').get('valid')
@@ -259,11 +266,7 @@ def solver_dir(files: list[str], author: str) -> str | None:
         return None
     root = roots.pop()
     inside = all(path.startswith(f'{root}/') for path in rest)
-    return root if inside and re.fullmatch(rf'solvers/{re.escape(author)}/[1-9][0-9]*', root) else None
-
-
-def side(result: dict, name: str) -> dict:
-    return value if isinstance(value := result.get(name), dict) else {}
+    return root if inside and re.fullmatch(rf'solvers/{re.escape(author)}/{SOLVER_N}', root) else None
 
 
 def is_scores(scores: Any, n: int) -> bool:
@@ -356,14 +359,15 @@ def with_files(repo: str, pr: PullRequest) -> PullRequest:
 
 
 def repo_facts(repo: str, pr: PullRequest, config: Config) -> Repo:
-    king = (raw(repo, 'KING', MAIN) or '').strip()
+    king = (raw(repo, KING_FILE, MAIN) or '').strip()
     parent, name = king.rsplit('/', 1)
     facts = Repo(
         king=king,
         king_sha=subdirs(repo, parent, MAIN)[name],
         leaderboard=raw(repo, 'LEADERBOARD.md', MAIN) or '',
         taken=[f'solvers/{pr.author}/{n}' for n in subdirs(repo, f'solvers/{pr.author}', MAIN)],
-        pending=[],
+        queued=[],
+        unrecorded=[],
     )
     earlier = [n for n in open_prs(repo) if n < pr.number]
     queued = [n for n in earlier if not ineligible(other := pull_request(repo, n), config) and not other.draft]
@@ -373,7 +377,7 @@ def repo_facts(repo: str, pr: PullRequest, config: Config) -> Repo:
         if n != pr.number and not recorded(facts.leaderboard, n) and not is_maintainer(author, False, config)
     ]
     unfinished = [n for n in merged if unrecorded_crown(with_files(repo, pull_request(repo, n)), facts, config)]
-    return replace(facts, pending=queued + unfinished)
+    return replace(facts, queued=queued, unrecorded=unfinished)
 
 
 def open_prs(repo: str) -> list[int]:
@@ -391,7 +395,7 @@ def chain_facts(subtensor: Any, created_at: datetime, seed_block: int) -> Chain:
     """The PR's creation block and the attested seed block's hash, from a ``bittensor.Subtensor``."""
     created = block_at(subtensor, created_at)
     block_hash = subtensor.get_block_hash(seed_block) if 0 <= seed_block <= created else None
-    return Chain(created, block_hash.lower().removeprefix('0x') if block_hash else None)
+    return Chain(created, normalize_hash(block_hash) if block_hash else None)
 
 
 def block_at(subtensor: Any, when: datetime) -> int:
@@ -426,7 +430,7 @@ def apply(v: Verdict, name: str, pr: PullRequest, repo: Repo, config: Config) ->
             gain, lower = (f'{x:+.2%}' if x is not None else '-' for x in (v.gain, v.lower_99))
             today = datetime.now(timezone.utc).date()
             row = f'| {v.round} | {solver} | {pr.author} | #{pr.number} | {gain} | {lower} | {today} |\n'
-            files = {'KING': f'{solver}\n', 'LEADERBOARD.md': repo.leaderboard.rstrip('\n') + '\n' + row}
+            files = {KING_FILE: f'{solver}\n', 'LEADERBOARD.md': repo.leaderboard.rstrip('\n') + '\n' + row}
             commit_to_main(name, files, f'crown: round {v.round} goes to {solver} (#{pr.number})')
 
 
@@ -459,7 +463,7 @@ def verify_command(name, number, actor, network, act):
     import bittensor as bt
 
     try:
-        config = Config.from_json(raw(name, '.gittensor/challenge.json', MAIN) or '')
+        config = Config.from_json(raw(name, CONFIG, MAIN) or '')
         pr = with_files(name, pull_request(name, number, actor))
         repo = repo_facts(name, pr, config)
         v = decide(pr, repo, lambda seed: chain_facts(bt.Subtensor(network=network), pr.created_at, seed), config)

@@ -120,8 +120,10 @@ def test_init_scaffolds_from_the_king_once_per_solver_not_yet_on_main(challenge_
     monkeypatch.setattr('gittensor.challenges.cli.fork_and_clone', lambda repo, dest: clone(bare, dest))
     root, mine = work / 'gt-challenge-fake', work / 'gt-challenge-fake' / 'solvers' / 'alice'
 
-    def init():
-        return CliRunner().invoke(cli, ['challenge', 'init', 'o/gt-challenge-fake', '--login', 'alice'])
+    monkeypatch.setattr('gittensor.challenges.cli.gh_user', lambda: 'alice')
+
+    def init(login='Alice'):  # the gh user's spelling wins
+        return CliRunner().invoke(cli, ['challenge', 'init', 'o/gt-challenge-fake', '--login', login])
 
     first, again = init(), init()
     assert first.exit_code == 0, first.output
@@ -131,10 +133,12 @@ def test_init_scaffolds_from_the_king_once_per_solver_not_yet_on_main(challenge_
     git(root, 'add', 'solvers')
     git(root, 'commit', '-qm', 'crown')
     git(root, 'push', '-q', 'upstream', 'HEAD:main')
+    shutil.rmtree(mine / '1')  # only on main now
     init()
 
-    assert sorted(p.name for p in mine.iterdir()) == ['1', '2']
+    assert [p.name for p in mine.iterdir()] == ['2']
     assert solver_sha(mine / '2') == solver_sha(root / 'baselines' / 'good')
+    assert 'is not the gh user alice' in init('bob').output
 
 
 def attest(root, monkeypatch, challenger, key):
@@ -193,17 +197,19 @@ def test_submit_pushes_one_commit_on_upstream_main_and_opens_the_pr(challenge_re
     }
     (root / ATTESTATION).write_text(sign_dev(key, result, 1000).to_json())
     (gh := tmp_path / 'bin' / 'gh').parent.mkdir()
-    gh.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" >> {tmp_path}/gh.log\n[ "$1" = pr ] && echo https://pr/1\nexit 0\n')
+    gh.write_text(
+        f'#!/bin/sh\nprintf "%s\\n" "$@" >> {tmp_path}/gh.log\n[ "$1" = pr ] && echo https://pr/1\n[ "$1" = api ] && echo alice\nexit 0\n'
+    )
     gh.chmod(0o755)
     monkeypatch.setenv('PATH', f'{gh.parent}:{os.environ["PATH"]}')
     monkeypatch.setattr('gittensor.challenges.cli.chain_now', lambda network, block: (1010, 'ab' * 32))
     monkeypatch.chdir(root)
 
-    out = CliRunner().invoke(cli, ['challenge', 'submit', '--agree-cla', '--login', 'alice'])
+    out = CliRunner().invoke(cli, ['challenge', 'submit', '--agree-cla', '--login', 'ALICE'])
 
     assert out.exit_code == 0, out.output
     fork, upstream = tmp_path / 'work' / 'fork.git', tmp_path / 'github.com' / 'o' / 'gt-challenge-fake.git'
-    commit = git(fork, 'rev-parse', 'challenge/alice-1')
+    commit = git(fork, 'rev-parse', 'challenge/alice-1-1000')
     assert git(fork, 'rev-parse', f'{commit}^@') == git(upstream, 'rev-parse', 'main')
     assert git(fork, 'diff-tree', '--no-commit-id', '--name-only', '-r', commit).split() == [
         'attestation.json',

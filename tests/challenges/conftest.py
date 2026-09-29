@@ -48,7 +48,11 @@ CHALLENGE_JSON = {
     'tier': 'small',
     'seeds': 3,
     'margin': 0.01,
+    'image': None,
+    'suspicious_gain': 0.25,
     'freshness_blocks': 150,
+    'crown_label': 'fake:r{round}:crown',
+    'maintainers': ['boss'],
     'dev_attestation_pubkey': None,
 }
 

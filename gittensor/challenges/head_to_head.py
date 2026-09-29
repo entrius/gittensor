@@ -27,6 +27,7 @@ import numpy as np
 from gittensor.challenges.runner import SeedResult, solver_cpus
 
 RESAMPLES = 10_000
+SKIPPED = ('.git', '__pycache__')  # never hashed, never run
 
 
 @dataclass(frozen=True)
@@ -44,21 +45,33 @@ class Entry:
 
 
 def solver_sha(solver_dir: Path) -> str:
-    """sha256 of the tree: per file, in relative-path order, its path, executable bit and bytes (a link: its target)."""
-    entries = {}
-    for root, dirs, files in os.walk(solver_dir):
-        for name in dirs + files:
-            path = os.path.join(root, name)
-            st = os.lstat(path)
-            if stat.S_ISLNK(st.st_mode):
-                entries[os.path.relpath(path, solver_dir)] = ('l', os.readlink(path).encode())
-            elif stat.S_ISREG(st.st_mode):
-                data = Path(path).read_bytes()
-                entries[os.path.relpath(path, solver_dir)] = ('x' if st.st_mode & 0o111 else '-', data)
-    digest = hashlib.sha256()
-    for rel, (kind, data) in sorted(entries.items()):
-        digest.update(f'{rel}\0{kind}\0{len(data)}\0'.encode() + data)
-    return digest.hexdigest()
+    """The git tree sha1 of the directory (``git rev-parse HEAD:<dir>``), without ``SKIPPED`` names or empty dirs."""
+    return git_tree(str(solver_dir)).hex()
+
+
+def git_tree(path: str) -> bytes:
+    entries = []
+    for name in os.listdir(path):
+        if name in SKIPPED:
+            continue
+        full, key = os.path.join(path, name), os.fsencode(name)
+        st = os.lstat(full)
+        if stat.S_ISLNK(st.st_mode):
+            entries.append((key, b'120000', git_object(b'blob', os.fsencode(os.readlink(full)))))
+        elif stat.S_ISREG(st.st_mode):
+            mode = b'100755' if st.st_mode & stat.S_IXUSR else b'100644'
+            entries.append((key, mode, git_object(b'blob', Path(full).read_bytes())))
+        elif stat.S_ISDIR(st.st_mode) and (tree := git_tree(full)) != EMPTY_TREE:
+            entries.append((key + b'/', b'40000', tree))  # git orders a tree as if its name ended in '/'
+    body = b''.join(b'%s %s\0%s' % (mode, key.rstrip(b'/'), sha) for key, mode, sha in sorted(entries))
+    return git_object(b'tree', body)
+
+
+def git_object(kind: bytes, body: bytes) -> bytes:
+    return hashlib.sha1(b'%s %d\0' % (kind, len(body)) + body).digest()
+
+
+EMPTY_TREE = git_object(b'tree', b'')
 
 
 def verdict(challenger: Entry, king: Entry, seed_block_hash: str, margin: float) -> dict:

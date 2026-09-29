@@ -2,9 +2,10 @@
 # Copyright © 2026 Entrius
 
 """Head to head on paired scores: the crown needs every challenger seed valid and the bootstrap bound over the margin;
-a king that scored nothing leaves no ratio; the solver hash sees paths, bytes and the executable bit."""
+a king that scored nothing leaves no ratio; the solver hash is git's tree sha."""
 
 import json
+import subprocess
 
 import pytest
 
@@ -45,14 +46,23 @@ def test_a_king_that_scored_nothing_leaves_no_ratio_and_any_valid_score_crowns()
     assert (verdict['mean_gain'], verdict['lower_99'], verdict['crown']) == (None, None, True)
 
 
-def test_solver_sha_covers_paths_bytes_and_the_executable_bit(tmp_path):
-    (tmp_path / 'lib').mkdir()
-    (tmp_path / 'lib' / 'a.py').write_text('x = 1\n')
-    (tmp_path / 'solve').write_text('#!/bin/sh\n')
-    before = solver_sha(tmp_path)
+def test_solver_sha_is_the_git_tree_sha_of_the_directory(tmp_path):
+    solver = tmp_path / 'solvers' / 'alice' / '1'
+    (solver / 'lib' / 'empty').mkdir(parents=True)
+    (solver / 'lib' / 'a.py').write_text('x = 1\n')
+    (solver / 'lib.txt').write_text('git sorts this before lib/\n')
+    (solver / 'solve').write_text('#!/bin/sh\n')
+    (solver / 'solve').chmod(0o755)
+    (solver / 'link').symlink_to('solve')
+    git = ['git', '-C', str(tmp_path)]
+    subprocess.run([*git, 'init', '-q'], check=True)
+    subprocess.run([*git, 'add', '.'], check=True)
+    tree = subprocess.run([*git, 'write-tree'], check=True, capture_output=True, text=True).stdout.strip()
+    expected = subprocess.run(
+        [*git, 'rev-parse', f'{tree}:solvers/alice/1'], check=True, capture_output=True, text=True
+    )
+    for skipped in ('__pycache__', '.git'):
+        (solver / skipped).mkdir()
+        (solver / skipped / 'x').write_text('never hashed\n')
 
-    (tmp_path / 'solve').chmod(0o755)
-    executable = solver_sha(tmp_path)
-    (tmp_path / 'lib' / 'a.py').rename(tmp_path / 'lib' / 'b.py')
-
-    assert len({before, executable, solver_sha(tmp_path)}) == 3
+    assert solver_sha(solver) == expected.stdout.strip()

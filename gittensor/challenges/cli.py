@@ -8,6 +8,7 @@ gitt challenge eval [CHALLENGE]                 in a checkout: your newest solve
 gitt challenge eval <module> <challenger_dir> --king DIR --seed-block-hash HEX [--json PATH]
 gitt challenge attest [CHALLENGE]               the official run: writes attestation.json when it is a crown
 gitt challenge submit [CHALLENGE] --agree-cla   checks attestation.json, opens the one-commit PR
+gitt challenge verify --repo OWNER/NAME --pr N  the maintainer's verdict on a PR; --apply carries it out
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from gittensor.challenges import runner
 from gittensor.challenges.attestation import Attestation, dev_pubkey, sign_dev
 from gittensor.challenges.checkout import ATTESTATION, CONFIG, Checkout, repo_name, submission_error
 from gittensor.challenges.head_to_head import Entry, canonical, report, snapshot, solver_sha
+from gittensor.challenges.verify import CLA_TEXT, verify_command
 from gittensor.cli.help import StyledGroup
 from gittensor.cli.helpers import console, err_console
 
@@ -37,9 +39,7 @@ SOLVER_DIR = click.Path(exists=True, file_okay=False, path_type=Path)
 DEV_KEY = Path('~/.gittensor/challenge-dev.key')
 MAIN = 'main'
 BASE = f'upstream/{MAIN}'
-CLA_LINE = (
-    '- [x] I agree to the Contributor License Agreement in CLA.md and that this solver is licensed under LICENSING.md.'
-)
+CLA_LINE = f'- [x] {CLA_TEXT}'
 CHALLENGE_ARG = click.argument('challenge', required=False)
 LOGIN_OPTION = click.option('--login', help='Your GitHub login (default: `gh api user`).')
 NETWORK_OPTION = click.option('--network', default='finney', show_default=True, help='Chain for the seed block.')
@@ -370,4 +370,5 @@ def submit_command(challenge, agree_cla, login, network):
 
 def register_challenge_commands(cli):
     """Register `gitt challenge` with the root CLI group."""
+    challenge_group.add_command(verify_command)
     cli.add_command(challenge_group, name='challenge')

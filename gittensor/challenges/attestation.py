@@ -17,6 +17,7 @@ import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from Crypto.PublicKey.ECC import EccKey
 from Crypto.Signature import eddsa
 
 from gittensor.challenges.head_to_head import canonical
@@ -57,7 +58,7 @@ def digest(result: dict, seed_block: int, image: str | None) -> bytes:
     return hashlib.sha256(canonical_payload(result, seed_block, image)).digest()
 
 
-def dev_key(key_path: str | Path) -> eddsa.EccKey:
+def dev_key(key_path: str | Path) -> EccKey:
     path = Path(key_path).expanduser()
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)

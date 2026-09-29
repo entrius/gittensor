@@ -9,5 +9,6 @@ challenge's package is imported by module name, never a dependency.
 * ``head_to_head``: paired per-seed scores, the bootstrap bound on the gain, the crown rule, the canonical report.
 * ``attestation``: ``attestation.json``, the signed result a miner submits (``dev`` key now, Polaris later).
 * ``checkout``: a miner's clone of a challenge repo, and the checks ``submit`` runs before opening the PR.
-* ``cli``: ``gitt challenge init | eval | attest | submit``.
+* ``verify``: the maintainer's verdict on a challenge PR (crown, close, wait, needs_review, ignore), never running it.
+* ``cli``: ``gitt challenge init | eval | attest | submit | verify``.
 """

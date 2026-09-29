@@ -5,7 +5,7 @@
 #
 #   FROM entrius/gt-challenge-evaluator@sha256:<digest>
 #   USER root
-#   RUN uv pip install --python /app/.venv/bin/python "gt-challenge-intents @ git+https://github.com/entrius/gt-challenge-intents@v0.1.0"
+#   RUN uv pip install --python /app/.venv/bin/python "gt-challenge-intents @ git+https://github.com/entrius/gt-challenge-intents@<commit sha>"
 #   USER evaluator
 #
 #   docker run --rm --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
@@ -15,7 +15,8 @@
 # bwrap makes unprivileged user namespaces, which Docker's default seccomp and AppArmor profiles refuse, and mounts a
 # fresh /proc, which Docker's masked /proc paths block: hence the three --security-opt flags (a narrower seccomp
 # profile that allows unshare and namespaced clone works too). Without them `gitt challenge eval` refuses to run ("no
-# sandbox here"). The evaluator runs as a non-root user, so RLIMIT_NPROC binds the solver.
+# sandbox here"). The evaluator runs as a non-root user, so RLIMIT_NPROC binds the solver. bwrap applies no seccomp
+# filter of its own inside this unconfined container: the confidential VM, not the container, is the trust boundary.
 # TODO: attest the result JSON under Polaris.
 FROM python:3.12-slim-bookworm
 
@@ -30,10 +31,10 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock README.md ./
 ENV PATH="/app/.venv/bin:$PATH"
-RUN uv sync --no-install-project
+RUN uv sync --locked --no-install-project
 
 COPY . .
-RUN uv sync
+RUN uv sync --locked
 
 RUN useradd --create-home evaluator
 USER evaluator

@@ -24,6 +24,9 @@ on:
       - uv.lock
       - .github/workflows/challenge-evaluator-image.yml
 
+permissions:
+  contents: read
+
 jobs:
   image:
     name: ${{ github.event_name == 'pull_request' && 'build only (dry run)' || 'build and push' }}
@@ -76,3 +79,4 @@ jobs:
           push: true
           tags: entrius/gt-challenge-evaluator:${{ steps.tag.outputs.tag }},entrius/gt-challenge-evaluator:${{ github.sha }}
           cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from gittensor.challenges import runner
 from gittensor.challenges.attest import verify_dev
 from gittensor.cli.main import cli
 from gittensor.controller.pay.scorecard import ScorecardError, read_scorecard
@@ -38,6 +39,28 @@ def test_submit_without_hippius_writes_the_bundle_to_out(solver, registry_path, 
     out = json.loads(result.output)
     assert out['commitment'] == f'gt-challenge:fake-echo:{out["sha256"]}' and not out['committed']
     assert (tmp_path / 'out' / f'fake-echo-{out["sha256"]}.tar.gz').is_file()
+
+
+def test_round_refuses_to_score_without_a_sandbox(solver, registry_path, tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, 'sandbox_error', lambda: 'bwrap is not installed')
+    path = tmp_path / 'candidates.json'
+    path.write_text(json.dumps([]))
+    state = tmp_path / 'state'
+    args = [
+        '--candidates',
+        str(path),
+        '--public-seed',
+        's',
+        '--state-dir',
+        str(state),
+        '--registry',
+        str(registry_path),
+    ]
+
+    result = CliRunner().invoke(cli, ['challenge', 'round', *args])
+
+    assert result.exit_code != 0 and 'no sandbox here' in result.output
+    assert not (state / 'leaderboard.json').exists() and not (state / 'scorecard').exists()
 
 
 @requires_sandbox

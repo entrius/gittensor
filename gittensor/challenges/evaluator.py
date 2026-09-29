@@ -15,13 +15,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from gittensor.challenges import runner
 from gittensor.challenges.leaderboard import Leaderboard, Submission
 from gittensor.challenges.registry import Challenge, import_challenge
-from gittensor.challenges.runner import evaluate
 from gittensor.challenges.scorecard import build_scorecard
 from gittensor.controller.pay.scorecard import write_scorecard
 
 log = logging.getLogger(__name__)
+
+
+class SandboxUnavailable(RuntimeError):
+    """bwrap does not run here, so no round can be scored."""
 
 
 class Attestor(Protocol):
@@ -46,7 +50,10 @@ def run_round(
     attestor: Attestor,
     now: float,
 ) -> tuple[Path, str]:
-    """The scorecard's path and sha256. Candidates for a challenge not in the registry are skipped."""
+    """The scorecard's path and sha256. Candidates for a challenge not in the registry are skipped. On a host without a
+    working sandbox it raises ``SandboxUnavailable`` before touching the board: never zeros from a broken host."""
+    if error := runner.sandbox_error():
+        raise SandboxUnavailable(error)
     board = Leaderboard.load(board_path)
     for c in candidates:
         challenge = registry.get(c.challenge_id)
@@ -54,7 +61,7 @@ def run_round(
             continue
         try:
             module = import_challenge(challenge)
-            score = evaluate(module, c.solver_dir, challenge.tier, public_seed, challenge.seeds).score
+            score = runner.evaluate(module, c.solver_dir, challenge.tier, public_seed, challenge.seeds).score
         except Exception as e:  # one bad candidate never costs the round
             log.warning(f'{c.challenge_id}: {c.hotkey} {c.submission_sha256[:16]} scores 0: {type(e).__name__}: {e}')
             score = 0.0

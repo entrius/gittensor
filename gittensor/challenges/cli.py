@@ -152,7 +152,7 @@ def round_command(candidates, public_seed, state_dir, key, registry):
     [dim]Prints the scorecard's path and sha256. v0: the dev attestation only proves which key wrote it.[/dim]
     """
     from gittensor.challenges.attest import DevAttestor  # the scorecard side imports bittensor: only when run
-    from gittensor.challenges.evaluator import Candidate, run_round
+    from gittensor.challenges.evaluator import Candidate, SandboxUnavailable, run_round
 
     try:
         found = [Candidate(**{**c, 'solver_dir': Path(c['solver_dir'])}) for c in json.loads(candidates.read_text())]
@@ -163,9 +163,18 @@ def round_command(candidates, public_seed, state_dir, key, registry):
     except RegistryError as e:
         raise click.ClickException(str(e)) from e
     attestor = DevAttestor(key or state_dir / 'evaluator_ed25519')
-    path, sha = run_round(
-        challenges, found, public_seed, state_dir / 'leaderboard.json', state_dir / 'scorecard', attestor, time.time()
-    )
+    try:
+        path, sha = run_round(
+            challenges,
+            found,
+            public_seed,
+            state_dir / 'leaderboard.json',
+            state_dir / 'scorecard',
+            attestor,
+            time.time(),
+        )
+    except SandboxUnavailable as e:
+        raise click.ClickException(f'no sandbox here ({e}): nothing was scored or written') from e
     click.echo(f'{path} {sha}')
 
 

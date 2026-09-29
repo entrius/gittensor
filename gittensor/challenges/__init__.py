@@ -8,5 +8,6 @@ challenge's package is imported by module name, never a dependency.
 * ``runner``: generate -> run ``solve`` in a bubblewrap sandbox under the tier's limits -> check, per seed and solver.
 * ``head_to_head``: paired per-seed scores, the bootstrap bound on the gain, the crown rule, the canonical report.
 * ``attestation``: ``attestation.json``, the signed result a miner submits (``dev`` key now, Polaris later).
-* ``cli``: ``gitt challenge eval``.
+* ``checkout``: a miner's clone of a challenge repo, and the checks ``submit`` runs before opening the PR.
+* ``cli``: ``gitt challenge init | eval | attest | submit``.
 """

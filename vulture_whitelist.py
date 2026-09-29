@@ -52,6 +52,10 @@ ALLOWED_SIGNERS_PATH
 PROOF_FILL_RATIO
 PROOF_FILL_FLOOR_RATIO
 
+# Challenge evaluator: the Polaris attestor stub and verify_dev (the validator-side check) are wired after v0
+PolarisAttestor
+verify_dev
+
 # Compute checks package: PEP 562 lazy attribute; run_full_check / due_for_check are its exported entry points, driven
 # by tests; load_manifest is what the bless-image workflow calls; regex is the FakeRunner matcher the tests use
 __getattr__

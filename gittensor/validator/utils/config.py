@@ -25,6 +25,9 @@ COMPUTE_SCORECARD_PATH = os.getenv('COMPUTE_SCORECARD_PATH', '')
 # soak: the write failed every cycle). Unset: `<neuron full path>/validator_commit.json`, the directory the validator
 # already keeps state.npz in, or ~/.bittensor/gittensor/validator_commit.json when it has none.
 COMPUTE_COMMIT_PATH = os.getenv('COMPUTE_COMMIT_PATH', '')
+# Challenge pool: the challenge evaluator's scorecard (`latest.json` beside `latest.sha256`). Unset: nothing is read and
+# the blend is today's. Set: CHALLENGE_EMISSION_SHARE is paid from its weights; a stale or invalid one recycles it.
+CHALLENGE_SCORECARD_PATH = os.getenv('CHALLENGE_SCORECARD_PATH', '')
 
 # log values
 bt.logging.info(f'VALIDATOR_WAIT: {VALIDATOR_WAIT}')

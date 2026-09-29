@@ -1,0 +1,29 @@
+{
+  "routing-cvrptw": {
+    "module": "gt_challenge_routing",
+    "repo": "entrius/gt-challenge-routing",
+    "version": "0.1.0",
+    "tier": "standard",
+    "seeds": 8,
+    "dethrone_margin": 0.01,
+    "emission_share": 0.0
+  },
+  "vector-search-ann": {
+    "module": "gt_challenge_vector_search",
+    "repo": "entrius/gt-challenge-vector-search",
+    "version": "0.1.0",
+    "tier": "standard",
+    "seeds": 8,
+    "dethrone_margin": 0.01,
+    "emission_share": 0.0
+  },
+  "intents-batch": {
+    "module": "gt_challenge_intents",
+    "repo": "entrius/gt-challenge-intents",
+    "version": "0.1.0",
+    "tier": "standard",
+    "seeds": 8,
+    "dethrone_margin": 0.01,
+    "emission_share": 0.0
+  }
+}

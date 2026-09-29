@@ -245,6 +245,9 @@ def solve(challenge: ModuleType, tier: str, solver_dir: Path, instance_dir: Path
 def evaluate(
     challenge: ModuleType, tier: str, seed_block_hash: str, n: int, solver_dirs: Sequence[Path]
 ) -> list[list[SeedResult]]:
-    """Per solver, its result on each of the n seeds."""
-    rows = [run_seed(challenge, tier, seed, solver_dirs) for seed in derive_seeds(seed_block_hash, n)]
+    """Per solver, its result on each of the n seeds. Odd seeds run the solvers in reverse, so none always goes first."""
+    rows = []
+    for i, seed in enumerate(derive_seeds(seed_block_hash, n)):
+        step = -1 if i % 2 else 1
+        rows.append(run_seed(challenge, tier, seed, solver_dirs[::step])[::step])
     return [list(results) for results in zip(*rows)]

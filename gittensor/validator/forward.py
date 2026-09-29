@@ -7,13 +7,16 @@ from typing import TYPE_CHECKING, Dict, Optional, Set, Tuple
 import bittensor as bt
 
 from gittensor.classes import MinerEvaluation, MinerEvaluationCache
+from gittensor.constants import CHALLENGE_EMISSION_SHARE
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
 from gittensor.utils.uids import get_all_uids
+from gittensor.validator.challenge_pool import challenge_pool_for
 from gittensor.validator.compute_pool import compute_pool_for
 from gittensor.validator.emission_allocation import blend_emission_pools
 from gittensor.validator.issue_discovery.scan import run_issue_discovery
 from gittensor.validator.oss_contributions.reward import get_rewards
 from gittensor.validator.utils.config import (
+    CHALLENGE_SCORECARD_PATH,
     COMPUTE_COMMIT_PATH,
     COMPUTE_SCORECARD_PATH,
     VALIDATOR_STEPS_INTERVAL,
@@ -44,6 +47,8 @@ async def forward(self: 'Validator') -> None:
     - Maintainer cut:        per-repo carve-out routed to maintainer miner neurons
     - Compute pool:          1 - OSS_EMISSION_SHARE, paid by the controller's signed scorecard (COMPUTE_SCORECARD_PATH);
                              recycled when it is stale, invalid or unset
+    - Challenge pool:        CHALLENGE_EMISSION_SHARE carved out of the OSS pool, paid by the challenge evaluator's
+                             scorecard (CHALLENGE_SCORECARD_PATH); recycled when it is stale or invalid; off when unset
     - Recycle:              registry slack and inactive repo slices to UID 0
     """
 
@@ -77,13 +82,23 @@ async def forward(self: 'Validator') -> None:
         maintainer_uids_by_repo = build_maintainer_uids_by_repo(miner_evaluations, master_repositories, miner_uids)
         # The compute pool: the controller's signed scorecard, verified, committed and blended in; unset or refused
         # means the compute share recycles (a dead controller must not keep paying).
-        compute = (
-            {'compute_pool': compute_pool_for(self, COMPUTE_SCORECARD_PATH, commit_path=COMPUTE_COMMIT_PATH or None)}
+        compute_pool = (
+            compute_pool_for(self, COMPUTE_SCORECARD_PATH, commit_path=COMPUTE_COMMIT_PATH or None)
             if COMPUTE_SCORECARD_PATH
-            else {}
+            else None
+        )
+        challenge_pool = (
+            challenge_pool_for(self, CHALLENGE_SCORECARD_PATH)
+            if CHALLENGE_SCORECARD_PATH and CHALLENGE_EMISSION_SHARE > 0
+            else None
         )
         rewards = blend_emission_pools(
-            miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo, **compute
+            miner_evaluations,
+            master_repositories,
+            miner_uids,
+            maintainer_uids_by_repo,
+            compute_pool=compute_pool,
+            challenge_pool=challenge_pool,
         )
 
         self.update_scores(rewards, miner_uids, blacklisted_uids=sorted(penalized_uids))

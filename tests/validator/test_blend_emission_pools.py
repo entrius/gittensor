@@ -479,7 +479,7 @@ class TestAllocationBreakdown:
             2: _evaluation(2, issues=[_discovered_issue('r/both', 10, earned_score=20.0)]),
         }
 
-        rows = list(calculate_repo_emission_breakdown(evaluations, repos, miner_uids))
+        rows = list(calculate_repo_emission_breakdown(evaluations, repos, miner_uids, oss_share=OSS_EMISSION_SHARE))
 
         assert len(rows) == 1
         row = rows[0]
@@ -501,7 +501,7 @@ class TestAllocationBreakdown:
         miner_uids = _uids(1)
         evaluations = {1: _evaluation(1, prs=[_scored_pr('r/issue-only', 100, earned_score=50.0)])}
 
-        rows = list(calculate_repo_emission_breakdown(evaluations, repos, miner_uids))
+        rows = list(calculate_repo_emission_breakdown(evaluations, repos, miner_uids, oss_share=OSS_EMISSION_SHARE))
 
         assert len(rows) == 1
         row = rows[0]

@@ -10,6 +10,7 @@ import numpy as np
 
 from gittensor.classes import MinerEvaluation, RepoEmissionAllocation
 from gittensor.constants import (
+    CHALLENGE_EMISSION_SHARE,
     EMISSION_SHARE_TOLERANCE,
     OSS_EMISSION_SHARE,
     RECYCLE_UID,
@@ -26,6 +27,7 @@ def blend_emission_pools(
     miner_uids: set[int],
     maintainer_uids_by_repo: Optional[Dict[str, list[int]]] = None,
     compute_pool: Optional['ScorecardPool'] = None,
+    challenge_pool: Optional['ScorecardPool'] = None,
 ) -> np.ndarray:
     """Allocate the combined scoring pool by bounded repository emission_share.
 
@@ -43,13 +45,20 @@ def blend_emission_pools(
     ``compute_pool`` (with ``COMPUTE_SCORECARD_PATH`` set): the whole share outside ``OSS_EMISSION_SHARE`` is the
     compute pool, paid by the controller scorecard's per-UID shares of it; the unpaid rest (recycle_share,
     unregistered hotkeys, or everything when the scorecard was refused or there is none) recycles.
+
+    ``challenge_pool`` (with ``CHALLENGE_SCORECARD_PATH`` set): ``CHALLENGE_EMISSION_SHARE`` is carved out of the OSS
+    pool (repos scale by ``OSS_EMISSION_SHARE - CHALLENGE_EMISSION_SHARE``) and paid the same way from the challenge
+    scorecard; its unpaid rest, or all of it when the scorecard was refused, recycles.
     """
     sorted_uids = sorted(miner_uids)
     uid_index = {uid: idx for idx, uid in enumerate(sorted_uids)}
     rewards = np.zeros(len(sorted_uids))
 
+    challenge_share = min(CHALLENGE_EMISSION_SHARE, OSS_EMISSION_SHARE) if challenge_pool is not None else 0.0
+    oss_share = OSS_EMISSION_SHARE - challenge_share
+
     total_configured_share = sum(config.emission_share for config in master_repositories.values())
-    recycle_share = max(0.0, 1.0 - total_configured_share) * OSS_EMISSION_SHARE
+    recycle_share = max(0.0, 1.0 - total_configured_share) * oss_share
     # The slice outside the OSS pool burns explicitly: weights are normalized on chain, so leaving it
     # unallocated would silently redistribute it pro-rata instead. With a scorecard that whole slice is the
     # compute pool (below); without one it recycles.
@@ -57,7 +66,7 @@ def blend_emission_pools(
         recycle_share += max(0.0, 1.0 - OSS_EMISSION_SHARE)
 
     for allocation in calculate_repo_emission_breakdown(
-        miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo
+        miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo, oss_share
     ):
         recycle_share += allocation.recycled_amount
         for uid, reward in allocation.maintainer_rewards.items():
@@ -68,18 +77,12 @@ def blend_emission_pools(
             rewards[uid_index[uid]] += reward
 
     if compute_pool is not None:
-        # Compute pool: the controller's scorecard weights, each a share of the compute pool; the rest recycles.
-        compute_share = max(0.0, 1.0 - OSS_EMISSION_SHARE)
-        paid = 0.0
-        for uid, share in compute_pool.rewards.items():
-            if uid in miner_uids and share > 0:
-                rewards[uid_index[uid]] += compute_share * share
-                paid += share
-        recycle_share += compute_share * max(0.0, 1.0 - paid)
-        bt.logging.info(
-            f'Compute pool: {paid * 100:.2f}% of the {compute_share * 100:g}% compute share paid to '
-            f'{len(compute_pool.rewards)} miner(s)'
-            + (f' from scorecard {compute_pool.sha256[:16]}…' if compute_pool.sha256 else f' ({compute_pool.reason})')
+        recycle_share += _pay_scorecard_pool(
+            'Compute', compute_pool, max(0.0, 1.0 - OSS_EMISSION_SHARE), rewards, uid_index, miner_uids
+        )
+    if challenge_pool is not None:
+        recycle_share += _pay_scorecard_pool(
+            'Challenge', challenge_pool, challenge_share, rewards, uid_index, miner_uids
         )
 
     # Recycle receives registry slack and empty repo slices.
@@ -92,11 +95,34 @@ def blend_emission_pools(
     return rewards
 
 
+def _pay_scorecard_pool(
+    name: str,
+    pool: 'ScorecardPool',
+    pool_share: float,
+    rewards: np.ndarray,
+    uid_index: Dict[int, int],
+    miner_uids: set[int],
+) -> float:
+    """Pay a scorecard's per-UID shares of ``pool_share`` into ``rewards``; returns the unpaid rest, which recycles."""
+    paid = 0.0
+    for uid, share in pool.rewards.items():
+        if uid in miner_uids and share > 0:
+            rewards[uid_index[uid]] += pool_share * share
+            paid += share
+    bt.logging.info(
+        f'{name} pool: {paid * 100:.2f}% of the {pool_share * 100:g}% {name.lower()} share paid to '
+        f'{len(pool.rewards)} miner(s)'
+        + (f' from scorecard {pool.sha256[:16]}…' if pool.sha256 else f' ({pool.reason})')
+    )
+    return pool_share * max(0.0, 1.0 - paid)
+
+
 def calculate_repo_emission_breakdown(
     miner_evaluations: Dict[int, MinerEvaluation],
     master_repositories: Dict[str, RepositoryConfig],
     miner_uids: set[int],
     maintainer_uids_by_repo: Optional[Dict[str, list[int]]] = None,
+    oss_share: float = OSS_EMISSION_SHARE,
 ) -> Iterator[RepoEmissionAllocation]:
     """Return per-repository reward allocation details without adding recycle slack.
 
@@ -141,13 +167,13 @@ def calculate_repo_emission_breakdown(
             repository_full_name=repo_name,
             emission_share=repo_config.emission_share,
             issue_discovery_share=repo_config.issue_discovery_share,
-            repo_slice=repo_config.emission_share * OSS_EMISSION_SHARE,
+            repo_slice=repo_config.emission_share * oss_share,
             maintainer_cut=repo_config.maintainer_cut,
         )
 
         # Maintainer pile: base-rate carve-out split evenly among registered maintainers.
         if eligible_maintainers:
-            carve_out = repo_config.maintainer_cut * repo_config.emission_share * OSS_EMISSION_SHARE
+            carve_out = repo_config.maintainer_cut * repo_config.emission_share * oss_share
             per_maintainer = carve_out / len(eligible_maintainers)
             allocation.maintainer_carve_out = carve_out
             allocation.maintainer_rewards = {uid: per_maintainer for uid in eligible_maintainers}
@@ -161,11 +187,11 @@ def calculate_repo_emission_breakdown(
             # Inactive repo's scoring share is redistributed to active repos; it only
             # recycles when nothing is active anywhere.
             if active_scoring_share <= 0:
-                allocation.recycled_amount += scoring_share * OSS_EMISSION_SHARE
+                allocation.recycled_amount += scoring_share * oss_share
             yield allocation
             continue
 
-        scoring_slice = scoring_share * OSS_EMISSION_SHARE * scoring_multiplier
+        scoring_slice = scoring_share * oss_share * scoring_multiplier
         issue_share = repo_config.issue_discovery_share
         pr_scores = allocation.pr_scores if issue_share < 1.0 else {}
         issue_scores = allocation.issue_discovery_scores if issue_share > 0.0 else {}

@@ -3,7 +3,9 @@
 
 """A submission: the solver directory as a deterministic ``.tar.gz`` (sorted entries, zeroed times and owners, modes
 kept), so the same solver always has the same sha256; the chain commitment ``gt-challenge:<challenge_id>:<sha256>``
-(first commit wins ties); and the upload to Hippius S3 when ``HIPPIUS_*`` credentials are set.
+(within the margin the earlier commit reigns; same-block commits are ordered by sha256); and the upload to Hippius S3
+when ``HIPPIUS_*`` credentials are set. The upload must follow the commit: a v0 bundle is plaintext, so one uploaded
+first can be committed first by anyone.
 
 TODO: v0 bundles are plaintext. Encrypt to the attested evaluator's key before upload, so a solver stays private
 while it reigns.

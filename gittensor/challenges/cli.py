@@ -88,11 +88,12 @@ def eval_command(module, solver_dir, tier, seeds, public_seed, json_mode):
 def submit_command(
     challenge_id, solver_dir, out, commit, registry, wallet_name, wallet_hotkey, netuid, network, rpc_url, json_mode
 ):
-    """Bundle SOLVER_DIR for CHALLENGE_ID, upload it, and (with --commit) commit it on chain.
+    """Bundle SOLVER_DIR for CHALLENGE_ID, commit it on chain (--commit), then upload it.
 
     [dim]The bundle goes to Hippius S3 when HIPPIUS_ACCESS_KEY, HIPPIUS_SECRET_KEY and HIPPIUS_BUCKET are set
     (HIPPIUS_ENDPOINT, HIPPIUS_REGION optional), else to --out. The commitment is gt-challenge:<id>:<sha256>;
-    the earliest commit of a score wins a tie.[/dim]
+    within the margin the earlier commit reigns. The upload always follows the commit (a v0 bundle is plaintext:
+    one uploaded first can be committed first by anyone), so Hippius needs --commit.[/dim]
     """
     try:
         if challenge_id not in load_registry(registry):
@@ -101,18 +102,21 @@ def submit_command(
     except (RegistryError, SubmissionError) as e:
         raise click.ClickException(str(e)) from e
     creds = hippius_credentials()
+    if creds and not commit:
+        raise click.UsageError('uploading to Hippius needs --commit: the commit must come first')
+    if not creds and not out:
+        raise click.UsageError('set HIPPIUS_ACCESS_KEY, HIPPIUS_SECRET_KEY and HIPPIUS_BUCKET, or pass --out')
+    committed = commit and _commit(bundle.commitment, wallet_name, wallet_hotkey, netuid, network, rpc_url)
     if creds:
         try:
             location = upload(bundle, creds)
         except OSError as e:
             raise click.ClickException(f'upload to Hippius failed: {e}') from e
-    elif out:
+    else:
+        assert out is not None
         out.mkdir(parents=True, exist_ok=True)
         (out / bundle.name).write_bytes(bundle.data)
         location = str(out / bundle.name)
-    else:
-        raise click.UsageError('set HIPPIUS_ACCESS_KEY, HIPPIUS_SECRET_KEY and HIPPIUS_BUCKET, or pass --out')
-    committed = commit and _commit(bundle.commitment, wallet_name, wallet_hotkey, netuid, network, rpc_url)
     if json_mode:
         payload = {'sha256': bundle.sha256, 'commitment': bundle.commitment, 'location': location}
         emit_json({**payload, 'committed': committed})

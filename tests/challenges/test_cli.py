@@ -34,8 +34,11 @@ def test_submit_without_hippius_writes_the_bundle_to_out(solver, registry_path, 
 
     refused = CliRunner().invoke(cli, args)
     result = CliRunner().invoke(cli, [*args, '--out', str(tmp_path / 'out')])
+    creds = {'HIPPIUS_ACCESS_KEY': 'a', 'HIPPIUS_SECRET_KEY': 's', 'HIPPIUS_BUCKET': 'b'}
+    uncommitted = CliRunner().invoke(cli, args, env=creds)
 
     assert refused.exit_code != 0 and 'HIPPIUS' in refused.output
+    assert uncommitted.exit_code != 0 and 'needs --commit' in uncommitted.output
     out = json.loads(result.output)
     assert out['commitment'] == f'gt-challenge:fake-echo:{out["sha256"]}' and not out['committed']
     assert (tmp_path / 'out' / f'fake-echo-{out["sha256"]}.tar.gz').is_file()

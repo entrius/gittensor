@@ -145,9 +145,10 @@ def write_scorecard(root: str | Path, doc: dict) -> tuple[Path, str]:
     return path, sha
 
 
-def read_scorecard(path: str | Path, now: float) -> tuple[dict, str]:
+def read_scorecard(path: str | Path, now: float, schema: str = SCHEMA) -> tuple[dict, str]:
     """The document and its sha256, or ``ScorecardError``: the sha256 beside it must match the bytes, the schema must
-    be ours, ``valid_until`` must not have passed, and the weights plus ``recycle_share`` must be a split of one pool."""
+    be ``schema``, ``valid_until`` must not have passed, and the weights plus ``recycle_share`` must be a split of one
+    pool."""
     path = Path(path)
     try:
         body = path.read_bytes()
@@ -161,8 +162,8 @@ def read_scorecard(path: str | Path, now: float) -> tuple[dict, str]:
         doc = json.loads(body)
     except ValueError as e:
         raise ScorecardError(f'{path}: not JSON: {e}') from e
-    if not isinstance(doc, dict) or doc.get('schema') != SCHEMA:
-        raise ScorecardError(f'{path}: not a {SCHEMA} document')
+    if not isinstance(doc, dict) or doc.get('schema') != schema:
+        raise ScorecardError(f'{path}: not a {schema} document')
     try:
         issued_at, valid_until = float(doc['issued_at']), float(doc['valid_until'])
         recycle = float(doc['recycle_share'])

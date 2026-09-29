@@ -17,7 +17,7 @@ from gittensor.constants import (
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
 if TYPE_CHECKING:
-    from gittensor.validator.compute_pool import ComputePool
+    from gittensor.validator.compute_pool import ScorecardPool
 
 
 def blend_emission_pools(
@@ -25,7 +25,7 @@ def blend_emission_pools(
     master_repositories: Dict[str, RepositoryConfig],
     miner_uids: set[int],
     maintainer_uids_by_repo: Optional[Dict[str, list[int]]] = None,
-    compute_pool: Optional['ComputePool'] = None,
+    compute_pool: Optional['ScorecardPool'] = None,
 ) -> np.ndarray:
     """Allocate the combined scoring pool by bounded repository emission_share.
 

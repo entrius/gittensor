@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Sequence
 
 import bittensor as bt
 
-from gittensor.controller.pay.scorecard import ScorecardError, read_scorecard
+from gittensor.controller.pay.scorecard import SCHEMA, ScorecardError, read_scorecard
 
 if TYPE_CHECKING:
     from neurons.validator import Validator
@@ -36,18 +36,18 @@ DEFAULT_COMMIT_DIR = '~/.bittensor/gittensor'
 
 
 @dataclass
-class ComputePool:
-    rewards: Dict[int, float] = field(default_factory=dict)  # uid -> share of the compute pool
-    sha256: Optional[str] = None  # None: no usable scorecard, the compute share recycles
+class ScorecardPool:
+    rewards: Dict[int, float] = field(default_factory=dict)  # uid -> share of its pool
+    sha256: Optional[str] = None  # None: no usable scorecard, the pool's share recycles
     reason: str = ''
 
 
-def pool_from_scorecard(path: str | Path, hotkeys: Sequence[str], now: float) -> ComputePool:
+def pool_from_scorecard(path: str | Path, hotkeys: Sequence[str], now: float, schema: str = SCHEMA) -> ScorecardPool:
     """Weights by UID for the hotkeys registered now; a hotkey that is not registered is simply not paid (recycled)."""
     try:
-        doc, sha = read_scorecard(path, now)
+        doc, sha = read_scorecard(path, now, schema)
     except ScorecardError as e:
-        return ComputePool(reason=str(e))
+        return ScorecardPool(reason=str(e))
     uid_of = {hotkey: uid for uid, hotkey in enumerate(hotkeys)}
     rewards: Dict[int, float] = {}
     for entry in doc['hotkeys']:
@@ -55,7 +55,7 @@ def pool_from_scorecard(path: str | Path, hotkeys: Sequence[str], now: float) ->
         weight = float(entry['weight'])
         if uid is not None and weight > 0:
             rewards[uid] = rewards.get(uid, 0.0) + weight
-    return ComputePool(rewards, sha)
+    return ScorecardPool(rewards, sha)
 
 
 def commit_path_for(validator: Any, override: str | Path | None = None) -> Path:
@@ -101,7 +101,7 @@ def sign_and_commit(subtensor: Any, wallet: Any, netuid: int, sha256: str, log_p
 
 def compute_pool_for(
     self: 'Validator', path: str, now: Optional[float] = None, commit_path: str | Path | None = None
-) -> ComputePool:
+) -> ScorecardPool:
     """``path`` is the controller's scorecard (read-only input); ``commit_path`` overrides where the commit record
     goes (``commit_path_for``)."""
     now = time.time() if now is None else now

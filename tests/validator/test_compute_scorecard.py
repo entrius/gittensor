@@ -22,7 +22,7 @@ from gittensor.controller.pay.scorecard import write_scorecard
 from gittensor.validator.compute_pool import (
     COMMIT_LOG,
     DEFAULT_COMMIT_DIR,
-    ComputePool,
+    ScorecardPool,
     commit_path_for,
     compute_pool_for,
     pool_from_scorecard,
@@ -133,7 +133,7 @@ def test_without_a_compute_pool_the_compute_share_recycles():
     assert today[1] == pytest.approx(0.0)
     assert today[0] == pytest.approx(1.0)
     empty = pool_from_scorecard('/nonexistent/latest.json', [], ISSUED)
-    assert isinstance(empty, ComputePool) and empty.sha256 is None and 'nonexistent' in empty.reason
+    assert isinstance(empty, ScorecardPool) and empty.sha256 is None and 'nonexistent' in empty.reason
 
 
 def test_the_commit_record_goes_under_the_validators_own_state_never_the_read_only_scorecard_dir(

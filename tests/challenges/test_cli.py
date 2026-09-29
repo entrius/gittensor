@@ -18,7 +18,7 @@ from tests.challenges.conftest import FAKE_MODULE, requires_sandbox
 def eval_args(challenger, king, json_path):
     return [
         *['challenge', 'eval', FAKE_MODULE, str(challenger), '--king', str(king), '--tier', 'small'],
-        *['--seeds', '3', '--seed-block-hash', '0x00FF', '--json', str(json_path)],
+        *['--seeds', '3', '--seed-block-hash', '0x' + 'AB' * 32, '--json', str(json_path)],
     ]
 
 
@@ -33,7 +33,7 @@ def test_a_copy_of_the_king_gains_nothing_and_the_same_inputs_write_the_same_byt
     assert first.exit_code == 0, first.output
     assert (tmp_path / 'a.json').read_bytes() == (tmp_path / 'b.json').read_bytes()
     doc = json.loads((tmp_path / 'a.json').read_text())
-    assert (doc['seed_block_hash'], doc['n'], doc['challenger']['valid']) == ('00ff', 3, 3)
+    assert (doc['seed_block_hash'], doc['n'], doc['challenger']['valid']) == ('ab' * 32, 3, 3)
     assert doc['king']['sha'] == doc['challenger']['sha'] and doc['king']['scores'] == [1.0, 1.0, 1.0]
     assert (doc['mean_gain'], doc['lower_99'], doc['crown']) == (0.0, 0.0, False)
 

@@ -33,8 +33,8 @@ def challenge_group():
 
 def parse_hash(ctx, param, value: str) -> str:
     value = value.lower().removeprefix('0x')
-    if not re.fullmatch('[0-9a-f]+', value):
-        raise click.BadParameter(f'{value!r} is not hex', ctx, param)
+    if not re.fullmatch('[0-9a-f]{64}', value):
+        raise click.BadParameter(f'{value!r} is not a 32-byte hex block hash', ctx, param)
     return value
 
 
@@ -45,8 +45,12 @@ def parse_hash(ctx, param, value: str) -> str:
 @click.option(
     '--tier', default='standard', show_default=True, help='Challenge tier (its size, time and memory limits).'
 )
-@click.option('--seeds', type=click.IntRange(min=1), default=1000, metavar='N', show_default=True, help='Instances.')
-@click.option('--seed-block-hash', required=True, callback=parse_hash, help='Block hash the seeds derive from (hex).')
+@click.option(
+    '--seeds', type=click.IntRange(1, 10_000), default=1000, metavar='N', show_default=True, help='Instances.'
+)
+@click.option(
+    '--seed-block-hash', required=True, callback=parse_hash, help='Block hash the seeds derive from (64 hex).'
+)
 @click.option('--margin', type=float, default=0.01, show_default=True, help='Gain the 99% lower bound must reach.')
 @click.option('--json', 'json_path', type=click.Path(dir_okay=False, path_type=Path), help='Write the canonical JSON.')
 def eval_command(module, challenger_dir, king_dir, tier, seeds, seed_block_hash, margin, json_path):

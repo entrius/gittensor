@@ -4,7 +4,7 @@
     "repo": "entrius/gt-challenge-routing",
     "version": "0.1.0",
     "tier": "standard",
-    "seeds": 8,
+    "seeds": 16,
     "dethrone_margin": 0.01,
     "emission_share": 0.0
   },

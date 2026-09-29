@@ -7,7 +7,7 @@ import dataclasses
 
 import pytest
 
-from gittensor.challenges.attestation import Attestation, sign_dev, verify
+from gittensor.challenges.attestation import Attestation, dev_pubkey, sign_dev, verify
 
 RESULT = {'challenger': {'sha': 'c' * 40}, 'king': {'sha': 'k' * 40}, 'crown': True, 'lower_99': 0.02}
 
@@ -21,6 +21,14 @@ def test_a_dev_attestation_round_trips_and_its_key_file_is_private(tmp_path):
     assert loaded == att and verify(loaded, att.signer['pubkey'])
     assert key.stat().st_mode & 0o777 == 0o600
     assert sign_dev(key, RESULT, 123, 'img@sha256:ab').signer == att.signer  # the key is reused
+    assert dev_pubkey(key) == att.signer['pubkey']
+
+
+def test_a_key_file_that_is_not_a_seed_is_refused(tmp_path):
+    (key := tmp_path / 'dev.key').write_bytes(b'short')
+
+    with pytest.raises(ValueError, match='is not a 32-byte ed25519 seed'):
+        sign_dev(key, RESULT, 123)
 
 
 @pytest.mark.parametrize(

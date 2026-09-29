@@ -65,14 +65,25 @@ def dev_key(key_path: str | Path) -> EccKey:
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, 'wb') as f:
             f.write(os.urandom(32))
-    return eddsa.import_private_key(path.read_bytes())
+    seed = path.read_bytes()
+    if len(seed) != 32:
+        raise ValueError(f'{path} is not a 32-byte ed25519 seed')
+    return eddsa.import_private_key(seed)
+
+
+def public_hex(key: EccKey) -> str:
+    return key.public_key().export_key(format='raw').hex()
+
+
+def dev_pubkey(key_path: str | Path) -> str:
+    """The dev key's public key (hex), making the key file on first use."""
+    return public_hex(dev_key(key_path))
 
 
 def sign_dev(key_path: str | Path, result: dict, seed_block: int, image: str | None = None) -> Attestation:
     key = dev_key(key_path)
     signature = eddsa.new(key, 'rfc8032').sign(digest(result, seed_block, image))
-    pubkey = key.public_key().export_key(format='raw').hex()
-    return Attestation(result, seed_block, image, {'kind': DEV, 'pubkey': pubkey}, signature.hex())
+    return Attestation(result, seed_block, image, {'kind': DEV, 'pubkey': public_hex(key)}, signature.hex())
 
 
 def verify(att: Attestation, dev_pubkey: str | None) -> bool:

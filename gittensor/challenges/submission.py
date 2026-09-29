@@ -28,7 +28,7 @@ from urllib.parse import quote, urlparse
 
 from gittensor.challenges.runner import SOLVE
 
-COMMITMENT_PREFIX = 'gt-challenge'
+COMMITMENT_PREFIX = 'gt-challenge:'
 HIPPIUS_ENDPOINT = 'https://s3.hippius.com'
 HIPPIUS_REGION = 'decentralized'
 UPLOAD_TIMEOUT_S = 300
@@ -50,7 +50,7 @@ class Bundle:
 
     @property
     def commitment(self) -> str:
-        return f'{COMMITMENT_PREFIX}:{self.challenge_id}:{self.sha256}'
+        return f'{COMMITMENT_PREFIX}{self.challenge_id}:{self.sha256}'
 
 
 def _normalize(info: tarfile.TarInfo) -> tarfile.TarInfo:

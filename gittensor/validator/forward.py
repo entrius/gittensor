@@ -49,6 +49,7 @@ async def forward(self: 'Validator') -> None:
                              recycled when it is stale, invalid or unset
     - Challenge pool:        CHALLENGE_EMISSION_SHARE carved out of the OSS pool, paid by the challenge evaluator's
                              scorecard (CHALLENGE_SCORECARD_PATH); recycled when it is stale or invalid; off when unset
+                             or CHALLENGE_EMISSION_SHARE is 0
     - Recycle:              registry slack and inactive repo slices to UID 0
     """
 

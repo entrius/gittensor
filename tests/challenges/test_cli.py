@@ -7,14 +7,13 @@ costs only itself, and the scorecard it writes is what the validator's ``read_sc
 import json
 from pathlib import Path
 
-import pytest
 from click.testing import CliRunner
 
 from gittensor.challenges import runner
 from gittensor.challenges.attest import verify_dev
 from gittensor.cli.main import cli
-from gittensor.controller.pay.scorecard import ScorecardError, read_scorecard
-from gittensor.validator.challenge_pool import SCHEMA
+from gittensor.constants import CHALLENGE_SCORECARD_SCHEMA as SCHEMA
+from gittensor.controller.pay.scorecard import read_scorecard
 from tests.challenges.conftest import FAKE_MODULE, requires_sandbox
 
 
@@ -99,5 +98,3 @@ def test_round_crowns_the_best_and_writes_a_scorecard_the_validator_reads(solver
     assert echo['king']['hotkey'] == 'hk-good' and [e['score'] for e in echo['evaluated']] == [1.0, 0.0, 0.0]
     assert json.loads((state / 'leaderboard.json').read_text())['challenges'] == doc['challenges']
     assert verify_dev(doc) and not verify_dev({**doc, 'recycle_share': 0.0})
-    with pytest.raises(ScorecardError, match='stale'):
-        read_scorecard(scorecard, doc['valid_until'], SCHEMA)

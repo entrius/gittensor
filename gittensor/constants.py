@@ -153,7 +153,9 @@ RECYCLE_UID = 0
 # Combined scoring pool distributed by repository emission_share, then by per-repo PR/issue split.
 OSS_EMISSION_SHARE = 0.90  # repo emission_share values are fractions of THIS pool (sparkinfer 0.4 -> 36% of total)
 # Challenge pool: carved out of the OSS pool (capped at OSS_EMISSION_SHARE) from the challenge scorecard; 0 = off.
+# `gitt miner score` still prices repos against the full OSS share, so it overstates repo slices once this is > 0.
 CHALLENGE_EMISSION_SHARE = 0.0
+CHALLENGE_SCORECARD_SCHEMA = 'gt-challenge-scorecard/1'
 DEFAULT_ISSUE_DISCOVERY_SHARE = 0.5
 EMISSION_SHARE_TOLERANCE = 1e-9
 MAX_MAINTAINER_CUT = 0.5  # maintaining is only half of the problem to software, at maximum

@@ -1,10 +1,11 @@
 # The MIT License (MIT)
 # Copyright © 2026 Entrius
 
-"""``gitt challenge``: the miner's side of the challenge pool.
+"""``gitt challenge``: the challenge pool.
 
 gitt challenge eval <module> <solver_dir> [--tier --seeds --public-seed]   score a solver locally, per seed
-gitt challenge submit <challenge_id> <solver_dir> [--out DIR] [--commit]   bundle, upload or save, commit on chain
+gitt challenge submit <challenge_id> <solver_dir> [--out DIR] [--commit]   bundle, commit on chain, upload or save
+gitt challenge round --candidates <json> --public-seed <s> --state-dir <dir> [--key]   the evaluator: one round
 """
 
 from __future__ import annotations
@@ -20,6 +21,8 @@ import click
 from rich.markup import escape
 from rich.table import Table
 
+from gittensor.challenges.attest import DevAttestor
+from gittensor.challenges.evaluator import Candidate, SandboxUnavailable, run_round
 from gittensor.challenges.registry import REGISTRY_PATH, RegistryError, load_registry
 from gittensor.challenges.runner import evaluate
 from gittensor.challenges.submission import SubmissionError, build_bundle, hippius_credentials, upload
@@ -46,8 +49,9 @@ def challenge_group():
 def eval_command(module, solver_dir, tier, seeds, public_seed, json_mode):
     """Score SOLVER_DIR (an executable `solve`) locally against the challenge package MODULE.
 
-    [dim]MODULE is the package's import name (gt_challenge_routing). Each seed: generate an instance, run `./solve <instance_dir> <output_dir>` under the tier's limits, check.
-    A timeout, crash or invalid output scores 0; the score is the mean.[/dim]
+    [dim]MODULE is the package's import name (gt_challenge_routing). Each seed: generate an instance, run
+    `./solve <instance_dir> <output_dir>` under the tier's limits, check. A timeout, crash or invalid output scores 0;
+    the score is the mean.[/dim]
     """
     try:
         challenge = importlib.import_module(module)
@@ -155,9 +159,6 @@ def round_command(candidates, public_seed, state_dir, key, registry):
 
     [dim]Prints the scorecard's path and sha256. v0: the dev attestation only proves which key wrote it.[/dim]
     """
-    from gittensor.challenges.attest import DevAttestor  # the scorecard side imports bittensor: only when run
-    from gittensor.challenges.evaluator import Candidate, SandboxUnavailable, run_round
-
     try:
         found = [Candidate(**{**c, 'solver_dir': Path(c['solver_dir'])}) for c in json.loads(candidates.read_text())]
     except (ValueError, TypeError, KeyError) as e:

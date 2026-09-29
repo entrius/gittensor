@@ -5,7 +5,7 @@
 leaderboard, persist the board, and write the attested scorecard. Finding submissions (chain commitments, Hippius
 download, bundle sha256 check) is the caller's; so is choosing the public seed (a block hash after every commit). A
 candidate that cannot be run (its challenge package missing or mismatched, its directory unreadable) scores 0 and is
-logged; the board and the scorecard are always written."""
+logged; with a working sandbox the board and the scorecard are always written."""
 
 from __future__ import annotations
 

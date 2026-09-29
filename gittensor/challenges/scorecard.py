@@ -14,7 +14,7 @@ from collections.abc import Mapping
 
 from gittensor.challenges.leaderboard import Leaderboard, Standing
 from gittensor.challenges.registry import Challenge
-from gittensor.validator.challenge_pool import SCHEMA
+from gittensor.constants import CHALLENGE_SCORECARD_SCHEMA as SCHEMA
 
 TTL_S = 2 * 60 * 60.0
 

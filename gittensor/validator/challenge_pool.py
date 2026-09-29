@@ -19,12 +19,11 @@ from typing import TYPE_CHECKING, Optional
 
 import bittensor as bt
 
+from gittensor.constants import CHALLENGE_SCORECARD_SCHEMA as SCHEMA
 from gittensor.validator.compute_pool import ScorecardPool, pool_from_scorecard
 
 if TYPE_CHECKING:
     from neurons.validator import Validator
-
-SCHEMA = 'gt-challenge-scorecard/1'
 
 
 def challenge_pool_for(self: 'Validator', path: str, now: Optional[float] = None) -> ScorecardPool:

@@ -52,7 +52,8 @@ ALLOWED_SIGNERS_PATH
 PROOF_FILL_RATIO
 PROOF_FILL_FLOOR_RATIO
 
-# Challenge evaluator: the Polaris attestor stub and verify_dev (the validator-side check) are wired after v0
+# Challenge evaluator: the Polaris attestor stub is wired after v0; verify_dev is test-only until the validator
+# verifies attestations
 PolarisAttestor
 verify_dev
 

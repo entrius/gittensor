@@ -1,11 +1,12 @@
 # The MIT License (MIT)
 # Copyright © 2026 Entrius
 
-"""Run one solver on N fresh instances and score it: per seed, ``generate`` -> ``./solve <instance> <output>`` -> ``check``.
+"""Run one solver on N fresh instances and score it: per seed, ``generate`` -> ``./solve <instance> <output>`` ->
+``check``.
 
 Seeds come from a public seed string (a future block hash): ``sha256(f'{public_seed}:{i}')``, so anyone can replay a
-score. ``generate`` writes into private dirs (instance and secret, each its own ``mkdtemp``); the solver gets copies in a
-third: the instance (read-only), an empty output dir, and its own directory (a fresh copy per seed, so no state
+score. ``generate`` writes into private dirs (instance and secret, each its own ``mkdtemp``); the solver gets copies
+in a third: the instance (read-only), an empty output dir, and its own directory (a fresh copy per seed, so no state
 carries). ``check`` reads the private originals plus the output, and output holding a link or a special file scores 0.
 
 The solver runs under bubblewrap: new user, pid, net, ipc and uts namespaces (no network), a read-only root with
@@ -15,8 +16,9 @@ paths (its prefixes and every ``sys.path`` directory, never one holding the temp
 ``PATH=<sys.prefix>/bin:/usr/bin:/bin``, ``HOME=/work``, ``TMPDIR=/tmp`` and ``LANG=C.UTF-8``. Limits: the tier's wall
 time (the sandbox is killed, and every process in its pid namespace with it), ``RLIMIT_AS`` at the tier's
 ``memory_mb`` (address space, not RSS), ``RLIMIT_FSIZE``, ``RLIMIT_NPROC``, and pinned to the first ``SOLVER_CPUS``
-available CPUs (fewer where fewer exist; the count used is recorded with every evaluation). Writes to ``/output`` and ``/work`` and
-the memory of several processes are bounded only per file and per process until the attested container adds a cgroup.
+available CPUs (fewer where fewer exist; the count used is recorded with every evaluation). Writes to ``/output`` and
+``/work`` and the memory of several processes are bounded only per file and per process until the attested container
+adds a cgroup.
 Without a working ``bwrap`` every seed scores 0 ("sandbox unavailable"): never an unsandboxed run. A timeout, crash,
 garbage or unreadable output, or a ``check`` that raises scores 0 for that seed, never an exception.
 
@@ -138,7 +140,7 @@ def sandbox_error() -> str:
     except (OSError, subprocess.TimeoutExpired) as e:
         return str(e)
     if proc.returncode:
-        return proc.stderr.decode(errors='replace').strip()[:200] or f'exit {proc.returncode}'
+        return proc.stderr.decode(errors='replace').strip()[:REASON_CHARS] or f'exit {proc.returncode}'
     return ''
 
 

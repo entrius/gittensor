@@ -8,7 +8,7 @@ Usage:
     gitt config              - Show/set CLI configuration
     gitt miner ...           - Miner commands (check, post, score)
     gitt up / gitt down      - Start / stop the compute agent container
-    gitt challenge ...       - Optimization challenges (eval, submit)
+    gitt challenge ...       - Optimization challenges (eval, submit, round)
 """
 
 import json
@@ -229,7 +229,7 @@ from gittensor.gateway.cli import register_gateway_commands  # noqa: E402
 
 register_gateway_commands(cli)
 
-# Register the challenge pool (gitt challenge eval / submit)
+# Register the challenge pool (gitt challenge eval / submit / round)
 from gittensor.challenges.cli import register_challenge_commands  # noqa: E402
 
 register_challenge_commands(cli)

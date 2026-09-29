@@ -13,11 +13,13 @@ gitt challenge submit [CHALLENGE] --agree-cla   checks attestation.json, opens t
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import re
 import shutil
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 import click
@@ -25,7 +27,7 @@ from rich.markup import escape
 from rich.table import Table
 
 from gittensor.challenges import runner
-from gittensor.challenges.attestation import Attestation, sign_dev
+from gittensor.challenges.attestation import Attestation, dev_pubkey, sign_dev
 from gittensor.challenges.checkout import ATTESTATION, CONFIG, Checkout, repo_name, submission_error
 from gittensor.challenges.head_to_head import Entry, canonical, report, snapshot, solver_sha
 from gittensor.cli.help import StyledGroup
@@ -34,6 +36,7 @@ from gittensor.cli.helpers import console, err_console
 SOLVER_DIR = click.Path(exists=True, file_okay=False, path_type=Path)
 DEV_KEY = Path('~/.gittensor/challenge-dev.key')
 MAIN = 'main'
+BASE = f'upstream/{MAIN}'
 CLA_LINE = (
     '- [x] I agree to the Contributor License Agreement in CLA.md and that this solver is licensed under LICENSING.md.'
 )
@@ -56,6 +59,14 @@ def finalized_block(network: str) -> tuple[int, str]:
     return substrate.get_block_number(block_hash), block_hash.lower().removeprefix('0x')
 
 
+def chain_now(network: str, seed_block: int) -> tuple[int, str]:
+    """The chain's current block number, and the hash of ``seed_block`` (64 lowercase hex)."""
+    import bittensor as bt
+
+    subtensor = bt.Subtensor(network=network)
+    return subtensor.get_current_block(), subtensor.get_block_hash(seed_block).lower().removeprefix('0x')
+
+
 def run(*cmd: str, cwd: Path | None = None, env: dict | None = None) -> str:
     try:
         done = subprocess.run(cmd, cwd=cwd, env=env, check=True, capture_output=True, text=True)
@@ -74,11 +85,41 @@ def github_login(login: str | None) -> str:
 
 
 def fork_and_clone(repo: str, dest: Path) -> None:
-    """Your fork as ``origin`` and the challenge repo as ``upstream``; without ``gh``, a plain clone."""
-    if shutil.which('gh'):
-        run('gh', 'repo', 'fork', repo, '--clone', '--default-branch-only', cwd=dest.parent)
-    else:
-        run('git', 'clone', f'https://github.com/{repo}.git', str(dest))
+    """Your fork as ``origin`` and the challenge repo as ``upstream``."""
+    run('gh', 'repo', 'fork', repo, '--clone', '--default-branch-only', cwd=dest.parent)
+
+
+def git(root: Path, *args: str, env: dict | None = None) -> str:
+    return run('git', *args, cwd=root, env=env)
+
+
+def on_main(root: Path, path: str) -> bool:
+    return subprocess.run(['git', 'cat-file', '-e', f'{BASE}:{path}'], cwd=root, capture_output=True).returncode == 0
+
+
+@dataclass(frozen=True)
+class Upstream:
+    """The challenge repo's ``main``, fetched: what the maintainer judges against."""
+
+    repo: str  # OWNER/NAME
+    config: dict
+    king: str
+    king_sha: str
+
+
+def fetch_upstream(root: Path) -> Upstream:
+    if 'upstream' not in git(root, 'remote').split():
+        raise click.ClickException('no `upstream` remote: clone with `gitt challenge init` so origin is your fork')
+    if not (match := re.search(r'github\.com[:/](.+?)(\.git)?/?$', git(root, 'remote', 'get-url', 'upstream'))):
+        raise click.ClickException('the `upstream` remote is not a GitHub repo')
+    git(root, 'fetch', '--quiet', 'upstream', MAIN)
+    config, king = json.loads(git(root, 'show', f'{BASE}:{CONFIG.as_posix()}')), git(root, 'show', f'{BASE}:KING')
+    return Upstream(match[1], config, king, git(root, 'rev-parse', f'{BASE}:{king}'))
+
+
+def refuse_ignored(root: Path, path: str) -> None:
+    if ignored := git(root, 'ls-files', '--others', '--ignored', '--exclude-standard', '--', path).split():
+        raise click.ClickException(f'{path} holds gitignored files the PR would leave out: {", ".join(ignored)}')
 
 
 def require_checkout(challenge: str | None) -> Checkout:
@@ -113,14 +154,19 @@ def init_command(challenge, login):
         fork_and_clone(repo, dest)
     if not (dest / CONFIG).is_file():
         raise click.ClickException(f'{repo} has no {CONFIG}: not a challenge repo')
-    checkout = Checkout.load(dest)
-    solver = checkout.next_solver_dir(github_login(login))
-    snapshot(checkout.root / checkout.king, solver)
+    fetch_upstream(dest)
+    checkout, login = Checkout.load(dest), github_login(login)
+    mine = checkout.solver_dirs(login)
+    if mine and not on_main(dest, mine[-1].relative_to(dest).as_posix()):
+        solver, note = mine[-1], 'yours, not on main yet'
+    else:
+        solver, note = checkout.next_solver_dir(login), 'a copy of the KING to start from'
+        snapshot(checkout.root / checkout.king, solver)
 
     config = checkout.config
     console.print(f'[bold]{config["challenge_id"]}[/bold] in {dest}\n\n{escape(checkout.summary())}\n')
     console.print(f'KING: {checkout.king}  ·  tier {config["tier"]}: {tier_limits(config)}  ·  {config["seeds"]} seeds')
-    console.print(f'your solver: {solver.relative_to(Path.cwd())} (a copy of the KING to start from)\n')
+    console.print(f'your solver: {solver.relative_to(Path.cwd())} ({note})\n')
     console.print(
         f'next: cd {dest.name}, edit {solver.relative_to(dest)}, then\n'
         '  gitt challenge eval     a free local head to head against KING\n'
@@ -199,7 +245,7 @@ def head_to_head(
     challenger, king = (Entry(sha, r) for sha, r in zip(shas, results))
     try:
         doc = report(module, challenge, tier, seed_block_hash, margin, challenger, king)
-        canonical(doc)
+        canonical(doc)  # refuses a NaN or infinity now, before anything is printed or written
     except ValueError as e:  # a non-finite mean, gain or bound: nothing is written
         raise click.ClickException(f'cannot report: {e}') from e
 
@@ -229,14 +275,29 @@ def head_to_head(
 def attest_command(challenge, dev_key, image, login, network):
     """The official run: your newest solver vs KING with challenge.json's settings on the latest finalized block.
 
-    [dim]Run it in the checkout on the Polaris VM. Writes a signed attestation.json only when the result is a crown,
-    so a loser is never submitted. Signed with a dev key for now; Polaris signing is not wired yet.[/dim]
+    [dim]Run it in the checkout on the Polaris VM. Before running it fetches upstream main and refuses a dev signer its
+    challenge.json does not accept, a KING that is not main's and gitignored files in the solver. Writes a signed
+    attestation.json only when the result is a crown, so a loser is never submitted. Signed with a dev key for now;
+    Polaris signing is not wired yet.[/dim]
     """
     checkout = require_checkout(challenge)
-    config, solver = checkout.config, newest_solver(checkout, github_login(login))
+    root, solver = checkout.root, newest_solver(checkout, github_login(login))
+    upstream, path = fetch_upstream(root), solver.relative_to(root).as_posix()
+    config = upstream.config
+    try:
+        pubkey = dev_pubkey(dev_key)
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
+    if dev_key.expanduser().stat().st_mode & 0o077:
+        err_console.print(f'[yellow]{dev_key} is readable by others: chmod 600 it[/yellow]')
+    if pubkey != config.get('dev_attestation_pubkey'):
+        raise click.ClickException(f'challenge.json on {MAIN} does not accept dev signer {pubkey}: nothing was run')
+    if checkout.king != upstream.king or solver_sha(root / checkout.king) != upstream.king_sha:
+        raise click.ClickException(f"your KING is not {MAIN}'s ({upstream.king}): `git pull upstream {MAIN}` first")
+    refuse_ignored(root, path)
     block, block_hash = finalized_block(network)
-    console.print(f'{solver.relative_to(checkout.root)} vs KING {checkout.king} on block {block}')
-    king = checkout.root / checkout.king
+    console.print(f'{path} vs KING {upstream.king} on block {block}')
+    king = root / upstream.king
     doc = head_to_head(config['module'], solver, king, config['tier'], config['seeds'], block_hash, config['margin'])
     if not doc['crown']:
         invalid = doc['n'] - doc['challenger']['valid']
@@ -244,9 +305,7 @@ def attest_command(challenge, dev_key, image, login, network):
         raise click.ClickException(f'no crown ({why}): nothing written, so nothing to submit')
     att = sign_dev(dev_key, doc, block, image)
     (checkout.root / ATTESTATION).write_text(att.to_json())
-    console.print(f'wrote {ATTESTATION} (dev signer {att.signer["pubkey"]}); next: gitt challenge submit --agree-cla')
-    if att.signer['pubkey'] != config.get('dev_attestation_pubkey'):
-        err_console.print('[yellow]challenge.json does not accept this dev signer: submit will refuse it[/yellow]')
+    console.print(f'wrote {ATTESTATION} (dev signer {pubkey}); next: gitt challenge submit --agree-cla')
 
 
 @challenge_group.command('submit')
@@ -257,8 +316,9 @@ def attest_command(challenge, dev_key, image, login, network):
 def submit_command(challenge, agree_cla, login, network):
     """Check attestation.json as the maintainer will, then open the one-commit PR: your solver + attestation.json.
 
-    [dim]Refuses a signature that does not verify, a non-crown, a run that does not match challenge.json, a solver
-    other than the one attested, a KING that has moved and a seed block older than freshness_blocks.[/dim]
+    [dim]Against upstream main's challenge.json and KING, it refuses a signature that does not verify, a non-crown, a
+    run that does not match challenge.json, a solver other than the one attested, a KING that has moved, a seed block
+    hash that is not the chain's, and a seed block within 5 blocks of freshness_blocks old.[/dim]
     """
     if not agree_cla:
         raise click.ClickException(
@@ -272,38 +332,39 @@ def submit_command(challenge, agree_cla, login, network):
     except (OSError, ValueError) as e:
         raise click.ClickException(f'cannot read {ATTESTATION} ({e}): run `gitt challenge attest` first') from e
 
-    def git(*args: str, env: dict | None = None) -> str:
-        return run('git', *args, cwd=root, env=env)
-
-    if 'upstream' not in git('remote').split():
-        raise click.ClickException('no `upstream` remote: clone with `gitt challenge init` so origin is your fork')
-    if not (match := re.search(r'github\.com[:/](.+?)(\.git)?/?$', git('remote', 'get-url', 'upstream'))):
-        raise click.ClickException('the `upstream` remote is not a GitHub repo')
-    repo = match[1]
-    git('fetch', '--quiet', 'upstream', MAIN)
-    base, path = f'upstream/{MAIN}', solver.relative_to(root).as_posix()
-    king = git('show', f'{base}:KING')
-    king_sha = git('rev-parse', f'{base}:{king}')
-    if subprocess.run(['git', 'cat-file', '-e', f'{base}:{path}'], cwd=root, capture_output=True).returncode == 0:
+    upstream, path = fetch_upstream(root), solver.relative_to(root).as_posix()
+    refuse_ignored(root, path)
+    if on_main(root, path):
         raise click.ClickException(f'{path} is already on {MAIN}: scaffold a new one with `gitt challenge init`')
     with tempfile.TemporaryDirectory() as tmp:  # a private index: the working tree and its index are untouched
         env = {**os.environ, 'GIT_INDEX_FILE': str(Path(tmp, 'index'))}
-        git('read-tree', base, env=env)
-        git('add', '--', path, ATTESTATION, env=env)
-        tree = git('write-tree', env=env)
-    block = finalized_block(network)[0]
-    if error := submission_error(att, checkout.config, git('rev-parse', f'{tree}:{path}'), king_sha, block):
+        git(root, 'read-tree', BASE, env=env)
+        git(root, 'add', '--', path, ATTESTATION, env=env)
+        tree = git(root, 'write-tree', env=env)
+    challenger_sha = git(root, 'rev-parse', f'{tree}:{path}')
+    block, seed_block_hash = chain_now(network, att.seed_block)
+    if error := submission_error(att, upstream.config, challenger_sha, upstream.king_sha, block, seed_block_hash):
         raise click.ClickException(f'not submitted: {error}')
+    try:
+        run('gh', 'auth', 'status')
+    except click.ClickException as e:
+        raise click.ClickException(f'gh cannot open the PR ({e.message}): run `gh auth login`') from e
 
     result, n = att.result, solver.name
     gain = 'the king scored 0' if result['mean_gain'] is None else f'gain {result["mean_gain"]:+.2%}'
     title = f'{result["challenge_id"]}: {login}/{n}, {gain}'
-    commit = git('commit-tree', tree, '-p', base, '-m', title)
-    branch = f'challenge/{login}-{n}'
-    git('push', '--quiet', 'origin', f'{commit}:refs/heads/{branch}')
-    body = f'{path} against KING {king} on seed block {att.seed_block}.\n\n{CLA_LINE}\n'
+    commit, branch = git(root, 'commit-tree', tree, '-p', BASE, '-m', title), f'challenge/{login}-{n}'
+    try:
+        git(root, 'push', '--quiet', 'origin', f'{commit}:refs/heads/{branch}')
+    except click.ClickException as e:
+        if 'rejected' not in e.message:
+            raise
+        raise click.ClickException(f'delete branch {branch} on your fork, then re-run ({e.message})') from e
+    body = f'{path} against KING {upstream.king} on seed block {att.seed_block}.\n\n{CLA_LINE}\n'
     head = f'{login}:{branch}'
-    url = run('gh', 'pr', 'create', '--repo', repo, '--base', MAIN, '--head', head, '--title', title, '--body', body)
+    url = run(
+        'gh', 'pr', 'create', '--repo', upstream.repo, '--base', MAIN, '--head', head, '--title', title, '--body', body
+    )
     console.print(f'opened {url}\nno pushes to {branch} from now on: a push closes the PR')
 
 

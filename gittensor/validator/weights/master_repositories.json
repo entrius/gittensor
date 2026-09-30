@@ -163,6 +163,7 @@
     },
     "maintainer_cut": 0.0,
     "scoring": {
+      "king_of_the_hill": true,
       "pr_lookback_days": 7,
       "standard_issue_multiplier": 1.0,
       "maintainer_issue_multiplier": 1.0,
@@ -171,7 +172,7 @@
         "sigmoid_midpoint_days": 3.33,
         "sigmoid_steepness": 1.2,
         "min_multiplier": 0.0,
-        "absolute_share": true
+        "absolute_share": false
       }
     },
     "trusted_label_pipeline": true

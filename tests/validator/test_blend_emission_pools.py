@@ -63,6 +63,7 @@ def _populate_repo_evaluations(evaluation: MinerEvaluation) -> None:
         open_prs = [pr for pr in evaluation.open_prs if pr.repository_full_name.lower() == repo_name]
         evaluation.repo_evaluations[repo_name] = RepoEvaluation(
             repository_full_name=repo_name,
+            is_eligible=True,
             total_score=max(
                 0.0,
                 sum(pr.earned_score for pr in merged) - sum(pr.collateral_score for pr in open_prs),
@@ -344,6 +345,17 @@ class TestKingOfTheHill:
 
         assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.0)
         assert rewards[_idx(miner_uids, 2)] == pytest.approx(OSS_EMISSION_SHARE)
+
+    def test_ineligible_miner_cannot_take_the_crown(self):
+        repos = {'r/a': _config(emission_share=1.0, issue_discovery_share=0.0, king_of_the_hill=True)}
+        miner_uids = _uids(1, 2)
+        evaluations = self._crowns(older_days=2, newer_days=1)
+        evaluations[2].repo_evaluations['r/a'].is_eligible = False
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids)
+
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(OSS_EMISSION_SHARE)
+        assert rewards[_idx(miner_uids, 2)] == pytest.approx(0.0)
 
     def test_king_outside_lookback_idles_repo(self):
         repos = {'r/a': _config(emission_share=1.0, issue_discovery_share=0.0, king_of_the_hill=True)}

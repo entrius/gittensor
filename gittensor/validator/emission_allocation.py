@@ -109,8 +109,11 @@ def calculate_repo_emission_breakdown(
     ``Σ decayed / Σ undecayed`` of itself (pro-rata by decayed score) and recycles the rest,
     so decay shrinks the payout rather than just reweighting scorers.
 
-    With ``scoring.king_of_the_hill`` only the repo's latest-merged scoring-labelled PR in its
-    lookback window earns (its own decayed score); every other PR in the repo scores 0.
+    With ``scoring.king_of_the_hill`` only the latest crowned PR (scoring label, inside the lookback
+    window) is paid from the repo's PR slice, at its own decayed score; per-PR scores are unchanged.
+    The king is chosen among PRs of repo-eligible miners evaluated this round (registered, fetched):
+    a crown by a non-miner, deregistered or penalized author can't dethrone, so the previous king can
+    keep earning for up to ``pr_lookback_days``. TODO: pick the king from repo-level data before a large share.
     """
     maintainer_map = maintainer_uids_by_repo or {}
 
@@ -171,9 +174,10 @@ def calculate_repo_emission_breakdown(
 
         pr_paid, issue_paid = allocation.pr_slice, allocation.issue_discovery_slice
         if scoring_cfg.time_decay.absolute_share:
-            pr_undecayed, issue_undecayed = _collect_repo_undecayed_totals(miner_evaluations, repo_name, miner_uids)
-            pr_undecayed = pr_undecayed if king_undecayed is None else king_undecayed
-            pr_paid *= _decayed_fraction(pr_total, pr_undecayed)
+            if king_undecayed is None:
+                king_undecayed = _collect_repo_pr_undecayed_total(miner_evaluations, repo_name, miner_uids)
+            issue_undecayed = _collect_repo_issue_undecayed_total(miner_evaluations, repo_name, miner_uids)
+            pr_paid *= _decayed_fraction(pr_total, king_undecayed)
             issue_paid *= _decayed_fraction(issue_total, issue_undecayed)
 
         allocation.pr_rewards, pr_unallocated = _calculate_score_rewards(pr_scores, pr_paid, miner_uids)
@@ -198,12 +202,16 @@ def _collect_king_of_the_hill_score(
 ) -> tuple[Dict[int, float], float]:
     """The king's ``{uid: decayed score}`` and undecayed score; empty when no crowned PR is in the window.
 
-    The king is the latest-merged PR with a scoring label (label multiplier > 0), ties to the higher PR number.
+    The king is the latest-merged PR with a scoring label (label multiplier > 0), ties to the higher PR number,
+    among scoring miners eligible in the repo.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
     crowned = [
         (pr.merged_at, pr.number, uid, pr)
         for uid, evaluation in miner_evaluations.items()
+        if _is_scoring_evaluation(uid, evaluation, miner_uids)
+        and (repo_eval := evaluation.repo_evaluations.get(repo_name)) is not None
+        and repo_eval.is_eligible
         for pr in evaluation.merged_prs
         if pr.repository_full_name.lower() == repo_name
         and pr.label_multiplier > 0
@@ -213,30 +221,38 @@ def _collect_king_of_the_hill_score(
     if not crowned:
         return {}, 0.0
     _, _, uid, king = max(crowned, key=lambda c: (c[0], c[1]))
-    if not _is_scoring_evaluation(uid, miner_evaluations[uid], miner_uids) or king.earned_score <= 0:
+    if king.earned_score <= 0:
         return {}, 0.0
     return {uid: king.earned_score}, king.undecayed_score
 
 
-def _collect_repo_undecayed_totals(
+def _collect_repo_pr_undecayed_total(
     miner_evaluations: Dict[int, MinerEvaluation],
     repo_name: str,
     miner_uids: set[int],
-) -> tuple[float, float]:
-    """Σ undecayed PR and issue-discovery scores across the repo's scoring miners (fully decayed ones included)."""
-    pr_total = issue_total = 0.0
-    for uid, evaluation in miner_evaluations.items():
-        if not _is_scoring_evaluation(uid, evaluation, miner_uids):
-            continue
-        repo_eval = evaluation.repo_evaluations.get(repo_name)
-        if repo_eval is not None:
-            pr_total += repo_eval.undecayed_total_score
-        issue_total += sum(
-            issue.discovery_undecayed_score
-            for issue in evaluation.issue_discovery_issues
-            if issue.repository_full_name.lower() == repo_name
-        )
-    return pr_total, issue_total
+) -> float:
+    """Σ undecayed PR scores across the repo's scoring miners (fully decayed ones included)."""
+    return sum(
+        repo_eval.undecayed_total_score
+        for uid, evaluation in miner_evaluations.items()
+        if _is_scoring_evaluation(uid, evaluation, miner_uids)
+        and (repo_eval := evaluation.repo_evaluations.get(repo_name)) is not None
+    )
+
+
+def _collect_repo_issue_undecayed_total(
+    miner_evaluations: Dict[int, MinerEvaluation],
+    repo_name: str,
+    miner_uids: set[int],
+) -> float:
+    """Σ undecayed issue-discovery scores across the repo's scoring miners (fully decayed ones included)."""
+    return sum(
+        issue.discovery_undecayed_score
+        for uid, evaluation in miner_evaluations.items()
+        if _is_scoring_evaluation(uid, evaluation, miner_uids)
+        for issue in evaluation.issue_discovery_issues
+        if issue.repository_full_name.lower() == repo_name
+    )
 
 
 def _calculate_score_rewards(

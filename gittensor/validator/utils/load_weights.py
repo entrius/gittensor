@@ -139,7 +139,10 @@ class ResolvedScoring:
     maintainer_issue_multiplier: float
     src_tok_saturation_scale: float
     time_decay: ResolvedTimeDecay
-    # When True only the latest-merged scoring-labelled PR in the lookback window earns; every other PR scores 0.
+    # When True only the latest crowned PR (scoring label, in the lookback window) is paid from the repo's PR slice;
+    # per-PR scores are unchanged. The king is picked among PRs of repo-eligible miners evaluated this round, so a
+    # non-miner / deregistered / penalized crown can't dethrone and the previous king can keep earning for up to
+    # pr_lookback_days. TODO: pick the king from repo-level data before a large share.
     king_of_the_hill: bool = False
 
 

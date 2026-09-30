@@ -10,7 +10,14 @@ from datetime import datetime
 import pytest
 
 from gittensor.challenges.attestation import sign_dev
-from gittensor.challenges.checkout import ATTESTATION, pr_body, submission_error
+from gittensor.challenges.checkout import (
+    ATTESTATION,
+    SOURCE_FILE_BYTES,
+    dir_files,
+    pr_body,
+    source_error,
+    submission_error,
+)
 from gittensor.challenges.head_to_head import Entry, report
 from gittensor.challenges.runner import SeedResult
 from gittensor.challenges.verify import Chain, Config, PullRequest, Repo, decide
@@ -103,3 +110,22 @@ def test_what_submit_accepts_the_maintainer_crowns(tmp_path):
 
     assert submission_error(att, config, CHALLENGER, KING, 1010, 'ab' * 32) is None
     assert decide(pr, repo, lambda seed_block: Chain(1010, 'ab' * 32), config).decision == 'crown'
+
+
+@pytest.mark.parametrize(
+    'add, reason',
+    [
+        (lambda d: None, None),
+        (lambda d: (d / 'a.out').write_bytes(b'\x7fELF\x02\x01\x01\x00'), 'a.out is binary'),
+        (lambda d: (d / 'latin1.py').write_bytes('# café'.encode('latin-1')), 'latin1.py is binary'),
+        (lambda d: (d / 'big.txt').write_text('x' * (SOURCE_FILE_BYTES + 1)), 'big.txt is 1048577 bytes'),
+        (lambda d: (d / 'lib').symlink_to('/usr/lib'), 'lib is a symlink'),
+        (lambda d: (d / 'solve').write_text('echo no shebang'), 'solve is not a script'),
+        (lambda d: (d / '__pycache__').mkdir() or (d / '__pycache__' / 'x.pyc').write_bytes(b'\0'), None),
+    ],
+)
+def test_a_solver_is_source_only(solver, add, reason):
+    add(path := solver('good'))
+    error = source_error(dir_files(path))
+
+    assert error.startswith(reason) if reason else error is None

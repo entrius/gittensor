@@ -3,17 +3,23 @@
 
 """A challenge repo's layout (G.1), defined once for the miner's commands and the maintainer's: ``.gittensor/
 challenge.json``, ``KING``, ``solvers/<login>/<n>/`` and the PR's ``attestation.json`` and CLA line. Plus a miner's
-clone of it, and the checks ``gitt challenge submit`` runs before opening the PR."""
+clone of it, the checks ``gitt challenge submit`` runs before opening the PR, and the source-only rule every solver
+meets (``source_error``), checked by eval, attest, submit and verify alike."""
 
 from __future__ import annotations
 
 import json
+import os
 import re
+import stat
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from gittensor.challenges.attestation import DEV, Attestation, verify
+from gittensor.challenges.head_to_head import SKIPPED
+from gittensor.challenges.runner import BUILD, SOLVE
 
 if TYPE_CHECKING:
     from gittensor.challenges.verify import Config
@@ -27,6 +33,10 @@ CLA_TEXT = 'I agree to the Contributor License Agreement in CLA.md and that this
 CLA_LINE = f'- [x] {CLA_TEXT}'
 OWNER = 'entrius'
 SLACK_BLOCKS = 5  # the PR opens a few blocks after submit checks freshness
+SOURCE_FILES = 500
+SOURCE_FILE_BYTES = 1 << 20
+SOURCE_DIR_BYTES = 4 << 20
+TEXT_MODES = ('100644', '100755')  # git's modes for a regular file; a symlink is 120000, a submodule 160000
 
 
 def normalize_hash(value: str) -> str:
@@ -82,6 +92,63 @@ class Checkout:
         readme = self.root / 'README.md'
         paragraphs = readme.read_text().split('\n\n') if readme.is_file() else []
         return next((p.strip() for p in paragraphs if p.strip() and not p.lstrip().startswith('#')), '')
+
+
+@dataclass(frozen=True)
+class SourceFile:
+    """One file of a solver, from a directory, a git tree or the GitHub API alike."""
+
+    path: str  # relative to the solver dir
+    mode: str  # git's; anything not in TEXT_MODES is a link or special file
+    size: int
+    read: Callable[[], bytes]  # called only once the sizes pass
+
+
+def source_error(files: Iterable[SourceFile]) -> str | None:
+    """Why the solver is not source only, or ``None``. Source only: at most ``SOURCE_FILES`` regular files (no
+    symlinks, submodules or special files), each valid UTF-8 without NUL bytes and at most ``SOURCE_FILE_BYTES``,
+    ``SOURCE_DIR_BYTES`` in all; ``solve``, and ``build`` if there is one, scripts with a shebang at the root."""
+    count = total = 0
+    scripts = {}
+    for f in files:
+        count, total = count + 1, total + f.size
+        if count > SOURCE_FILES:
+            return f'more than {SOURCE_FILES} files'
+        if f.mode not in TEXT_MODES:
+            return f'{f.path} is a symlink or special file: source only'
+        if f.size > SOURCE_FILE_BYTES:
+            return f'{f.path} is {f.size} bytes, over the {SOURCE_FILE_BYTES} per file'
+        if total > SOURCE_DIR_BYTES:
+            return f'over {SOURCE_DIR_BYTES} bytes in all'
+        if not is_text(data := f.read()):
+            return f'{f.path} is binary: source only (UTF-8 text without NUL bytes)'
+        if f.path in (SOLVE, BUILD):
+            scripts[f.path] = data
+    if SOLVE not in scripts:
+        return f'no {SOLVE} script'
+    unmarked = [name for name, data in scripts.items() if not data.startswith(b'#!')]
+    return f'{unmarked[0]} is not a script: start it with a shebang (#!)' if unmarked else None
+
+
+def is_text(data: bytes) -> bool:
+    try:
+        data.decode()
+    except UnicodeDecodeError:
+        return False
+    return b'\0' not in data
+
+
+def dir_files(root: Path, sub: str = '') -> Iterator[SourceFile]:
+    """The files under ``root`` in name order, without ``SKIPPED`` names."""
+    for entry in sorted(os.scandir(root / sub), key=lambda e: e.name):
+        if entry.name in SKIPPED:
+            continue
+        path, st = f'{sub}{entry.name}', entry.stat(follow_symlinks=False)
+        if stat.S_ISDIR(st.st_mode):
+            yield from dir_files(root, f'{path}/')
+        else:
+            mode = ('100755' if st.st_mode & stat.S_IXUSR else '100644') if stat.S_ISREG(st.st_mode) else 'special'
+            yield SourceFile(path, mode, st.st_size, (root / path).read_bytes)
 
 
 def side(result: dict, name: str) -> dict:

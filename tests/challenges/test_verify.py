@@ -108,6 +108,7 @@ def scored(factor):
         ({'pr': {'changed_files': 3001}}, 'close', 'scope'),
         ({'pr': {'files': ['attestation.json', 'solvers/miner/2/solve']}}, 'close', 'scope'),
         ({'pr': {'solver_files': [*FILES, BINARY]}}, 'close', 'source'),
+        ({'pr': {'solver_truncated': True}}, 'close', 'source'),
         ({'config': {'dev_attestation_pubkey': '00' * 32}}, 'close', 'signature'),
         ({'seed_block': 900}, 'close', 'seed'),
         ({'chain': {'seed_block_hash': 'cd' * 32}}, 'close', 'seed'),
@@ -187,6 +188,18 @@ def test_a_pr_tree_with_a_symlink_or_a_binary_blob_is_not_source_only(monkeypatc
     monkeypatch.setattr(verify_module, 'api', responses.__getitem__)
     link = {'path': 'lib/fast.so', 'mode': '120000', 'type': 'blob', 'sha': 'b', 'size': 4}
 
-    assert (source_error(verify_module.tree_files('o/r', 'x')) or '').startswith('lib/fast.so is binary')
+    def error():
+        files, truncated = verify_module.tree_files('o/r', 'x')
+        return 'truncated' if truncated else source_error(files) or ''
+
+    assert error().startswith('lib/fast.so is binary')
     tree[2] = link
-    assert (source_error(verify_module.tree_files('o/r', 'x')) or '').startswith('lib/fast.so is a symlink')
+    assert error().startswith('lib/fast.so is a symlink')
+    responses['repos/o/r/git/trees/x?recursive=1']['truncated'] = True
+    assert error() == 'truncated'
+
+
+def test_a_truncated_tree_listing_closes_the_pr(key):
+    verdict = judge(key, pr={'solver_truncated': True})
+
+    assert verdict.reason == 'solvers/miner/1 is not source only: tree listing truncated'

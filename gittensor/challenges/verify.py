@@ -92,6 +92,7 @@ class PullRequest:
     attestation: str | None = None  # attestation.json at the head, as committed
     solver_sha: str | None = None  # the head's tree sha of the solver dir
     solver_files: list[SourceFile] = field(default_factory=list)  # that tree's files, read only when checked
+    solver_truncated: bool = False  # GitHub listed that tree only in part
 
     @property
     def paths(self) -> list[str]:
@@ -179,7 +180,7 @@ def decide(pr: PullRequest, repo: Repo, chain: Callable[[int], Chain], config: C
     scope = solver if scoped else f'may change only solvers/{pr.author}/<unused n>/'
     if not passed('scope', scoped, f'{scope} and {ATTESTATION}'):
         return stop('close')
-    unsourced = source_error(pr.solver_files)
+    unsourced = 'tree listing truncated' if pr.solver_truncated else source_error(pr.solver_files)
     if not passed('source', not unsourced, f'{solver} is not source only: {unsourced}' if unsourced else 'source only'):
         return stop('close')
     try:
@@ -309,15 +310,15 @@ def raw(repo: str, path: str, ref: str) -> str | None:
         raise
 
 
-def tree_files(repo: str, sha: str) -> list[SourceFile]:
-    """The files of tree ``sha``, each fetched only when read. A truncated listing still holds far more than
-    ``SOURCE_FILES``."""
-    entries = api(f'repos/{repo}/git/trees/{sha}?recursive=1')['tree']
-    return [
+def tree_files(repo: str, sha: str) -> tuple[list[SourceFile], bool]:
+    """The files of tree ``sha``, each fetched only when read, and whether GitHub truncated the listing."""
+    listing = api(f'repos/{repo}/git/trees/{sha}?recursive=1')
+    files = [
         SourceFile(e['path'], e['mode'], e.get('size', 0), partial(blob, repo, e['sha']))
-        for e in entries
+        for e in listing['tree']
         if e['type'] != 'tree'
     ]
+    return files, listing['truncated']
 
 
 def blob(repo: str, sha: str) -> bytes:
@@ -373,13 +374,15 @@ def with_files(repo: str, pr: PullRequest) -> PullRequest:
     solver = solver_dir(files + renamed_from, pr.author)
     parent, name = solver.rsplit('/', 1) if solver else ('', '')
     sha = subdirs(repo, parent, pr.head).get(name) if solver else None
+    solver_files, truncated = tree_files(repo, sha) if sha else ([], False)
     return replace(
         pr,
         files=files,
         renamed_from=renamed_from,
         attestation=raw(repo, ATTESTATION, pr.head),
         solver_sha=sha,
-        solver_files=tree_files(repo, sha) if sha else [],
+        solver_files=solver_files,
+        solver_truncated=truncated,
     )
 
 

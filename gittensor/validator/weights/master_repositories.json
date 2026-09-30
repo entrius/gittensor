@@ -41,7 +41,7 @@
       "min_valid_merged_prs": 1,
       "min_valid_solved_issues": 0
     },
-    "emission_share": 0.1,
+    "emission_share": 0.2,
     "fixed_base_score": 1.0,
     "issue_discovery_share": 0.0,
     "label_multipliers": {

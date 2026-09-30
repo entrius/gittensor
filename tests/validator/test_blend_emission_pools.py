@@ -4,9 +4,9 @@
 """Regression tests for repo-bounded round allocation.
 
 These cover the allocation scenarios required by issue #1215: repo slices cap
-PR throughput, ineligible/empty slices redistribute across eligible repos by
-weight to fill the configured pool, PR/issue sub-slices spill only within a repo,
-registry slack recycles, and the fixed recycle baseline is gone.
+PR throughput, ineligible/empty slices recycle (nothing pools across repos),
+PR/issue sub-slices spill only within a repo, registry slack recycles, and the
+fixed recycle baseline is gone.
 """
 
 import sys
@@ -224,7 +224,7 @@ class TestOpenPrCollateralAllocation:
 
 
 class TestCrossRepoIsolation:
-    def test_empty_repo_slice_redistributes_to_eligible_repo(self):
+    def test_idle_repo_recycles_active_repo_gets_exactly_its_own_slice(self):
         repos = {
             'r/active': _config(emission_share=0.4, issue_discovery_share=0.0),
             'r/empty': _config(emission_share=0.6, issue_discovery_share=0.0),
@@ -234,10 +234,10 @@ class TestCrossRepoIsolation:
 
         rewards = blend_emission_pools(evaluations, repos, miner_uids)
 
-        assert rewards[_idx(miner_uids, 1)] == pytest.approx(OSS_EMISSION_SHARE)
-        assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(0.0)
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.4 * OSS_EMISSION_SHARE)
+        assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(0.6 * OSS_EMISSION_SHARE)
 
-    def test_empty_repo_slice_redistributes_by_eligible_weight(self):
+    def test_active_repos_never_absorb_idle_share(self):
         repos = {
             'r/a': _config(emission_share=0.3, issue_discovery_share=0.0),
             'r/b': _config(emission_share=0.1, issue_discovery_share=0.0),
@@ -251,11 +251,9 @@ class TestCrossRepoIsolation:
 
         rewards = blend_emission_pools(evaluations, repos, miner_uids)
 
-        # r/empty's 0.6 is split across the eligible repos by their relative weight
-        # (0.3 : 0.1), preserving the 3:1 ratio while filling the full OSS pool.
-        assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.75 * OSS_EMISSION_SHARE)
-        assert rewards[_idx(miner_uids, 2)] == pytest.approx(0.25 * OSS_EMISSION_SHARE)
-        assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(0.0)
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.3 * OSS_EMISSION_SHARE)
+        assert rewards[_idx(miner_uids, 2)] == pytest.approx(0.1 * OSS_EMISSION_SHARE)
+        assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(0.6 * OSS_EMISSION_SHARE)
 
 
 class TestFailedEvaluationFiltering:
@@ -659,10 +657,9 @@ class TestMaintainerCut:
 
         assert float(rewards.sum()) == pytest.approx(1.0)
 
-    def test_maintainer_cut_not_inflated_by_redistribution(self):
-        # Maintainer-only repo (no scorers) coexisting with an active repo and a dead
-        # repo: the maintainer is paid the base-rate cut and nothing more, while the
-        # maintainer-only repo's miner half flows to the active scorer. Zero burn.
+    def test_maintainer_only_repo_scoring_half_recycles(self):
+        # Maintainer-only repo (no scorers) beside an active and a dead repo: the maintainer
+        # gets the cut, the maintainer-only repo's scoring half and the dead repo recycle.
         repos = {
             'r/maint': _config(emission_share=0.4, issue_discovery_share=0.0, maintainer_cut=0.5),
             'r/active': _config(emission_share=0.4, issue_discovery_share=0.0),
@@ -676,11 +673,9 @@ class TestMaintainerCut:
 
         rewards = blend_emission_pools(evaluations, repos, miner_uids, {'r/maint': [1]})
 
-        # Maintainer: base rate 0.5 * 0.4, NOT scaled by the 2x scoring multiplier.
         assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.5 * 0.4 * OSS_EMISSION_SHARE)
-        # Active scorer absorbs the entire scoring pool (its own + maint half + dead).
-        assert rewards[_idx(miner_uids, 2)] == pytest.approx(0.8 * OSS_EMISSION_SHARE)
-        assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(0.0)
+        assert rewards[_idx(miner_uids, 2)] == pytest.approx(0.4 * OSS_EMISSION_SHARE)
+        assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(0.4 * OSS_EMISSION_SHARE)
 
     def test_maintainer_only_repo_recycles_scoring_when_nothing_active(self):
         # No active scorers anywhere: maintainer still paid base rate, scoring recycles.

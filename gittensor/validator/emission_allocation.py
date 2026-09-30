@@ -100,43 +100,15 @@ def calculate_repo_emission_breakdown(
 ) -> Iterator[RepoEmissionAllocation]:
     """Return per-repository reward allocation details without adding recycle slack.
 
-    Two independent piles: the maintainer cut is paid at the repo's *base* rate
-    (``maintainer_cut * emission_share * OSS``) and is never scaled, so a maintainer's
-    take cannot be inflated by other repos going dead. Everything else forms a
-    subnet-wide scoring pool released only to repos with PR/issue scorers this round,
-    weighted by their post-cut scoring share. Ineligible/empty scoring shares thus flow
-    to active scorers instead of recycling; with no active repos the scoring pool
-    recycles. Registry slack (configured shares < 1.0) recycles either way.
+    Each repo pays only its own ``emission_share * OSS`` slice; nothing pools across repos.
+    The maintainer cut comes off the top; the scoring remainder goes to the repo's PR/issue
+    scorers, and recycles when the repo has none this round.
     """
     maintainer_map = maintainer_uids_by_repo or {}
 
-    # Pass 1: classify each repo and size the scoring pool vs the active scoring share.
-    plans: list[tuple[str, RepositoryConfig, list[int], float, bool]] = []
-    total_scoring_share = 0.0
-    active_scoring_share = 0.0
     for repo_name, repo_config in master_repositories.items():
         if repo_config.emission_share <= 0:
             continue
-        eligible_maintainers = (
-            [uid for uid in (maintainer_map.get(repo_name) or []) if uid in miner_uids]
-            if repo_config.maintainer_cut > 0.0
-            else []
-        )
-        cut_fraction = repo_config.maintainer_cut if eligible_maintainers else 0.0
-        scoring_share = repo_config.emission_share * (1.0 - cut_fraction)
-        is_active = _repo_has_scorers(miner_evaluations, repo_name, repo_config, miner_uids)
-
-        total_scoring_share += scoring_share
-        if is_active:
-            active_scoring_share += scoring_share
-        plans.append((repo_name, repo_config, eligible_maintainers, scoring_share, is_active))
-
-    # The scoring pool is released to active repos pro-rata by scoring share; with none
-    # active the pool recycles (multiplier 0 routes each repo's scoring share to recycle).
-    scoring_multiplier = total_scoring_share / active_scoring_share if active_scoring_share > 0 else 0.0
-
-    # Pass 2: emit per-repo allocations.
-    for repo_name, repo_config, eligible_maintainers, scoring_share, is_active in plans:
         allocation = RepoEmissionAllocation(
             repository_full_name=repo_name,
             emission_share=repo_config.emission_share,
@@ -145,7 +117,13 @@ def calculate_repo_emission_breakdown(
             maintainer_cut=repo_config.maintainer_cut,
         )
 
-        # Maintainer pile: base-rate carve-out split evenly among registered maintainers.
+        # Maintainer carve-out split evenly among registered maintainers.
+        eligible_maintainers = (
+            [uid for uid in (maintainer_map.get(repo_name) or []) if uid in miner_uids]
+            if repo_config.maintainer_cut > 0.0
+            else []
+        )
+        cut_fraction = repo_config.maintainer_cut if eligible_maintainers else 0.0
         if eligible_maintainers:
             carve_out = repo_config.maintainer_cut * repo_config.emission_share * OSS_EMISSION_SHARE
             per_maintainer = carve_out / len(eligible_maintainers)
@@ -157,15 +135,7 @@ def calculate_repo_emission_breakdown(
             miner_evaluations, repo_name, miner_uids
         )
 
-        if not is_active:
-            # Inactive repo's scoring share is redistributed to active repos; it only
-            # recycles when nothing is active anywhere.
-            if active_scoring_share <= 0:
-                allocation.recycled_amount += scoring_share * OSS_EMISSION_SHARE
-            yield allocation
-            continue
-
-        scoring_slice = scoring_share * OSS_EMISSION_SHARE * scoring_multiplier
+        scoring_slice = repo_config.emission_share * (1.0 - cut_fraction) * OSS_EMISSION_SHARE
         issue_share = repo_config.issue_discovery_share
         pr_scores = allocation.pr_scores if issue_share < 1.0 else {}
         issue_scores = allocation.issue_discovery_scores if issue_share > 0.0 else {}
@@ -177,8 +147,12 @@ def calculate_repo_emission_breakdown(
             allocation.issue_discovery_slice = scoring_slice * issue_share
         elif pr_total > 0:
             allocation.pr_slice = scoring_slice
-        else:
+        elif issue_total > 0:
             allocation.issue_discovery_slice = scoring_slice
+        else:
+            allocation.recycled_amount += scoring_slice
+            yield allocation
+            continue
 
         allocation.pr_rewards, pr_unallocated = _calculate_score_rewards(pr_scores, allocation.pr_slice, miner_uids)
         allocation.issue_discovery_rewards, issue_unallocated = _calculate_score_rewards(
@@ -186,25 +160,6 @@ def calculate_repo_emission_breakdown(
         )
         allocation.recycled_amount += pr_unallocated + issue_unallocated
         yield allocation
-
-
-def _repo_has_scorers(
-    miner_evaluations: Dict[int, MinerEvaluation],
-    repo_name: str,
-    repo_config: RepositoryConfig,
-    miner_uids: set[int],
-) -> bool:
-    """True when the repo has a scorer on a side that pays out (mirrors the split gates).
-
-    Maintainer presence alone does NOT make a repo active: a maintainer-only repo pays
-    its base-rate cut but its scoring share is redistributed to repos that did work.
-    """
-    issue_share = repo_config.issue_discovery_share
-    if issue_share < 1.0 and _collect_repo_pr_scores(miner_evaluations, repo_name, miner_uids):
-        return True
-    if issue_share > 0.0 and _collect_repo_issue_discovery_scores(miner_evaluations, repo_name, miner_uids):
-        return True
-    return False
 
 
 def _calculate_score_rewards(

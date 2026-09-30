@@ -10,8 +10,8 @@ gitt challenge attest [CHALLENGE]               the official run: writes attesta
 gitt challenge submit [CHALLENGE] --agree-cla   checks attestation.json, opens the one-commit PR
 gitt challenge verify --repo OWNER/NAME --pr N  the maintainer's verdict on a PR; --apply carries it out
 
-A solver is source only: text files (UTF-8, no NUL bytes) under size caps, no symlinks, and an executable `solve` script.
-A compiled solver adds a `build` script, run once in the sandbox before the seeds and untimed; `solve` runs its output.
+A solver is source only: text files (UTF-8, no NUL bytes) under size caps, no symlinks, and a `solve` script. A
+compiled solver adds a `build` script, run once in the sandbox before the seeds and untimed; `solve` runs its output.
 """
 
 from __future__ import annotations
@@ -240,8 +240,8 @@ def eval_command(module, challenger_dir, king_dir, tier, seeds, seed_block_hash,
     MODULE is the package's import name (gt_challenge_intents). Seed i is sha256('<hash>:i'); each instance is
     generated once and both solvers run `./solve <instance_dir> <output_dir>` on it in turn, sandboxed under the
     tier's limits. Both must be source only; a `build` script, if any, runs once first (untimed, 300 s at most) and its
-    failure scores every seed 0. A timeout, crash or invalid output scores 0. The challenger takes the crown when every one of its
-    seeds is valid and the 99% lower bound of its mean gain over the king is at least the margin.[/dim]
+    failure scores every seed 0. A timeout, crash or invalid output scores 0. The challenger takes the crown when every
+    one of its seeds is valid and the 99% lower bound of its mean gain over the king is at least the margin.[/dim]
     """
     if challenger_dir:
         if not (king_dir and seed_block_hash):

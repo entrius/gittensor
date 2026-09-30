@@ -9,10 +9,11 @@ writes into private dirs (instance and secret, each its own ``mkdtemp``); each s
 instance (read-only), an empty output dir, and its own directory (a fresh copy per seed and solver, so no state
 carries). ``check`` reads the private originals plus the output, and output holding a link or a special file scores 0.
 
-A solver is source only (``checkout.source_error``); one that compiles ships a ``build`` script at its root. It runs once
-per solver, before any seed, in the solver's own directory (in place: callers pass a private snapshot, hashed before
-the build) under the same sandbox with ``BUILD_TIME_LIMIT_S`` and ``BUILD_MEMORY_MB``, untimed for scoring. What it
-writes there is what every seed's copy runs. A build that fails or times out scores every seed 0 ("build failed").
+A solver is source only (``checkout.source_error``); one that compiles ships a ``build`` script at its root. It runs
+once per solver, before any seed, in the solver's own directory (in place: callers pass a private snapshot, hashed
+before the build) under the same sandbox with ``BUILD_TIME_LIMIT_S`` and ``BUILD_MEMORY_MB``, untimed for scoring.
+What it writes there is what every seed's copy runs. A build that fails or times out scores every seed 0 ("build
+failed").
 
 The solver runs under bubblewrap: new user, pid, net, ipc and uts namespaces (no network), a read-only root with
 ``/usr`` and the loader, size-capped ``/tmp`` and ``/dev/shm``, and the evaluator's own Python read-only at the same

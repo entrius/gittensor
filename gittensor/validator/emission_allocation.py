@@ -3,6 +3,7 @@
 
 """Round-level emission allocation by repository emission shares."""
 
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Dict, Iterator, Optional
 
 import bittensor as bt
@@ -14,7 +15,7 @@ from gittensor.constants import (
     OSS_EMISSION_SHARE,
     RECYCLE_UID,
 )
-from gittensor.validator.utils.load_weights import RepositoryConfig
+from gittensor.validator.utils.load_weights import RepositoryConfig, resolve_scoring
 
 if TYPE_CHECKING:
     from gittensor.validator.compute_pool import ComputePool
@@ -107,6 +108,9 @@ def calculate_repo_emission_breakdown(
     With ``scoring.time_decay.absolute_share`` each sub-slice pays out only
     ``Σ decayed / Σ undecayed`` of itself (pro-rata by decayed score) and recycles the rest,
     so decay shrinks the payout rather than just reweighting scorers.
+
+    With ``scoring.king_of_the_hill`` only the repo's latest-merged scoring-labelled PR in its
+    lookback window earns (its own decayed score); every other PR in the repo scores 0.
     """
     maintainer_map = maintainer_uids_by_repo or {}
 
@@ -134,7 +138,14 @@ def calculate_repo_emission_breakdown(
             allocation.maintainer_carve_out = carve_out
             allocation.maintainer_rewards = {uid: per_maintainer for uid in eligible_maintainers}
 
-        allocation.pr_scores = _collect_repo_pr_scores(miner_evaluations, repo_name, miner_uids)
+        scoring_cfg = resolve_scoring(repo_config.scoring)
+        king_undecayed: Optional[float] = None
+        if scoring_cfg.king_of_the_hill:
+            allocation.pr_scores, king_undecayed = _collect_king_of_the_hill_score(
+                miner_evaluations, repo_name, miner_uids, scoring_cfg.pr_lookback_days
+            )
+        else:
+            allocation.pr_scores = _collect_repo_pr_scores(miner_evaluations, repo_name, miner_uids)
         allocation.issue_discovery_scores = _collect_repo_issue_discovery_scores(
             miner_evaluations, repo_name, miner_uids
         )
@@ -159,8 +170,9 @@ def calculate_repo_emission_breakdown(
             continue
 
         pr_paid, issue_paid = allocation.pr_slice, allocation.issue_discovery_slice
-        if repo_config.scoring.time_decay.absolute_share:
+        if scoring_cfg.time_decay.absolute_share:
             pr_undecayed, issue_undecayed = _collect_repo_undecayed_totals(miner_evaluations, repo_name, miner_uids)
+            pr_undecayed = pr_undecayed if king_undecayed is None else king_undecayed
             pr_paid *= _decayed_fraction(pr_total, pr_undecayed)
             issue_paid *= _decayed_fraction(issue_total, issue_undecayed)
 
@@ -176,6 +188,34 @@ def calculate_repo_emission_breakdown(
 def _decayed_fraction(decayed_total: float, undecayed_total: float) -> float:
     """Share of a sub-slice an ``absolute_share`` repo pays out: Σ decayed / Σ undecayed, capped at 1."""
     return decayed_total / max(decayed_total, undecayed_total) if decayed_total > 0 else 0.0
+
+
+def _collect_king_of_the_hill_score(
+    miner_evaluations: Dict[int, MinerEvaluation],
+    repo_name: str,
+    miner_uids: set[int],
+    lookback_days: int,
+) -> tuple[Dict[int, float], float]:
+    """The king's ``{uid: decayed score}`` and undecayed score; empty when no crowned PR is in the window.
+
+    The king is the latest-merged PR with a scoring label (label multiplier > 0), ties to the higher PR number.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+    crowned = [
+        (pr.merged_at, pr.number, uid, pr)
+        for uid, evaluation in miner_evaluations.items()
+        for pr in evaluation.merged_prs
+        if pr.repository_full_name.lower() == repo_name
+        and pr.label_multiplier > 0
+        and pr.merged_at is not None
+        and pr.merged_at >= cutoff
+    ]
+    if not crowned:
+        return {}, 0.0
+    _, _, uid, king = max(crowned, key=lambda c: (c[0], c[1]))
+    if not _is_scoring_evaluation(uid, miner_evaluations[uid], miner_uids) or king.earned_score <= 0:
+        return {}, 0.0
+    return {uid: king.earned_score}, king.undecayed_score
 
 
 def _collect_repo_undecayed_totals(

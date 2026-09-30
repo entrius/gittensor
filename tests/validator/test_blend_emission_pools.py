@@ -10,7 +10,7 @@ PR/issue sub-slices spill only within a repo, registry slack recycles, and
 """
 
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -77,8 +77,8 @@ def _populate_repo_evaluations(evaluation: MinerEvaluation) -> None:
         )
 
 
-def _scored_pr(repo: str, number: int, earned_score: float) -> ScoredPR:
-    now = datetime.now(timezone.utc)
+def _scored_pr(repo: str, number: int, earned_score: float, merged_at: datetime | None = None) -> ScoredPR:
+    now = merged_at or datetime.now(timezone.utc)
     pr = MirrorPullRequest(
         repo_full_name=repo,
         pr_number=number,
@@ -111,8 +111,8 @@ def _scored_pr(repo: str, number: int, earned_score: float) -> ScoredPR:
     return ScoredPR(pr=pr, earned_score=earned_score, undecayed_score=earned_score)
 
 
-def _decayed_pr(repo: str, number: int, decay: float) -> ScoredPR:
-    scored = _scored_pr(repo, number, earned_score=0.0)
+def _decayed_pr(repo: str, number: int, decay: float, merged_at: datetime | None = None) -> ScoredPR:
+    scored = _scored_pr(repo, number, earned_score=0.0, merged_at=merged_at)
     scored.base_score = 1.0
     scored.time_decay_multiplier = decay
     scored.calculate_final_earned_score()
@@ -140,12 +140,15 @@ def _config(
     issue_discovery_share: float = 0.5,
     maintainer_cut: float = 0.0,
     absolute_share: bool = False,
+    king_of_the_hill: bool = False,
 ) -> RepositoryConfig:
     return RepositoryConfig(
         emission_share=emission_share,
         issue_discovery_share=issue_discovery_share,
         maintainer_cut=maintainer_cut,
-        scoring=RepoScoringConfig(time_decay=RepoTimeDecayConfig(absolute_share=absolute_share)),
+        scoring=RepoScoringConfig(
+            king_of_the_hill=king_of_the_hill, time_decay=RepoTimeDecayConfig(absolute_share=absolute_share)
+        ),
     )
 
 
@@ -323,6 +326,58 @@ class TestAbsoluteShare:
 
         assert rewards[_idx(miner_uids, 1)] == pytest.approx(OSS_EMISSION_SHARE)
         assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(0.0)
+
+
+class TestKingOfTheHill:
+    def _crowns(self, older_days: float, newer_days: float):
+        now = datetime.now(timezone.utc)
+        return {
+            1: _evaluation(1, prs=[_scored_pr('r/a', 1, 10.0, merged_at=now - timedelta(days=older_days))]),
+            2: _evaluation(2, prs=[_scored_pr('r/a', 2, 10.0, merged_at=now - timedelta(days=newer_days))]),
+        }
+
+    def test_only_latest_crown_earns_the_slice(self):
+        repos = {'r/a': _config(emission_share=1.0, issue_discovery_share=0.0, king_of_the_hill=True)}
+        miner_uids = _uids(1, 2)
+
+        rewards = blend_emission_pools(self._crowns(older_days=2, newer_days=1), repos, miner_uids)
+
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.0)
+        assert rewards[_idx(miner_uids, 2)] == pytest.approx(OSS_EMISSION_SHARE)
+
+    def test_king_outside_lookback_idles_repo(self):
+        repos = {'r/a': _config(emission_share=1.0, issue_discovery_share=0.0, king_of_the_hill=True)}
+        miner_uids = _uids(1, 2)
+
+        rewards = blend_emission_pools(self._crowns(older_days=60, newer_days=40), repos, miner_uids)
+
+        assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(OSS_EMISSION_SHARE)
+
+    def test_composes_with_absolute_share(self):
+        repos = {
+            'r/a': _config(emission_share=1.0, issue_discovery_share=0.0, absolute_share=True, king_of_the_hill=True)
+        }
+        miner_uids = _uids(1, 2)
+        now = datetime.now(timezone.utc)
+        evaluations = {
+            1: _evaluation(1, prs=[_decayed_pr('r/a', 1, decay=1.0, merged_at=now)]),
+            2: _evaluation(2, prs=[_decayed_pr('r/a', 2, decay=0.9, merged_at=now)]),
+        }
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids)
+
+        # Same merged_at: the higher PR number is king, paid its own 0.9, not pooled with the other crown.
+        assert rewards[_idx(miner_uids, 2)] == pytest.approx(0.9 * OSS_EMISSION_SHARE)
+        assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(0.1 * OSS_EMISSION_SHARE)
+
+    def test_flag_off_pays_both_pro_rata(self):
+        repos = {'r/a': _config(emission_share=1.0, issue_discovery_share=0.0)}
+        miner_uids = _uids(1, 2)
+
+        rewards = blend_emission_pools(self._crowns(older_days=2, newer_days=1), repos, miner_uids)
+
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.5 * OSS_EMISSION_SHARE)
+        assert rewards[_idx(miner_uids, 2)] == pytest.approx(0.5 * OSS_EMISSION_SHARE)
 
 
 class TestFailedEvaluationFiltering:

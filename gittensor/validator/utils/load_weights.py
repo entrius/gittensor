@@ -124,6 +124,7 @@ class RepoScoringConfig:
     standard_issue_multiplier: Optional[float] = None
     maintainer_issue_multiplier: Optional[float] = None
     src_tok_saturation_scale: Optional[float] = None
+    king_of_the_hill: Optional[bool] = None
     time_decay: RepoTimeDecayConfig = field(default_factory=RepoTimeDecayConfig)
 
 
@@ -138,6 +139,8 @@ class ResolvedScoring:
     maintainer_issue_multiplier: float
     src_tok_saturation_scale: float
     time_decay: ResolvedTimeDecay
+    # When True only the latest-merged scoring-labelled PR in the lookback window earns; every other PR scores 0.
+    king_of_the_hill: bool = False
 
 
 @dataclass
@@ -241,6 +244,7 @@ def resolve_scoring(cfg: Optional[RepoScoringConfig]) -> ResolvedScoring:
         maintainer_issue_multiplier=float(pick(cfg.maintainer_issue_multiplier, MAINTAINER_ISSUE_MULTIPLIER)),
         src_tok_saturation_scale=float(pick(cfg.src_tok_saturation_scale, SRC_TOK_SATURATION_SCALE)),
         time_decay=resolve_time_decay(cfg.time_decay),
+        king_of_the_hill=bool(cfg.king_of_the_hill),
     )
 
 
@@ -347,6 +351,7 @@ def _parse_eligibility(repo_name: str, raw: Any) -> RepoEligibilityConfig:
 
 
 _SCORING_INT_FIELDS = ('pr_lookback_days',)
+_SCORING_BOOL_FIELDS = ('king_of_the_hill',)
 _SCORING_FLOAT_FIELDS = (
     'open_pr_collateral_percent',
     'review_penalty_rate',
@@ -365,6 +370,12 @@ def _coerce_scoring_value(repo_name: str, field_name: str, raw_value: Any, caste
         return caster(raw_value)
     except (TypeError, ValueError) as e:
         raise RepositoryRegistryError(f'{repo_name} scoring.{field_name} must be a number: {e}') from e
+
+
+def _coerce_scoring_bool(repo_name: str, field_name: str, raw_value: Any) -> Optional[bool]:
+    if raw_value is not None and not isinstance(raw_value, bool):
+        raise RepositoryRegistryError(f'{repo_name} scoring.{field_name} must be a bool, got {type(raw_value)}')
+    return raw_value
 
 
 _TIME_DECAY_INT_FIELDS = ('grace_period_hours',)
@@ -390,12 +401,7 @@ def _parse_time_decay(repo_name: str, raw: Any) -> RepoTimeDecayConfig:
     for field_name in _TIME_DECAY_FLOAT_FIELDS:
         kwargs[field_name] = _coerce_scoring_value(repo_name, f'time_decay.{field_name}', raw.get(field_name), float)
     for field_name in _TIME_DECAY_BOOL_FIELDS:
-        value = raw.get(field_name)
-        if value is not None and not isinstance(value, bool):
-            raise RepositoryRegistryError(
-                f'{repo_name} scoring.time_decay.{field_name} must be a bool, got {type(value)}'
-            )
-        kwargs[field_name] = value
+        kwargs[field_name] = _coerce_scoring_bool(repo_name, f'time_decay.{field_name}', raw.get(field_name))
     return RepoTimeDecayConfig(**kwargs)
 
 
@@ -406,7 +412,8 @@ def _parse_scoring(repo_name: str, raw: Any) -> RepoScoringConfig:
     if not isinstance(raw, dict):
         raise RepositoryRegistryError(f'{repo_name} scoring must be an object, got {type(raw)}')
 
-    unknown = sorted(set(raw) - set(_SCORING_INT_FIELDS) - set(_SCORING_FLOAT_FIELDS) - {'time_decay'})
+    known = set(_SCORING_INT_FIELDS) | set(_SCORING_FLOAT_FIELDS) | set(_SCORING_BOOL_FIELDS) | {'time_decay'}
+    unknown = sorted(set(raw) - known)
     if unknown:
         raise RepositoryRegistryError(f'{repo_name} scoring has unknown keys: {unknown}')
 
@@ -415,6 +422,8 @@ def _parse_scoring(repo_name: str, raw: Any) -> RepoScoringConfig:
         kwargs[field_name] = _coerce_scoring_value(repo_name, field_name, raw.get(field_name), int)
     for field_name in _SCORING_FLOAT_FIELDS:
         kwargs[field_name] = _coerce_scoring_value(repo_name, field_name, raw.get(field_name), float)
+    for field_name in _SCORING_BOOL_FIELDS:
+        kwargs[field_name] = _coerce_scoring_bool(repo_name, field_name, raw.get(field_name))
     kwargs['time_decay'] = _parse_time_decay(repo_name, raw.get('time_decay'))
     return RepoScoringConfig(**kwargs)
 

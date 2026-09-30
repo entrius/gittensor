@@ -486,6 +486,29 @@ class TestRepositoryConfigScoringBlock:
         assert resolved.absolute_share is True
         assert lw.resolve_time_decay(None).absolute_share is False
 
+    def test_loader_parses_king_of_the_hill(self, tmp_path, monkeypatch):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/custom': {'emission_share': 0.5, 'scoring': {'king_of_the_hill': True}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        assert lw.resolve_scoring(lw.load_master_repo_weights()['foo/custom'].scoring).king_of_the_hill is True
+        assert lw.resolve_scoring(None).king_of_the_hill is False
+
+    @pytest.mark.parametrize('value', [1, 'true'])
+    def test_loader_rejects_non_bool_king_of_the_hill(self, tmp_path, monkeypatch, value):
+        from gittensor.validator.utils import load_weights as lw
+
+        (tmp_path / 'master_repositories.json').write_text(
+            json.dumps({'foo/bad': {'emission_share': 0.5, 'scoring': {'king_of_the_hill': value}}})
+        )
+        monkeypatch.setattr(lw, '_get_weights_dir', lambda: tmp_path)
+
+        with pytest.raises(RepositoryRegistryError):
+            lw.load_master_repo_weights()
+
     @pytest.mark.parametrize('value', [1, 'true'])
     def test_loader_rejects_non_bool_absolute_share(self, tmp_path, monkeypatch, value):
         from gittensor.validator.utils import load_weights as lw

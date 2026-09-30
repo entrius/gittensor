@@ -131,3 +131,12 @@ def test_a_solver_is_source_only(solver, add, reason):
     error = source_error(dir_files(path))
 
     assert (error or '').startswith(reason) if reason else error is None
+
+
+def test_every_size_is_checked_before_any_file_is_read():
+    def unread():
+        raise AssertionError('read before the sizes passed')
+
+    files = [SourceFile('solve', '100755', 10, unread), SourceFile('big', '100644', SOURCE_FILE_BYTES + 1, unread)]
+
+    assert (source_error(files) or '').startswith('big is 1048577 bytes')

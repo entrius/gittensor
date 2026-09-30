@@ -107,12 +107,13 @@ class SourceFile:
 def source_error(files: Iterable[SourceFile]) -> str | None:
     """Why the solver is not source only, or ``None``. Source only: at most ``SOURCE_FILES`` regular files (no
     symlinks, submodules or special files), each valid UTF-8 without NUL bytes and at most ``SOURCE_FILE_BYTES``,
-    ``SOURCE_DIR_BYTES`` in all; ``solve``, and ``build`` if there is one, scripts with a shebang at the root."""
-    count = total = 0
-    scripts = {}
+    ``SOURCE_DIR_BYTES`` in all; ``solve``, and ``build`` if there is one, scripts with a shebang at the root. Every
+    mode and size is checked before any file is read."""
+    listed, total = [], 0
     for f in files:
-        count, total = count + 1, total + f.size
-        if count > SOURCE_FILES:
+        listed.append(f)
+        total += f.size
+        if len(listed) > SOURCE_FILES:
             return f'more than {SOURCE_FILES} files'
         if f.mode not in TEXT_MODES:
             return f'{f.path} is a symlink or special file: source only'
@@ -120,6 +121,8 @@ def source_error(files: Iterable[SourceFile]) -> str | None:
             return f'{f.path} is {f.size} bytes, over the {SOURCE_FILE_BYTES} per file'
         if total > SOURCE_DIR_BYTES:
             return f'over {SOURCE_DIR_BYTES} bytes in all'
+    scripts = {}
+    for f in listed:
         if not is_text(data := f.read()):
             return f'{f.path} is binary: source only (UTF-8 text without NUL bytes)'
         if f.path in (SOLVE, BUILD):

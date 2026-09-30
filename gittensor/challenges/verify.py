@@ -4,8 +4,8 @@
 """``gitt challenge verify``: the maintainer's verdict on a challenge PR. It never executes submitted code: it reads the
 solver's files only as data, to close one that is not source only.
 
-``decide`` is pure: it takes the facts (the PR, the repo's ``main``, the chain) and the repo's ``challenge.json`` and
-runs the checks in order; the first failure decides. The fetchers gather those facts with ``gh api`` and a Subtensor;
+``decide`` is pure but for reading the solver's blobs: it takes the facts (the PR, the repo's ``main``, the chain)
+and the repo's ``challenge.json`` and runs the checks in order; the first failure decides. The fetchers gather those facts with ``gh api`` and a Subtensor;
 ``apply`` carries a verdict out with ``gh``, idempotently.
 """
 

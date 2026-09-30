@@ -13,6 +13,7 @@ shared scoring helpers (``calculate_final_earned_score``,
 
 from dataclasses import dataclass
 from datetime import datetime
+from math import prod
 from typing import List, Optional
 
 from gittensor.classes import _apply_score_multipliers
@@ -37,6 +38,7 @@ class ScoredPR:
     # Score outputs
     base_score: float = 0.0
     earned_score: float = 0.0
+    undecayed_score: float = 0.0  # earned_score with time decay at 1.0
     collateral_score: float = 0.0  # OPEN PRs only
 
     # Token scoring breakdown (populated when files are tokenized)
@@ -84,4 +86,5 @@ class ScoredPR:
         }
         label = f'{self.pr.state} PR #{self.pr.pr_number} ({self.pr.repo_full_name})'
         self.earned_score = _apply_score_multipliers(self.base_score, multipliers, label)
+        self.undecayed_score = self.base_score * prod(v for k, v in multipliers.items() if k != 'decay')
         return self.earned_score

@@ -5,8 +5,8 @@
 
 These cover the allocation scenarios required by issue #1215: repo slices cap
 PR throughput, ineligible/empty slices recycle (nothing pools across repos),
-PR/issue sub-slices spill only within a repo, registry slack recycles, and the
-fixed recycle baseline is gone.
+PR/issue sub-slices spill only within a repo, registry slack recycles, and
+``absolute_share`` repos pay out only the decayed fraction of their slice.
 """
 
 import sys
@@ -23,7 +23,12 @@ from gittensor.utils.mirror.models import MirrorPullRequest, MirrorReviewSummary
 from gittensor.validator import emission_allocation
 from gittensor.validator.emission_allocation import blend_emission_pools, calculate_repo_emission_breakdown
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
-from gittensor.validator.utils.load_weights import RepositoryConfig, load_master_repo_weights
+from gittensor.validator.utils.load_weights import (
+    RepoScoringConfig,
+    RepositoryConfig,
+    RepoTimeDecayConfig,
+    load_master_repo_weights,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -62,6 +67,10 @@ def _populate_repo_evaluations(evaluation: MinerEvaluation) -> None:
                 0.0,
                 sum(pr.earned_score for pr in merged) - sum(pr.collateral_score for pr in open_prs),
             ),
+            undecayed_total_score=max(
+                0.0,
+                sum(pr.undecayed_score for pr in merged) - sum(pr.collateral_score for pr in open_prs),
+            ),
             total_collateral_score=sum(pr.collateral_score for pr in open_prs),
             total_merged_prs=len(merged),
             total_open_prs=len(open_prs),
@@ -99,7 +108,15 @@ def _scored_pr(repo: str, number: int, earned_score: float) -> ScoredPR:
         scoring_data_stored=True,
         review_summary=MirrorReviewSummary(),
     )
-    return ScoredPR(pr=pr, earned_score=earned_score)
+    return ScoredPR(pr=pr, earned_score=earned_score, undecayed_score=earned_score)
+
+
+def _decayed_pr(repo: str, number: int, decay: float) -> ScoredPR:
+    scored = _scored_pr(repo, number, earned_score=0.0)
+    scored.base_score = 1.0
+    scored.time_decay_multiplier = decay
+    scored.calculate_final_earned_score()
+    return scored
 
 
 def _open_pr(repo: str, number: int, collateral_score: float) -> ScoredPR:
@@ -122,11 +139,13 @@ def _config(
     emission_share: float,
     issue_discovery_share: float = 0.5,
     maintainer_cut: float = 0.0,
+    absolute_share: bool = False,
 ) -> RepositoryConfig:
     return RepositoryConfig(
         emission_share=emission_share,
         issue_discovery_share=issue_discovery_share,
         maintainer_cut=maintainer_cut,
+        scoring=RepoScoringConfig(time_decay=RepoTimeDecayConfig(absolute_share=absolute_share)),
     )
 
 
@@ -254,6 +273,56 @@ class TestCrossRepoIsolation:
         assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.3 * OSS_EMISSION_SHARE)
         assert rewards[_idx(miner_uids, 2)] == pytest.approx(0.1 * OSS_EMISSION_SHARE)
         assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(0.6 * OSS_EMISSION_SHARE)
+
+
+class TestAbsoluteShare:
+    def test_sole_scorer_at_90pct_decay_gets_90pct_of_slice(self):
+        repos = {'r/a': _config(emission_share=0.5, issue_discovery_share=0.0, absolute_share=True)}
+        miner_uids = _uids(1)
+        evaluations = {1: _evaluation(1, prs=[_decayed_pr('r/a', 1, decay=0.9)])}
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids)
+
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.9 * 0.5 * OSS_EMISSION_SHARE)
+        assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(1.0 - 0.45 * OSS_EMISSION_SHARE)
+        assert float(rewards.sum()) == pytest.approx(1.0)
+
+    def test_two_scorers_split_decayed_payout_pro_rata(self):
+        repos = {'r/a': _config(emission_share=1.0, issue_discovery_share=0.0, absolute_share=True)}
+        miner_uids = _uids(1, 2)
+        evaluations = {
+            1: _evaluation(1, prs=[_decayed_pr('r/a', 1, decay=1.0)]),
+            2: _evaluation(2, prs=[_decayed_pr('r/a', 2, decay=0.5)]),
+        }
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids)
+
+        # Payout 1.5 / 2.0 of the slice, split 1.0 : 0.5.
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.5 * OSS_EMISSION_SHARE)
+        assert rewards[_idx(miner_uids, 2)] == pytest.approx(0.25 * OSS_EMISSION_SHARE)
+        assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(0.25 * OSS_EMISSION_SHARE)
+
+    def test_issue_sub_slice_pays_decayed_fraction(self):
+        repos = {'r/a': _config(emission_share=1.0, issue_discovery_share=1.0, absolute_share=True)}
+        miner_uids = _uids(1)
+        issue = _discovered_issue('r/a', 10, earned_score=0.6)
+        issue.discovery_undecayed_score = 0.8
+        evaluations = {1: _evaluation(1, issues=[issue])}
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids)
+
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(0.75 * OSS_EMISSION_SHARE)
+        assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(0.25 * OSS_EMISSION_SHARE)
+
+    def test_flag_off_decayed_sole_scorer_gets_full_slice(self):
+        repos = {'r/a': _config(emission_share=1.0, issue_discovery_share=0.0)}
+        miner_uids = _uids(1)
+        evaluations = {1: _evaluation(1, prs=[_decayed_pr('r/a', 1, decay=0.9)])}
+
+        rewards = blend_emission_pools(evaluations, repos, miner_uids)
+
+        assert rewards[_idx(miner_uids, 1)] == pytest.approx(OSS_EMISSION_SHARE)
+        assert rewards[_idx(miner_uids, RECYCLE_UID)] == pytest.approx(0.0)
 
 
 class TestFailedEvaluationFiltering:

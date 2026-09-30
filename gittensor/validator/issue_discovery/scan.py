@@ -589,6 +589,14 @@ def _finalize_repo_issue_scores(
                 * issue.discovery_open_issue_spam_multiplier,
                 2,
             )
+            issue.discovery_undecayed_score = round(
+                issue.discovery_base_score
+                * issue.discovery_label_multiplier
+                * issue.discovery_review_quality_multiplier
+                * issue.discovery_credibility_multiplier
+                * issue.discovery_open_issue_spam_multiplier,
+                2,
+            )
             repo_score += issue.discovery_earned_score
 
         repo_eval.issue_discovery_score = round(repo_score, 2)

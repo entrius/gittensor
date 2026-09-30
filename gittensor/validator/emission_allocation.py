@@ -32,8 +32,8 @@ def blend_emission_pools(
     Each repo's ``emission_share * OSS_EMISSION_SHARE`` slice is distributed
     only within that repo. PR and issue-discovery sub-slices are split by the
     repo's ``issue_discovery_share`` and spill only inside the same repo when
-    exactly one side has eligible non-zero scorers. Empty repo slices and
-    registry slack recycle to UID 0.
+    exactly one side has eligible non-zero scorers. Empty repo slices, the
+    decayed-away part of ``absolute_share`` repos, and registry slack recycle to UID 0.
 
     When a repo sets ``maintainer_cut`` and ``maintainer_uids_by_repo`` lists
     registered maintainer miners for it, ``maintainer_cut`` of that repo's slice
@@ -103,6 +103,10 @@ def calculate_repo_emission_breakdown(
     Each repo pays only its own ``emission_share * OSS`` slice; nothing pools across repos.
     The maintainer cut comes off the top; the scoring remainder goes to the repo's PR/issue
     scorers, and recycles when the repo has none this round.
+
+    With ``scoring.time_decay.absolute_share`` each sub-slice pays out only
+    ``Σ decayed / Σ undecayed`` of itself (pro-rata by decayed score) and recycles the rest,
+    so decay shrinks the payout rather than just reweighting scorers.
     """
     maintainer_map = maintainer_uids_by_repo or {}
 
@@ -154,12 +158,45 @@ def calculate_repo_emission_breakdown(
             yield allocation
             continue
 
-        allocation.pr_rewards, pr_unallocated = _calculate_score_rewards(pr_scores, allocation.pr_slice, miner_uids)
+        pr_paid, issue_paid = allocation.pr_slice, allocation.issue_discovery_slice
+        if repo_config.scoring.time_decay.absolute_share:
+            pr_undecayed, issue_undecayed = _collect_repo_undecayed_totals(miner_evaluations, repo_name, miner_uids)
+            pr_paid *= _decayed_fraction(pr_total, pr_undecayed)
+            issue_paid *= _decayed_fraction(issue_total, issue_undecayed)
+
+        allocation.pr_rewards, pr_unallocated = _calculate_score_rewards(pr_scores, pr_paid, miner_uids)
         allocation.issue_discovery_rewards, issue_unallocated = _calculate_score_rewards(
-            issue_scores, allocation.issue_discovery_slice, miner_uids
+            issue_scores, issue_paid, miner_uids
         )
-        allocation.recycled_amount += pr_unallocated + issue_unallocated
+        decayed_away = (allocation.pr_slice - pr_paid) + (allocation.issue_discovery_slice - issue_paid)
+        allocation.recycled_amount += decayed_away + pr_unallocated + issue_unallocated
         yield allocation
+
+
+def _decayed_fraction(decayed_total: float, undecayed_total: float) -> float:
+    """Share of a sub-slice an ``absolute_share`` repo pays out: Σ decayed / Σ undecayed, capped at 1."""
+    return decayed_total / max(decayed_total, undecayed_total) if decayed_total > 0 else 0.0
+
+
+def _collect_repo_undecayed_totals(
+    miner_evaluations: Dict[int, MinerEvaluation],
+    repo_name: str,
+    miner_uids: set[int],
+) -> tuple[float, float]:
+    """Σ undecayed PR and issue-discovery scores across the repo's scoring miners (fully decayed ones included)."""
+    pr_total = issue_total = 0.0
+    for uid, evaluation in miner_evaluations.items():
+        if not _is_scoring_evaluation(uid, evaluation, miner_uids):
+            continue
+        repo_eval = evaluation.repo_evaluations.get(repo_name)
+        if repo_eval is not None:
+            pr_total += repo_eval.undecayed_total_score
+        issue_total += sum(
+            issue.discovery_undecayed_score
+            for issue in evaluation.issue_discovery_issues
+            if issue.repository_full_name.lower() == repo_name
+        )
+    return pr_total, issue_total
 
 
 def _calculate_score_rewards(

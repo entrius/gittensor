@@ -95,6 +95,7 @@ class RepoTimeDecayConfig:
     sigmoid_midpoint_days: Optional[float] = None
     sigmoid_steepness: Optional[float] = None
     min_multiplier: Optional[float] = None
+    absolute_share: Optional[bool] = None
 
 
 @dataclass(frozen=True)
@@ -105,6 +106,8 @@ class ResolvedTimeDecay:
     sigmoid_midpoint_days: float
     sigmoid_steepness: float
     min_multiplier: float
+    # When True the repo pays out only the decayed fraction of its slice (Σ decayed / Σ undecayed); the rest recycles.
+    absolute_share: bool = False
 
 
 @dataclass
@@ -219,6 +222,7 @@ def resolve_time_decay(cfg: Optional[RepoTimeDecayConfig]) -> ResolvedTimeDecay:
         sigmoid_midpoint_days=float(pick(cfg.sigmoid_midpoint_days, TIME_DECAY_SIGMOID_MIDPOINT)),
         sigmoid_steepness=float(pick(cfg.sigmoid_steepness, TIME_DECAY_SIGMOID_STEEPNESS_SCALAR)),
         min_multiplier=float(pick(cfg.min_multiplier, TIME_DECAY_MIN_MULTIPLIER)),
+        absolute_share=bool(cfg.absolute_share),
     )
 
 
@@ -365,6 +369,7 @@ def _coerce_scoring_value(repo_name: str, field_name: str, raw_value: Any, caste
 
 _TIME_DECAY_INT_FIELDS = ('grace_period_hours',)
 _TIME_DECAY_FLOAT_FIELDS = ('sigmoid_midpoint_days', 'sigmoid_steepness', 'min_multiplier')
+_TIME_DECAY_BOOL_FIELDS = ('absolute_share',)
 
 
 def _parse_time_decay(repo_name: str, raw: Any) -> RepoTimeDecayConfig:
@@ -374,7 +379,7 @@ def _parse_time_decay(repo_name: str, raw: Any) -> RepoTimeDecayConfig:
     if not isinstance(raw, dict):
         raise RepositoryRegistryError(f'{repo_name} scoring.time_decay must be an object, got {type(raw)}')
 
-    known = set(_TIME_DECAY_INT_FIELDS) | set(_TIME_DECAY_FLOAT_FIELDS)
+    known = set(_TIME_DECAY_INT_FIELDS) | set(_TIME_DECAY_FLOAT_FIELDS) | set(_TIME_DECAY_BOOL_FIELDS)
     unknown = sorted(set(raw) - known)
     if unknown:
         raise RepositoryRegistryError(f'{repo_name} scoring.time_decay has unknown keys: {unknown}')
@@ -384,6 +389,13 @@ def _parse_time_decay(repo_name: str, raw: Any) -> RepoTimeDecayConfig:
         kwargs[field_name] = _coerce_scoring_value(repo_name, f'time_decay.{field_name}', raw.get(field_name), int)
     for field_name in _TIME_DECAY_FLOAT_FIELDS:
         kwargs[field_name] = _coerce_scoring_value(repo_name, f'time_decay.{field_name}', raw.get(field_name), float)
+    for field_name in _TIME_DECAY_BOOL_FIELDS:
+        value = raw.get(field_name)
+        if value is not None and not isinstance(value, bool):
+            raise RepositoryRegistryError(
+                f'{repo_name} scoring.time_decay.{field_name} must be a bool, got {type(value)}'
+            )
+        kwargs[field_name] = value
     return RepoTimeDecayConfig(**kwargs)
 
 

@@ -9,6 +9,9 @@ gitt challenge eval <module> <challenger_dir> --king DIR --seed-block-hash HEX [
 gitt challenge attest [CHALLENGE]               the official run: writes attestation.json when it is a crown
 gitt challenge submit [CHALLENGE] --agree-cla   checks attestation.json, opens the one-commit PR
 gitt challenge verify --repo OWNER/NAME --pr N  the maintainer's verdict on a PR; --apply carries it out
+
+A solver is source only: text files (UTF-8, no NUL bytes) under size caps, no symlinks, and an executable `solve` script.
+A compiled solver adds a `build` script, run once in the sandbox before the seeds and untimed; `solve` runs its output.
 """
 
 from __future__ import annotations
@@ -34,9 +37,11 @@ from gittensor.challenges.checkout import (
     KING_FILE,
     MAIN,
     Checkout,
+    dir_files,
     normalize_hash,
     pr_body,
     repo_name,
+    source_error,
     submission_error,
 )
 from gittensor.challenges.head_to_head import SKIPPED, Entry, canonical, report, snapshot, solver_sha
@@ -234,7 +239,8 @@ def eval_command(module, challenger_dir, king_dir, tier, seeds, seed_block_hash,
 
     MODULE is the package's import name (gt_challenge_intents). Seed i is sha256('<hash>:i'); each instance is
     generated once and both solvers run `./solve <instance_dir> <output_dir>` on it in turn, sandboxed under the
-    tier's limits. A timeout, crash or invalid output scores 0. The challenger takes the crown when every one of its
+    tier's limits. Both must be source only; a `build` script, if any, runs once first (untimed, 300 s at most) and its
+    failure scores every seed 0. A timeout, crash or invalid output scores 0. The challenger takes the crown when every one of its
     seeds is valid and the 99% lower bound of its mean gain over the king is at least the margin.[/dim]
     """
     if challenger_dir:
@@ -266,14 +272,17 @@ def head_to_head(
         raise click.BadParameter(f'{tier!r} is not one of {", ".join(challenge.TIERS)}', param_hint='--tier')
     if error := runner.sandbox_error():
         raise click.ClickException(f'no sandbox here ({error}): nothing was run')
-    with tempfile.TemporaryDirectory(prefix='gt-snapshot-') as private:
+    with tempfile.TemporaryDirectory(prefix='gt-snapshot-', ignore_cleanup_errors=True) as private:
         try:
             dirs = [snapshot(challenger_dir, Path(private, 'challenger')), snapshot(king_dir, Path(private, 'king'))]
+            for name, d in zip(('challenger', 'king'), dirs):
+                if error := source_error(dir_files(d)):
+                    raise click.ClickException(f'the {name} is not source only ({error}): nothing was run')
         except (OSError, shutil.Error) as e:
             raise click.ClickException(f'cannot copy the solvers: {e}') from e
-        shas = [solver_sha(d) for d in dirs]
+        shas, builds = [solver_sha(d) for d in dirs], [(d / runner.BUILD).is_file() for d in dirs]
         results = runner.evaluate(challenge, tier, seed_block_hash, seeds, dirs)
-    challenger, king = (Entry(sha, r) for sha, r in zip(shas, results))
+    challenger, king = (Entry(*entry) for entry in zip(shas, results, builds))
     try:
         doc = report(module, challenge, tier, seed_block_hash, margin, challenger, king)
         canonical(doc)  # refuses a NaN or infinity now, before anything is printed or written
@@ -365,6 +374,8 @@ def submit_command(challenge, agree_cla, login, network):
 
     upstream, path = fetch_upstream(root), solver.relative_to(root).as_posix()
     refuse_ignored(root, path)
+    if error := source_error(dir_files(solver)):
+        raise click.ClickException(f'not submitted: {path} is not source only ({error})')
     if on_main(root, path):
         raise click.ClickException(f'{path} is already on {MAIN}: scaffold a new one with `gitt challenge init`')
     with tempfile.TemporaryDirectory() as tmp:  # a private index: the working tree and its index are untouched

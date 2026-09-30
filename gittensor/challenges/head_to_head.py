@@ -38,6 +38,7 @@ SKIPPED = ('.git', '__pycache__')  # never hashed, never run
 class Entry:
     sha: str
     results: list[SeedResult]
+    build: bool = False  # it has a build script
 
     @property
     def scores(self) -> list[float]:
@@ -45,7 +46,8 @@ class Entry:
 
     def summary(self) -> dict:
         valid = sum(r.valid for r in self.results)
-        return {'sha': self.sha, 'scores': self.scores, 'valid': valid, 'mean': sum(self.scores) / len(self.scores)}
+        mean = sum(self.scores) / len(self.scores)
+        return {'sha': self.sha, 'scores': self.scores, 'valid': valid, 'mean': mean, 'build': self.build}
 
 
 def solver_sha(solver_dir: Path) -> str:

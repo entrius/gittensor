@@ -13,6 +13,7 @@ from gittensor.challenges.attestation import sign_dev
 from gittensor.challenges.checkout import (
     ATTESTATION,
     SOURCE_FILE_BYTES,
+    SourceFile,
     dir_files,
     pr_body,
     source_error,
@@ -105,6 +106,7 @@ def test_what_submit_accepts_the_maintainer_crowns(tmp_path):
         files=[ATTESTATION, 'solvers/alice/1/solve'],
         attestation=att.to_json(),
         solver_sha=CHALLENGER,
+        solver_files=[SourceFile('solve', '100755', 10, lambda: b'#!/bin/sh\n')],
     )
     repo = Repo('baselines/good', KING, '| round |\n|---|\n| 0 |\n', taken=[], queued=[], unrecorded=[])
 
@@ -128,4 +130,4 @@ def test_a_solver_is_source_only(solver, add, reason):
     add(path := solver('good'))
     error = source_error(dir_files(path))
 
-    assert error.startswith(reason) if reason else error is None
+    assert (error or '').startswith(reason) if reason else error is None

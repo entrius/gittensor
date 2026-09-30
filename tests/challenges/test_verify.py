@@ -3,6 +3,7 @@
 
 """The maintainer's verdict from plain facts: each check's failure decides, in order; all passing crowns."""
 
+import base64
 import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -11,11 +12,18 @@ import click
 import pytest
 from click.testing import CliRunner
 
+from gittensor.challenges import verify as verify_module
 from gittensor.challenges.attestation import sign_dev
+from gittensor.challenges.checkout import SourceFile, source_error
 from gittensor.challenges.verify import CLA_TEXT, Chain, Config, PullRequest, Repo, block_at, decide, verify_command
 
 KING = [0.8, 1.0, 1.2, 0.9, 1.1, 1.0, 0.7, 1.3] * 4
 HASH, KING_SHA, SOLVER_SHA = 'ab' * 32, 'k' * 40, 'c' * 40
+FILES = [
+    SourceFile('solve', '100755', 20, lambda: b'#!/bin/sh\nexec ./fast'),
+    SourceFile('lib/util.py', '100644', 9, lambda: b'X = 1\n'),
+]
+BINARY = SourceFile('fast', '100755', 8, lambda: b'\x7fELF\x02\x01\x01\x00')
 RESULT = {
     'challenge_id': 'intents-batch',
     'module': 'gt_challenge_intents',
@@ -55,6 +63,7 @@ PR = PullRequest(
     changed_files=3,
     files=['attestation.json', 'solvers/miner/1/solve', 'solvers/miner/1/lib/util.py'],
     solver_sha=SOLVER_SHA,
+    solver_files=FILES,
 )
 LEADERBOARD = '| round | solver | pr |\n|---|---|---|\n| 0 | baselines/cow | - |\n| 1 | solvers/a/1 | #3 |\n'
 REPO = Repo(
@@ -98,6 +107,7 @@ def scored(factor):
         ({'pr': {'renamed_from': ['README.md']}}, 'close', 'scope'),
         ({'pr': {'changed_files': 3001}}, 'close', 'scope'),
         ({'pr': {'files': ['attestation.json', 'solvers/miner/2/solve']}}, 'close', 'scope'),
+        ({'pr': {'solver_files': [*FILES, BINARY]}}, 'close', 'source'),
         ({'config': {'dev_attestation_pubkey': '00' * 32}}, 'close', 'signature'),
         ({'seed_block': 900}, 'close', 'seed'),
         ({'chain': {'seed_block_hash': 'cd' * 32}}, 'close', 'seed'),
@@ -163,3 +173,20 @@ def test_verify_registers_as_a_click_command():
     result = CliRunner().invoke(group, ['verify', '--help'])
 
     assert result.exit_code == 0 and '--apply' in result.output
+
+
+def test_a_pr_tree_with_a_symlink_or_a_binary_blob_is_not_source_only(monkeypatch):
+    tree = [
+        {'path': 'solve', 'mode': '100755', 'type': 'blob', 'sha': 's', 'size': 10},
+        {'path': 'lib', 'mode': '040000', 'type': 'tree', 'sha': 't'},
+        {'path': 'lib/fast.so', 'mode': '100644', 'type': 'blob', 'sha': 'b', 'size': 8},
+    ]
+    blobs = {'s': b'#!/bin/sh\n', 'b': b'\x7fELF\x02\x01\x01\x00'}
+    responses = {'repos/o/r/git/trees/x?recursive=1': {'tree': tree, 'truncated': False}}
+    responses |= {f'repos/o/r/git/blobs/{k}': {'content': base64.b64encode(v).decode()} for k, v in blobs.items()}
+    monkeypatch.setattr(verify_module, 'api', responses.__getitem__)
+    link = {'path': 'lib/fast.so', 'mode': '120000', 'type': 'blob', 'sha': 'b', 'size': 4}
+
+    assert (source_error(verify_module.tree_files('o/r', 'x')) or '').startswith('lib/fast.so is binary')
+    tree[2] = link
+    assert (source_error(verify_module.tree_files('o/r', 'x')) or '').startswith('lib/fast.so is a symlink')

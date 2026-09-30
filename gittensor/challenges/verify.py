@@ -1,7 +1,8 @@
 # The MIT License (MIT)
 # Copyright © 2026 Entrius
 
-"""``gitt challenge verify``: the maintainer's verdict on a challenge PR. It never executes submitted code.
+"""``gitt challenge verify``: the maintainer's verdict on a challenge PR. It never executes submitted code: it reads the
+solver's files only as data, to close one that is not source only.
 
 ``decide`` is pure: it takes the facts (the PR, the repo's ``main``, the chain) and the repo's ``challenge.json`` and
 runs the checks in order; the first failure decides. The fetchers gather those facts with ``gh api`` and a Subtensor;
@@ -10,12 +11,13 @@ runs the checks in order; the first failure decides. The fetchers gather those f
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import subprocess
 from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import datetime, timezone
-from functools import cache
+from functools import cache, partial
 from typing import Any, Callable
 
 import click
@@ -28,9 +30,11 @@ from gittensor.challenges.checkout import (
     KING_FILE,
     MAIN,
     SOLVER_N,
+    SourceFile,
     normalize_hash,
     run_mismatch,
     side,
+    source_error,
 )
 from gittensor.challenges.head_to_head import Entry, verdict
 from gittensor.challenges.runner import SeedResult
@@ -87,6 +91,7 @@ class PullRequest:
     renamed_from: list[str] = field(default_factory=list)  # a rename's old paths: changed too
     attestation: str | None = None  # attestation.json at the head, as committed
     solver_sha: str | None = None  # the head's tree sha of the solver dir
+    solver_files: list[SourceFile] = field(default_factory=list)  # that tree's files, read only when checked
 
     @property
     def paths(self) -> list[str]:
@@ -173,6 +178,9 @@ def decide(pr: PullRequest, repo: Repo, chain: Callable[[int], Chain], config: C
     scoped = solver is not None and solver not in repo.taken and len(pr.files) == pr.changed_files
     scope = solver if scoped else f'may change only solvers/{pr.author}/<unused n>/'
     if not passed('scope', scoped, f'{scope} and {ATTESTATION}'):
+        return stop('close')
+    unsourced = source_error(pr.solver_files)
+    if not passed('source', not unsourced, f'{solver} is not source only: {unsourced}' if unsourced else 'source only'):
         return stop('close')
     try:
         att = Attestation.from_json(pr.attestation or '')
@@ -301,6 +309,21 @@ def raw(repo: str, path: str, ref: str) -> str | None:
         raise
 
 
+def tree_files(repo: str, sha: str) -> list[SourceFile]:
+    """The files of tree ``sha``, each fetched only when read. A truncated listing still holds far more than
+    ``SOURCE_FILES``."""
+    entries = api(f'repos/{repo}/git/trees/{sha}?recursive=1')['tree']
+    return [
+        SourceFile(e['path'], e['mode'], e.get('size', 0), partial(blob, repo, e['sha']))
+        for e in entries
+        if e['type'] != 'tree'
+    ]
+
+
+def blob(repo: str, sha: str) -> bytes:
+    return base64.b64decode(api(f'repos/{repo}/git/blobs/{sha}')['content'])
+
+
 def subdirs(repo: str, path: str, ref: str) -> dict[str, str]:
     """``{name: tree sha}`` of the directories in ``path`` at ``ref``."""
     try:
@@ -349,12 +372,14 @@ def with_files(repo: str, pr: PullRequest) -> PullRequest:
     files, renamed_from = [row[0] for row in rows], [row[1] for row in rows if row[1]]
     solver = solver_dir(files + renamed_from, pr.author)
     parent, name = solver.rsplit('/', 1) if solver else ('', '')
+    sha = subdirs(repo, parent, pr.head).get(name) if solver else None
     return replace(
         pr,
         files=files,
         renamed_from=renamed_from,
         attestation=raw(repo, ATTESTATION, pr.head),
-        solver_sha=subdirs(repo, parent, pr.head).get(name) if solver else None,
+        solver_sha=sha,
+        solver_files=tree_files(repo, sha) if sha else [],
     )
 
 

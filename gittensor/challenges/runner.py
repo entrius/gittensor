@@ -11,9 +11,9 @@ carries). ``check`` reads the private originals plus the output, and output hold
 
 A solver is source only (``checkout.source_error``); one that compiles ships a ``build`` script at its root. It runs
 once per solver, before any seed, in the solver's own directory (in place: callers pass a private snapshot, hashed
-before the build) under the same sandbox with ``BUILD_TIME_LIMIT_S`` and ``BUILD_MEMORY_MB``, untimed for scoring.
-What it writes there is what every seed's copy runs. A build that fails or times out scores every seed 0 ("build
-failed").
+before the build) under the same sandbox with ``BUILD_TIME_LIMIT_S``, ``BUILD_MEMORY_MB`` and ``BUILD_TMPFS_MB``,
+untimed for scoring. What it writes there is what every seed's copy runs. A build that fails, times out or leaves the
+dir over ``BUILD_OUTPUT_BYTES`` scores every seed 0 ("build failed").
 
 The solver runs under bubblewrap: new user, pid, net, ipc and uts namespaces (no network), a read-only root with
 ``/usr`` and the loader, size-capped ``/tmp`` and ``/dev/shm``, and the evaluator's own Python read-only at the same
@@ -45,7 +45,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,6 +55,8 @@ SOLVE = 'solve'
 BUILD = 'build'
 BUILD_TIME_LIMIT_S = 300
 BUILD_MEMORY_MB = 4096
+BUILD_TMPFS_MB = 512  # each of the build's /tmp and /dev/shm
+BUILD_OUTPUT_BYTES = 1 << 30  # the built solver dir, copied for every seed
 REASON_CHARS = 200
 LOG_TAIL_CHARS = 160  # the end of the solver's output, after the 'exit N: ' prefix
 FSIZE_BYTES = 1 << 30
@@ -94,8 +96,8 @@ def python_runtime() -> tuple[str, ...]:
     return tuple(sorted(keep, key=len))
 
 
-def sandbox(memory_mb: int) -> list[str]:
-    """The bwrap command up to the solver's own mounts."""
+def sandbox(tmpfs_mb: int) -> list[str]:
+    """The bwrap command up to the solver's own mounts, with ``/tmp`` and ``/dev/shm`` of ``tmpfs_mb`` each."""
     command = ['bwrap', '--unshare-all', '--die-with-parent', '--new-session', '--ro-bind', '/usr', '/usr']
     for path in HOST_ROOTS:
         if os.path.islink(path):
@@ -104,7 +106,7 @@ def sandbox(memory_mb: int) -> list[str]:
             command += ['--ro-bind', path, path]
     for path in HOST_FILES:
         command += ['--ro-bind-try', path, path]
-    size = str(memory_mb << 20)
+    size = str(tmpfs_mb << 20)
     command += [
         '--proc',
         '/proc',
@@ -147,21 +149,28 @@ def run_solver(box: Path, log: Path, time_limit_s: float, memory_mb: int) -> str
     not."""
     mounts = ['--ro-bind', box / 'instance', '/instance', '--bind', box / 'output', '/output']
     argv = [f'/work/{SOLVE}', '/instance', '/output']
-    return run_sandboxed(box / 'solver', mounts, argv, log, time_limit_s, memory_mb)
+    return run_sandboxed(box / 'solver', mounts, argv, log, time_limit_s, memory_mb, memory_mb)
 
 
 def build(solver_dir: Path) -> str:
     """Run ``solver_dir/build`` in place, if there is one: '' when there is none, no sandbox (every seed then says so)
-    or it exited 0 within ``BUILD_TIME_LIMIT_S``, else why not."""
+    or it exited 0 within ``BUILD_TIME_LIMIT_S`` leaving at most ``BUILD_OUTPUT_BYTES``, else why not."""
     if not (solver_dir / BUILD).is_file() or sandbox_error():
         return ''
     with tempfile.TemporaryDirectory(prefix='gt-log-') as private:
-        return run_sandboxed(
-            solver_dir, [], [f'/work/{BUILD}'], Path(private, 'build.log'), BUILD_TIME_LIMIT_S, BUILD_MEMORY_MB
-        )
+        log, limits = Path(private, 'build.log'), (BUILD_TIME_LIMIT_S, BUILD_MEMORY_MB, BUILD_TMPFS_MB)
+        if failure := run_sandboxed(solver_dir, [], [f'/work/{BUILD}'], log, *limits):
+            return failure
+    try:
+        size = sum(st.st_size for _, st in entries(solver_dir))
+    except OSError as e:
+        return f'build output unreadable: {e}'
+    return f'build output over {BUILD_OUTPUT_BYTES} bytes' if size > BUILD_OUTPUT_BYTES else ''
 
 
-def run_sandboxed(work: Path, mounts: list, argv: list[str], log: Path, time_limit_s: float, memory_mb: int) -> str:
+def run_sandboxed(
+    work: Path, mounts: list, argv: list[str], log: Path, time_limit_s: float, memory_mb: int, tmpfs_mb: int
+) -> str:
     """Run ``argv`` in the sandbox with ``work`` as ``/work`` (the cwd) plus ``mounts``, output to ``log``: '' when it
     exited 0 within the limit, else why not."""
     memory, cpus = memory_mb << 20, solver_cpus()
@@ -174,7 +183,7 @@ def run_sandboxed(work: Path, mounts: list, argv: list[str], log: Path, time_lim
         os.sched_setaffinity(0, cpus)
 
     mounts = [*mounts, '--bind', work, '/work', '--chdir', '/work', '--remount-ro', '/']
-    command = [*sandbox(memory_mb), *map(str, mounts), '--', *argv]
+    command = [*sandbox(tmpfs_mb), *map(str, mounts), '--', *argv]
     with log.open('wb') as out:
         proc = subprocess.Popen(
             command, env=ENV, stdin=subprocess.DEVNULL, stdout=out, stderr=out, start_new_session=True, preexec_fn=limit
@@ -197,23 +206,28 @@ def run_sandboxed(work: Path, mounts: list, argv: list[str], log: Path, time_lim
     return ''
 
 
-def output_link(output_dir: Path) -> str:
-    """The first entry that is a symlink, a hard link or not a regular file or directory; '' when there is none. The
-    evaluator owns the tree, so each directory gets u+rwx back before it is read (a solver cannot hide an entry behind
-    ``chmod 111``); anything still unreadable raises ``OSError``."""
+def entries(top: Path) -> Iterator[tuple[str, os.stat_result]]:
+    """Every entry under ``top``, lstat'd. The evaluator owns the tree, so each directory gets u+rwx back before it is
+    read (a solver cannot hide an entry behind ``chmod 111``); anything still unreadable raises ``OSError``."""
 
     def fail(error: OSError):
         raise error
 
-    os.chmod(output_dir, 0o700)
-    for root, dirs, files in os.walk(output_dir, onerror=fail):
+    os.chmod(top, 0o700)
+    for root, dirs, files in os.walk(top, onerror=fail):
         for name in dirs + files:
             path = os.path.join(root, name)
             st = os.lstat(path)
             if stat.S_ISDIR(st.st_mode):
                 os.chmod(path, 0o700)
-            elif not (stat.S_ISREG(st.st_mode) and st.st_nlink == 1):
-                return name
+            yield path, st
+
+
+def output_link(output_dir: Path) -> str:
+    """The first entry that is a symlink, a hard link or not a regular file or directory; '' when there is none."""
+    for path, st in entries(output_dir):
+        if not (stat.S_ISDIR(st.st_mode) or (stat.S_ISREG(st.st_mode) and st.st_nlink == 1)):
+            return os.path.basename(path)
     return ''
 
 

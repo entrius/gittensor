@@ -150,3 +150,22 @@ def test_a_failing_build_scores_every_seed_zero_with_its_reason(solver):
     results = run(with_build(solver('good'), 'echo nope >&2; exit 2'), 2)
 
     assert [(r.score, r.reason) for r in results] == [(0.0, 'build failed: exit 2: nope')] * 2
+
+
+@requires_sandbox
+def test_a_failed_build_zeroes_only_its_own_solver_in_a_pair(solver):
+    [challenger, king] = evaluate(
+        fake_challenge, 'small', 'block-0xabc', 3, [with_build(solver('crash'), 'exit 1'), solver('good')]
+    )
+
+    assert [r.reason for r in challenger] == ['build failed: exit 1'] * 3
+    assert [r.score for r in king] == [1.0] * 3
+
+
+@requires_sandbox
+def test_a_build_that_leaves_too_much_behind_fails(solver, monkeypatch):
+    monkeypatch.setattr(runner, 'BUILD_OUTPUT_BYTES', 1000)
+
+    [seed] = run(with_build(solver('good'), 'mkdir d; head -c 2000 /dev/zero > d/pad; chmod 111 d'))
+
+    assert seed.reason == 'build failed: build output over 1000 bytes'

@@ -64,6 +64,7 @@ PR = PullRequest(
     files=['attestation.json', 'solvers/miner/1/solve', 'solvers/miner/1/lib/util.py'],
     solver_sha=SOLVER_SHA,
     solver_files=FILES,
+    author_hotkey=lambda: '5Hotkey',
 )
 LEADERBOARD = '| round | solver | pr |\n|---|---|---|\n| 0 | baselines/cow | - |\n| 1 | solvers/a/1 | #3 |\n'
 REPO = Repo(
@@ -101,6 +102,7 @@ def scored(factor):
         ({'pr': {'force_pushed': True}}, 'close', 'one commit'),
         ({'pr': {'draft': True}}, 'wait', 'ready'),
         ({'pr': {'body': f'- [ ] {CLA_TEXT}'}}, 'close', 'cla'),
+        ({'pr': {'author_hotkey': lambda: None}}, 'close', 'miner'),
         ({'repo': {'queued': [5]}}, 'wait', 'queue'),
         ({'repo': {'unrecorded': [9]}}, 'wait', 'queue'),
         ({'pr': {'files': [*PR.files, 'README.md'], 'changed_files': 4}}, 'close', 'scope'),

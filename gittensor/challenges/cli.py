@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import click
+import requests
 from rich.markup import escape
 from rich.table import Table
 
@@ -38,6 +39,7 @@ from gittensor.challenges.checkout import (
     MAIN,
     Checkout,
     dir_files,
+    miner_hotkey,
     normalize_hash,
     pr_body,
     repo_name,
@@ -91,6 +93,10 @@ def run(*cmd: str, cwd: Path | None = None, env: dict | None = None) -> str:
 
 def gh_user() -> str:
     return run('gh', 'api', 'user', '--jq', '.login')
+
+
+def gh_user_id() -> int:
+    return int(run('gh', 'api', 'user', '--jq', '.id'))
 
 
 def github_login(login: str | None) -> str:
@@ -358,7 +364,8 @@ def submit_command(challenge, agree_cla, login, network):
 
     [dim]Against upstream main's challenge.json and KING, it refuses a signature that does not verify, a non-crown, a
     run that does not match challenge.json, a solver other than the one attested, a KING that has moved, a seed block
-    hash that is not the chain's, and a seed block within 5 blocks of freshness_blocks old.[/dim]
+    hash that is not the chain's, a seed block within 5 blocks of freshness_blocks old, and a GitHub account that is
+    not a registered gittensor miner.[/dim]
     """
     if not agree_cla:
         raise click.ClickException(
@@ -387,6 +394,14 @@ def submit_command(challenge, agree_cla, login, network):
     block, seed_block_hash = chain_now(network, att.seed_block)
     if error := submission_error(att, upstream.config, challenger_sha, upstream.king_sha, block, seed_block_hash):
         raise click.ClickException(f'not submitted: {error}')
+    try:
+        registered = miner_hotkey(gh_user_id()) is not None
+    except (requests.RequestException, ValueError) as e:
+        raise click.ClickException(f'not submitted: cannot tell whether {login} is a registered miner ({e})') from e
+    if not registered:
+        raise click.ClickException(
+            f'not submitted: {login} is not a registered gittensor miner: register and `gitt miner post` first'
+        )
     try:
         run('gh', 'auth', 'status')
     except click.ClickException as e:

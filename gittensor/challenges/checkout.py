@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import requests
+
 from gittensor.challenges.attestation import DEV, Attestation, verify
 from gittensor.challenges.head_to_head import SKIPPED
 from gittensor.challenges.runner import BUILD, SOLVE
@@ -36,6 +38,8 @@ SLACK_BLOCKS = 5  # the PR opens a few blocks after submit checks freshness
 SOURCE_FILES = 500
 SOURCE_FILE_BYTES = 1 << 20
 SOURCE_DIR_BYTES = 4 << 20
+MINER_URL = 'https://api.gittensor.io/miners/by-github-id/{}/hotkey'
+NOT_A_MINER = 'not a registered gittensor miner: register and `gitt miner post`, then resubmit as a new PR'
 TEXT_MODES = ('100644', '100755')  # git's modes for a regular file; a symlink is 120000, a submodule 160000
 
 
@@ -92,6 +96,19 @@ class Checkout:
         readme = self.root / 'README.md'
         paragraphs = readme.read_text().split('\n\n') if readme.is_file() else []
         return next((p.strip() for p in paragraphs if p.strip() and not p.lstrip().startswith('#')), '')
+
+
+def miner_hotkey(github_id: int) -> str | None:
+    """The registered gittensor miner's hotkey for this GitHub account, or ``None`` when it is not one (the API answers
+    200 with an empty body). Raises ``requests.RequestException`` or ``ValueError`` when it cannot tell."""
+    response = requests.get(MINER_URL.format(github_id), timeout=15)
+    response.raise_for_status()
+    if not response.content.strip():
+        return None
+    miner = response.json()
+    if str(miner.get('githubId')) != str(github_id) or not miner.get('hotkey'):
+        raise ValueError(f'unexpected miner record for GitHub id {github_id}: {miner}')
+    return miner['hotkey']
 
 
 @dataclass(frozen=True)

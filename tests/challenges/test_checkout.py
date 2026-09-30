@@ -5,9 +5,11 @@
 on is refused with the reason."""
 
 import dataclasses
+import json
 from datetime import datetime
 
 import pytest
+import requests
 
 from gittensor.challenges.attestation import sign_dev
 from gittensor.challenges.checkout import (
@@ -15,6 +17,7 @@ from gittensor.challenges.checkout import (
     SOURCE_FILE_BYTES,
     SourceFile,
     dir_files,
+    miner_hotkey,
     pr_body,
     source_error,
     submission_error,
@@ -107,6 +110,7 @@ def test_what_submit_accepts_the_maintainer_crowns(tmp_path):
         attestation=att.to_json(),
         solver_sha=CHALLENGER,
         solver_files=[SourceFile('solve', '100755', 10, lambda: b'#!/bin/sh\n')],
+        author_hotkey=lambda: '5Hotkey',
     )
     repo = Repo('baselines/good', KING, '| round |\n|---|\n| 0 |\n', taken=[], queued=[], unrecorded=[])
 
@@ -140,3 +144,14 @@ def test_every_size_is_checked_before_any_file_is_read():
     files = [SourceFile('solve', '100755', 10, unread), SourceFile('big', '100644', SOURCE_FILE_BYTES + 1, unread)]
 
     assert (source_error(files) or '').startswith('big is 1048577 bytes')
+
+
+@pytest.mark.parametrize(
+    'body, hotkey', [(b'', None), (json.dumps({'uid': 64, 'hotkey': '5H', 'githubId': '42'}).encode(), '5H')]
+)
+def test_the_miner_api_answers_an_empty_200_for_an_unregistered_account(monkeypatch, body, hotkey):
+    response = requests.Response()
+    response.status_code, response._content = 200, body
+    monkeypatch.setattr(requests, 'get', lambda url, timeout: response)
+
+    assert miner_hotkey(42) == hotkey

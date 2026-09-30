@@ -203,8 +203,14 @@ def test_submit_pushes_one_commit_on_upstream_main_and_opens_the_pr(challenge_re
     gh.chmod(0o755)
     monkeypatch.setenv('PATH', f'{gh.parent}:{os.environ["PATH"]}')
     monkeypatch.setattr('gittensor.challenges.cli.chain_now', lambda network, block: (1010, 'ab' * 32))
+    monkeypatch.setattr('gittensor.challenges.cli.gh_user_id', lambda: 42)
+    monkeypatch.setattr('gittensor.challenges.cli.miner_hotkey', {}.get)
     monkeypatch.chdir(root)
 
+    out = CliRunner().invoke(cli, ['challenge', 'submit', '--agree-cla', '--login', 'ALICE'])
+    assert out.exit_code != 0 and 'alice is not a registered gittensor miner' in out.output
+
+    monkeypatch.setattr('gittensor.challenges.cli.miner_hotkey', {42: '5Hotkey'}.get)
     out = CliRunner().invoke(cli, ['challenge', 'submit', '--agree-cla', '--login', 'ALICE'])
 
     assert out.exit_code == 0, out.output

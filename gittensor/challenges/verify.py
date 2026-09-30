@@ -21,6 +21,7 @@ from functools import cache, partial
 from typing import Any, Callable
 
 import click
+import requests
 
 from gittensor.challenges.attestation import DEV, Attestation, verify
 from gittensor.challenges.checkout import (
@@ -29,8 +30,10 @@ from gittensor.challenges.checkout import (
     CONFIG,
     KING_FILE,
     MAIN,
+    NOT_A_MINER,
     SOLVER_N,
     SourceFile,
+    miner_hotkey,
     normalize_hash,
     run_mismatch,
     side,
@@ -81,6 +84,7 @@ class PullRequest:
     force_pushed: bool
     commits: int
     created_at: datetime
+    author_hotkey: Callable[[], str | None] = lambda: None  # the author's miner hotkey, looked up only when checked
     head: str = ''  # the head commit sha
     base: str = MAIN
     draft: bool = False
@@ -171,6 +175,9 @@ def decide(pr: PullRequest, repo: Repo, chain: Callable[[int], Chain], config: C
         return stop('wait')
     cla = any(CLA.fullmatch(line.strip()) for line in pr.body.splitlines())
     if not passed('cla', cla, 'CLA accepted' if cla else NO_CLA):
+        return stop('close')
+    hotkey = pr.author_hotkey()
+    if not passed('miner', hotkey is not None, f'{pr.author} mines as {hotkey}' if hotkey else NOT_A_MINER):
         return stop('close')
     waiting = f'waiting on open PRs {repo.queued}; merged crowns to record {repo.unrecorded}'
     if not passed('queue', not (repo.queued or repo.unrecorded), waiting):
@@ -359,6 +366,7 @@ def pull_request(repo: str, number: int, actor: str | None = None) -> PullReques
         force_pushed='head_ref_force_pushed' in events,
         commits=meta['commits'],
         created_at=datetime.fromisoformat(meta['created_at']),
+        author_hotkey=partial(miner_hotkey, meta['user']['id']),
         head=meta['head']['sha'],
         base=meta['base']['ref'],
         draft=meta['draft'],
@@ -499,6 +507,8 @@ def verify_command(name, number, actor, network, act):
             apply(v, name, pr, repo, config)
     except subprocess.CalledProcessError as e:
         raise click.ClickException(f'{" ".join(e.cmd)}: {e.stderr.strip()}') from e
+    except requests.RequestException as e:
+        raise click.ClickException(f'cannot tell whether the author is a registered miner: {e}') from e
     except (KeyError, ValueError) as e:
         raise click.ClickException(f'unexpected shape: {e!r}') from e
     click.echo(v.to_json())

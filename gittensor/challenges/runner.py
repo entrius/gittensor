@@ -9,6 +9,11 @@ writes into private dirs (instance and secret, each its own ``mkdtemp``); each s
 instance (read-only), an empty output dir, and its own directory (a fresh copy per seed and solver, so no state
 carries). ``check`` reads the private originals plus the output, and output holding a link or a special file scores 0.
 
+A solver is source only (``checkout.source_error``); one that compiles ships a ``build`` script at its root. It runs once
+per solver, before any seed, in the solver's own directory (in place: callers pass a private snapshot, hashed before
+the build) under the same sandbox with ``BUILD_TIME_LIMIT_S`` and ``BUILD_MEMORY_MB``, untimed for scoring. What it
+writes there is what every seed's copy runs. A build that fails or times out scores every seed 0 ("build failed").
+
 The solver runs under bubblewrap: new user, pid, net, ipc and uts namespaces (no network), a read-only root with
 ``/usr`` and the loader, size-capped ``/tmp`` and ``/dev/shm``, and the evaluator's own Python read-only at the same
 paths (its prefixes and every ``sys.path`` directory, never one holding the temp dir where the secrets live), so
@@ -46,6 +51,9 @@ from pathlib import Path
 from types import ModuleType
 
 SOLVE = 'solve'
+BUILD = 'build'
+BUILD_TIME_LIMIT_S = 300
+BUILD_MEMORY_MB = 4096
 REASON_CHARS = 200
 LOG_TAIL_CHARS = 160  # the end of the solver's output, after the 'exit N: ' prefix
 FSIZE_BYTES = 1 << 30
@@ -136,6 +144,25 @@ def solver_cpus() -> list[int]:
 def run_solver(box: Path, log: Path, time_limit_s: float, memory_mb: int) -> str:
     """Run ``box/solver/solve`` on ``box/instance`` into ``box/output``: '' when it exited 0 within the limit, else why
     not."""
+    mounts = ['--ro-bind', box / 'instance', '/instance', '--bind', box / 'output', '/output']
+    argv = [f'/work/{SOLVE}', '/instance', '/output']
+    return run_sandboxed(box / 'solver', mounts, argv, log, time_limit_s, memory_mb)
+
+
+def build(solver_dir: Path) -> str:
+    """Run ``solver_dir/build`` in place, if there is one: '' when there is none, no sandbox (every seed then says so)
+    or it exited 0 within ``BUILD_TIME_LIMIT_S``, else why not."""
+    if not (solver_dir / BUILD).is_file() or sandbox_error():
+        return ''
+    with tempfile.TemporaryDirectory(prefix='gt-log-') as private:
+        return run_sandboxed(
+            solver_dir, [], [f'/work/{BUILD}'], Path(private, 'build.log'), BUILD_TIME_LIMIT_S, BUILD_MEMORY_MB
+        )
+
+
+def run_sandboxed(work: Path, mounts: list, argv: list[str], log: Path, time_limit_s: float, memory_mb: int) -> str:
+    """Run ``argv`` in the sandbox with ``work`` as ``/work`` (the cwd) plus ``mounts``, output to ``log``: '' when it
+    exited 0 within the limit, else why not."""
     memory, cpus = memory_mb << 20, solver_cpus()
 
     def limit() -> None:
@@ -145,9 +172,8 @@ def run_solver(box: Path, log: Path, time_limit_s: float, memory_mb: int) -> str
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
         os.sched_setaffinity(0, cpus)
 
-    mounts = ['--ro-bind', box / 'instance', '/instance', '--bind', box / 'output', '/output']
-    mounts += ['--bind', box / 'solver', '/work', '--chdir', '/work', '--remount-ro', '/']
-    command = [*sandbox(memory_mb), *map(str, mounts), '--', f'/work/{SOLVE}', '/instance', '/output']
+    mounts = [*mounts, '--bind', work, '/work', '--chdir', '/work', '--remount-ro', '/']
+    command = [*sandbox(memory_mb), *map(str, mounts), '--', *argv]
     with log.open('wb') as out:
         proc = subprocess.Popen(
             command, env=ENV, stdin=subprocess.DEVNULL, stdout=out, stderr=out, start_new_session=True, preexec_fn=limit
@@ -245,9 +271,16 @@ def solve(challenge: ModuleType, tier: str, solver_dir: Path, instance_dir: Path
 def evaluate(
     challenge: ModuleType, tier: str, seed_block_hash: str, n: int, solver_dirs: Sequence[Path]
 ) -> list[list[SeedResult]]:
-    """Per solver, its result on each of the n seeds. Odd seeds run the solvers in reverse, so none always goes first."""
+    """Per solver, its result on each of the n seeds. Each solver's ``build`` runs first, once, in its dir; a failed
+    build scores every seed 0. Odd seeds run the solvers in reverse, so none always goes first."""
+    failures = [build(solver_dir) for solver_dir in solver_dirs]
+    ready = [solver_dir for solver_dir, failure in zip(solver_dirs, failures) if not failure]
     rows = []
-    for i, seed in enumerate(derive_seeds(seed_block_hash, n)):
+    for i, seed in enumerate(derive_seeds(seed_block_hash, n) if ready else []):
         step = -1 if i % 2 else 1
-        rows.append(run_seed(challenge, tier, seed, solver_dirs[::step])[::step])
-    return [list(results) for results in zip(*rows)]
+        rows.append(run_seed(challenge, tier, seed, ready[::step])[::step])
+    built = zip(*rows)
+    return [
+        [SeedResult(False, 0.0, 0.0, f'build failed: {failure}'[:REASON_CHARS])] * n if failure else list(next(built))
+        for failure in failures
+    ]

@@ -5,6 +5,7 @@
 reason, nothing it starts outlives it, and without a sandbox nothing runs at all."""
 
 import hashlib
+import shutil
 from pathlib import Path
 
 import pytest
@@ -110,3 +111,42 @@ def test_without_a_sandbox_nothing_runs(solver, monkeypatch):
     [seed] = run(solver('good'))
 
     assert (seed.score, seed.reason) == (0.0, 'sandbox unavailable: bwrap is not installed')
+
+
+C_ECHO = r"""#include <stdio.h>
+#include <string.h>
+int main(int argc, char **argv) {
+    char path[4096], number[64] = {0};
+    snprintf(path, sizeof path, "%s/number.txt", argv[1]);
+    FILE *in = fopen(path, "r");
+    fread(number, 1, sizeof number - 1, in);
+    snprintf(path, sizeof path, "%s/answer.txt", argv[2]);
+    fputs(number, fopen(path, "w"));
+    return 0;
+}
+"""
+
+
+def with_build(path: Path, build: str, solve: str | None = None) -> Path:
+    for name, body in (('build', build), ('solve', solve)):
+        if body:
+            (path / name).write_text(f'#!/bin/sh\n{body}\n')
+            (path / name).chmod(0o755)
+    return path
+
+
+@requires_sandbox
+@pytest.mark.skipif(shutil.which('cc') is None, reason='no C compiler')
+def test_a_build_compiles_once_before_the_seeds_and_the_seeds_run_its_output(solver):
+    path = with_build(solver('good'), 'echo x >> built.log; exec cc -O2 -o echo main.c', 'exec ./echo "$@"')
+    (path / 'main.c').write_text(C_ECHO)
+
+    assert [r.score for r in run(path, 2)] == [1.0, 1.0]
+    assert (path / 'built.log').read_text() == 'x\n'
+
+
+@requires_sandbox
+def test_a_failing_build_scores_every_seed_zero_with_its_reason(solver):
+    results = run(with_build(solver('good'), 'echo nope >&2; exit 2'), 2)
+
+    assert [(r.score, r.reason) for r in results] == [(0.0, 'build failed: exit 2: nope')] * 2

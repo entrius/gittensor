@@ -184,6 +184,7 @@ def _score_miner_repos(
             bt.logging.info(f'├─ {repo_name}: ineligible — {reason}')
 
         repo_eval.total_score = max(0.0, repo_eval.total_score - repo_eval.total_collateral_score)
+        repo_eval.undecayed_total_score = max(0.0, repo_eval.undecayed_total_score - repo_eval.total_collateral_score)
         evaluation.repo_evaluations[repo_name] = repo_eval
 
 
@@ -200,6 +201,7 @@ def _score_eligible_repo_prs(
         pr.open_pr_spam_multiplier = spam_multiplier
         pr.calculate_final_earned_score()
         repo_eval.total_score += pr.earned_score
+        repo_eval.undecayed_total_score += pr.undecayed_score
 
     bt.logging.info(
         f'├─ {repo_eval.repository_full_name}: eligible — '

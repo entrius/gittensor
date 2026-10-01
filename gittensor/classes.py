@@ -132,6 +132,7 @@ class Issue:
     body_or_title_edited_at: Optional[datetime] = None
     discovery_base_score: float = 0.0
     discovery_earned_score: float = 0.0
+    discovery_undecayed_score: float = 0.0  # discovery_earned_score with time decay at 1.0
     discovery_review_quality_multiplier: float = 1.0
     discovery_time_decay_multiplier: float = 1.0
     discovery_credibility_multiplier: float = 1.0
@@ -212,6 +213,7 @@ class RepoEvaluation:
     credibility: float = 0.0
     base_total_score: float = 0.0
     total_score: float = 0.0
+    undecayed_total_score: float = 0.0  # total_score with time decay at 1.0
     total_collateral_score: float = 0.0
     total_nodes_scored: int = 0
     total_token_score: float = 0.0

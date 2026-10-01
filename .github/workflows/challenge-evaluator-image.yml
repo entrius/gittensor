@@ -1,0 +1,82 @@
+name: challenge evaluator image
+
+# Builds the base challenge evaluator (docker/challenge-evaluator.Dockerfile) and checks the bwrap sandbox runs in it.
+# A pull request touching it only builds (dry run); a push to main or test publishes it like docker-publish.yml does:
+# main -> entrius/gt-challenge-evaluator:latest, test -> :test, plus :<sha>. Challenge images pin it by digest.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - docker/challenge-evaluator.Dockerfile
+      - gittensor/challenges/**
+      - pyproject.toml
+      - uv.lock
+      - .github/workflows/challenge-evaluator-image.yml
+  push:
+    branches:
+      - main
+      - test
+    paths:
+      - docker/challenge-evaluator.Dockerfile
+      - gittensor/challenges/**
+      - pyproject.toml
+      - uv.lock
+      - .github/workflows/challenge-evaluator-image.yml
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    name: ${{ github.event_name == 'pull_request' && 'build only (dry run)' || 'build and push' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Resolve the tag from the branch
+        id: tag
+        env:
+          REF: ${{ github.ref_name }}
+        run: |
+          REF="${REF//\//-}"
+          echo "tag=$([ "$REF" = main ] && echo latest || echo "$REF")" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/challenge-evaluator.Dockerfile
+          load: true
+          tags: gt-challenge-evaluator:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Check the sandbox runs in the image
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          docker run --rm --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+            --security-opt systempaths=unconfined --entrypoint python gt-challenge-evaluator:ci -c \
+            "import sys; from gittensor.challenges.runner import sandbox_error; e = sandbox_error(); print(e or 'sandbox ok'); sys.exit(bool(e))"
+
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/challenge-evaluator.Dockerfile
+          push: true
+          tags: entrius/gt-challenge-evaluator:${{ steps.tag.outputs.tag }},entrius/gt-challenge-evaluator:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

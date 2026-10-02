@@ -3,7 +3,7 @@
 
 """Round-level emission allocation by repository emission shares."""
 
-from typing import TYPE_CHECKING, Dict, Iterator, Optional
+from typing import Dict, Iterator, Optional
 
 import bittensor as bt
 import numpy as np
@@ -16,16 +16,12 @@ from gittensor.constants import (
 )
 from gittensor.validator.utils.load_weights import RepositoryConfig
 
-if TYPE_CHECKING:
-    from gittensor.validator.compute_pool import ComputePool
-
 
 def blend_emission_pools(
     miner_evaluations: Dict[int, MinerEvaluation],
     master_repositories: Dict[str, RepositoryConfig],
     miner_uids: set[int],
     maintainer_uids_by_repo: Optional[Dict[str, list[int]]] = None,
-    compute_pool: Optional['ComputePool'] = None,
 ) -> np.ndarray:
     """Allocate the combined scoring pool by bounded repository emission_share.
 
@@ -39,22 +35,15 @@ def blend_emission_pools(
     registered maintainer miners for it, ``maintainer_cut`` of that repo's slice
     is carved off the top and split evenly among those maintainers; the
     remainder scores normally. Repos with no listed maintainers are unaffected.
-
-    ``compute_pool`` (with ``COMPUTE_SCORECARD_PATH`` set): the whole share outside ``OSS_EMISSION_SHARE`` is the
-    compute pool, paid by the controller scorecard's per-UID shares of it; the unpaid rest (recycle_share,
-    unregistered hotkeys, or everything when the scorecard was refused or there is none) recycles.
     """
     sorted_uids = sorted(miner_uids)
     uid_index = {uid: idx for idx, uid in enumerate(sorted_uids)}
     rewards = np.zeros(len(sorted_uids))
 
     total_configured_share = sum(config.emission_share for config in master_repositories.values())
-    recycle_share = max(0.0, 1.0 - total_configured_share) * OSS_EMISSION_SHARE
-    # The slice outside the OSS pool burns explicitly: weights are normalized on chain, so leaving it
-    # unallocated would silently redistribute it pro-rata instead. With a scorecard that whole slice is the
-    # compute pool (below); without one it recycles.
-    if compute_pool is None:
-        recycle_share += max(0.0, 1.0 - OSS_EMISSION_SHARE)
+    # Everything outside the allocated repo slices burns explicitly: weights are normalized on chain, so leaving
+    # it unallocated would silently redistribute it pro-rata instead.
+    recycle_share = max(0.0, 1.0 - total_configured_share * OSS_EMISSION_SHARE)
 
     for allocation in calculate_repo_emission_breakdown(
         miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo
@@ -66,21 +55,6 @@ def blend_emission_pools(
             rewards[uid_index[uid]] += reward
         for uid, reward in allocation.issue_discovery_rewards.items():
             rewards[uid_index[uid]] += reward
-
-    if compute_pool is not None:
-        # Compute pool: the controller's scorecard weights, each a share of the compute pool; the rest recycles.
-        compute_share = max(0.0, 1.0 - OSS_EMISSION_SHARE)
-        paid = 0.0
-        for uid, share in compute_pool.rewards.items():
-            if uid in miner_uids and share > 0:
-                rewards[uid_index[uid]] += compute_share * share
-                paid += share
-        recycle_share += compute_share * max(0.0, 1.0 - paid)
-        bt.logging.info(
-            f'Compute pool: {paid * 100:.2f}% of the {compute_share * 100:g}% compute share paid to '
-            f'{len(compute_pool.rewards)} miner(s)'
-            + (f' from scorecard {compute_pool.sha256[:16]}…' if compute_pool.sha256 else f' ({compute_pool.reason})')
-        )
 
     # Recycle receives registry slack and empty repo slices.
     if RECYCLE_UID in miner_uids:

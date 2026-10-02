@@ -9,9 +9,7 @@ dependencies = [
     "bittensor==10.3.1",
     "bittensor-cli==9.21.1",
     "click==8.3.2",
-    "jsonschema==4.25.1",
     "psycopg[binary]==3.3.4",
-    "pyyaml==6.0.3",
     "rich==14.3.3",
     "tree-sitter==0.24.0",
     "tree-sitter-language-pack==0.7.2",
@@ -20,7 +18,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "httpx==0.28.1",
     "pre-commit==4.6.0",
     "pyright==1.1.408",
     "pytest==9.0.3",

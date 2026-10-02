@@ -41,7 +41,9 @@ def blend_emission_pools(
     rewards = np.zeros(len(sorted_uids))
 
     total_configured_share = sum(config.emission_share for config in master_repositories.values())
-    recycle_share = max(0.0, 1.0 - total_configured_share) * OSS_EMISSION_SHARE
+    # Everything outside the allocated repo slices burns explicitly: weights are normalized on chain, so leaving
+    # it unallocated would silently redistribute it pro-rata instead.
+    recycle_share = max(0.0, 1.0 - total_configured_share * OSS_EMISSION_SHARE)
 
     for allocation in calculate_repo_emission_breakdown(
         miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo

@@ -12,10 +12,7 @@ from gittensor.utils.uids import get_all_uids
 from gittensor.validator.emission_allocation import blend_emission_pools
 from gittensor.validator.issue_discovery.scan import run_issue_discovery
 from gittensor.validator.oss_contributions.reward import get_rewards
-from gittensor.validator.utils.config import (
-    VALIDATOR_STEPS_INTERVAL,
-    VALIDATOR_WAIT,
-)
+from gittensor.validator.utils.config import VALIDATOR_STEPS_INTERVAL, VALIDATOR_WAIT
 from gittensor.validator.utils.load_weights import (
     RepositoryConfig,
     load_master_repo_weights,

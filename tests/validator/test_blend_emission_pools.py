@@ -14,10 +14,7 @@ from datetime import datetime, timezone
 import pytest
 
 from gittensor.classes import Issue, MinerEvaluation, RepoEvaluation
-from gittensor.constants import (
-    OSS_EMISSION_SHARE,
-    RECYCLE_UID,
-)
+from gittensor.constants import OSS_EMISSION_SHARE, RECYCLE_UID
 from gittensor.utils.mirror.models import MirrorPullRequest, MirrorReviewSummary
 from gittensor.validator.emission_allocation import blend_emission_pools, calculate_repo_emission_breakdown
 from gittensor.validator.oss_contributions.mirror.scored_pr import ScoredPR
@@ -509,7 +506,7 @@ class TestPreservedCompatibility:
 
         rewards = blend_emission_pools({}, repos, miner_uids)
 
-        assert float(rewards.sum()) == pytest.approx(OSS_EMISSION_SHARE)
+        assert float(rewards.sum()) == pytest.approx(1.0)
 
 
 class TestCaseInsensitiveRepoMatching:

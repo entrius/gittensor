@@ -7,7 +7,6 @@ Gittensor CLI - Main entry point
 Usage:
     gitt config              - Show/set CLI configuration
     gitt miner ...           - Miner commands (check, post, score)
-    gitt up / gitt down      - Start / stop the compute agent container
 """
 
 import json
@@ -212,21 +211,6 @@ cli.add_command(config_group)
 from gittensor.cli.miner_commands import register_miner_commands  # noqa: E402
 
 register_miner_commands(cli)
-
-# Register compute agent commands (gitt up / gitt down)
-from gittensor.cli.up_commands import register_up_commands  # noqa: E402
-
-register_up_commands(cli)
-
-# Register compute controller commands (gitt controller ...)
-from gittensor.controller.cli import register_controller_commands  # noqa: E402
-
-register_controller_commands(cli)
-
-# Register the compute gateway (gitt gateway)
-from gittensor.gateway.cli import register_gateway_commands  # noqa: E402
-
-register_gateway_commands(cli)
 
 
 def main():

@@ -27,6 +27,7 @@ from typing import Callable, Dict, List, Optional, Protocol, Sequence, Tuple
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import HostRunner
 from gittensor.controller.checks.scrape import GpuInfo
+from gittensor.controller.ssh import SshTransportError
 
 
 class ProofUnavailable(RuntimeError):
@@ -281,13 +282,15 @@ def probe_box(
     timeout: float = cfg.PROOF_JOB_TIMEOUT_S,
     clock: Callable[[], float] = time.monotonic,
 ) -> ProbeResult:
-    """Both phases on one box, then cleanup. Never raises: a staging failure is a ``ProbeResult`` with ``error``."""
+    """Both phases, then cleanup. Staging transport errors propagate; other staging failures return ``error``."""
     result = ProbeResult(provider=getattr(proof, 'version', '?'))
     if not gpus:
         result.error = 'no GPUs to prove'
         return result
     try:
         staged = stage_box(runner, gpus, proof, image, timeout)
+    except SshTransportError:
+        raise  # no challenge ran: the caller must treat a lost upload as unreachable, not a proof strike
     except ProofUnavailable as e:
         result.error = clip(str(e))
         return result

@@ -44,9 +44,11 @@ RUN cmake -S sparkinfer -B sparkinfer/build -G Ninja \
 FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION}
 ENV DEBIAN_FRONTEND=noninteractive
 # python3 + huggingface_hub for the model/tokenizer download in server/run.sh (curl is its fallback).
+# Both pinned: tokenizers needs huggingface_hub < 2.0, and unpinned pip takes hub 2.x and then walks tokenizers back
+# to a release with no wheel (a Rust build, which this stage has no compiler for). 1.x ships the `hf` CLI itself.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl python3 python3-pip bash \
-    && pip3 install --no-cache-dir --break-system-packages "huggingface_hub[cli]" tokenizers \
+    && pip3 install --no-cache-dir --break-system-packages huggingface_hub==1.33.0 tokenizers==0.23.2 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/sparkinfer

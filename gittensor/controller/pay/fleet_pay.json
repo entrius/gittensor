@@ -1,0 +1,4 @@
+{
+  "_doc": "Per-GPU-type pay targets in USD per card-hour (vault 23 section 7a). USD is the target; alpha is what is paid: each window the ledger converts these to alpha weights at the oracle price, holds the last good price if the oracle fails, and splits the serving emission across cards by accrued weight. Below target_fleet the unspent remainder recycles; above it per-card pay dilutes. idle: while IDLE and proof-passing. leased: while LEASED and healthy (the four pay conditions). STARTING, DRAINING, CHECKING earn nothing. Set by hand (Kimbo 2026-09-14); the leased/idle ratio must stay above 1.",
+  "RTX5090": {"idle_usd_per_hr": 0.35, "leased_usd_per_hr": 1.00, "target_fleet": 64}
+}

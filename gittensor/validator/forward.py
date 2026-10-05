@@ -9,10 +9,16 @@ import bittensor as bt
 from gittensor.classes import MinerEvaluation, MinerEvaluationCache
 from gittensor.utils.mirror.client import MirrorClient, MirrorRequestError
 from gittensor.utils.uids import get_all_uids
+from gittensor.validator.compute_pool import compute_pool_for
 from gittensor.validator.emission_allocation import blend_emission_pools
 from gittensor.validator.issue_discovery.scan import run_issue_discovery
 from gittensor.validator.oss_contributions.reward import get_rewards
-from gittensor.validator.utils.config import VALIDATOR_STEPS_INTERVAL, VALIDATOR_WAIT
+from gittensor.validator.utils.config import (
+    COMPUTE_COMMIT_PATH,
+    COMPUTE_SCORECARD_PATH,
+    VALIDATOR_STEPS_INTERVAL,
+    VALIDATOR_WAIT,
+)
 from gittensor.validator.utils.load_weights import (
     RepositoryConfig,
     load_master_repo_weights,
@@ -34,8 +40,10 @@ async def forward(self: 'Validator') -> None:
     4. Blend emission pools and update scores
 
     Emission blending:
-    - Combined scoring pool: 100%, allocated by repository emission_share
+    - Combined scoring pool: OSS_EMISSION_SHARE (100% today), allocated by repository emission_share
     - Maintainer cut:        per-repo carve-out routed to maintainer miner neurons
+    - Compute pool:          1 - OSS_EMISSION_SHARE, paid by the controller's signed scorecard (COMPUTE_SCORECARD_PATH);
+                             recycled when it is stale, invalid or unset
     - Recycle:              registry slack and inactive repo slices to UID 0
     """
 
@@ -67,7 +75,16 @@ async def forward(self: 'Validator') -> None:
 
         # 5. Allocate repo-bounded emission shares into final rewards
         maintainer_uids_by_repo = build_maintainer_uids_by_repo(miner_evaluations, master_repositories, miner_uids)
-        rewards = blend_emission_pools(miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo)
+        # The compute pool: the controller's signed scorecard, verified, committed and blended in; unset or refused
+        # means the compute share recycles (a dead controller must not keep paying).
+        compute = (
+            {'compute_pool': compute_pool_for(self, COMPUTE_SCORECARD_PATH, commit_path=COMPUTE_COMMIT_PATH or None)}
+            if COMPUTE_SCORECARD_PATH
+            else {}
+        )
+        rewards = blend_emission_pools(
+            miner_evaluations, master_repositories, miner_uids, maintainer_uids_by_repo, **compute
+        )
 
         self.update_scores(rewards, miner_uids, blacklisted_uids=sorted(penalized_uids))
 

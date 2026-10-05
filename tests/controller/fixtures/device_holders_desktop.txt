@@ -1,0 +1,16 @@
+/proc/1/root/proc/1196/fd /dev/nvidiactl
+/proc/1/root/proc/1196/fd /dev/nvidia0
+/proc/1/root/proc/1642/fd /dev/nvidiactl
+/proc/1/root/proc/1642/fd /dev/nvidia0
+/proc/1/root/proc/2154/fd /dev/nvidiactl
+/proc/1/root/proc/2154/fd /dev/nvidia0
+/proc/1/root/proc/2616/fd /dev/nvidiactl
+/proc/1/root/proc/2616/fd /dev/nvidia0
+== 1196 Xorg
+0::/system.slice/display-manager.service
+== 1642 gnome-shell
+0::/user.slice/user-1000.slice/session-2.scope
+== 2154 xdg-desktop-por
+0::/user.slice/user-1000.slice/user@1000.service/app.slice/xdg-desktop-portal.service
+== 2616 snapd-desktop-i
+0::/user.slice/user-1000.slice/user@1000.service/app.slice/snapd-desktop-integration.service

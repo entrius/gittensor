@@ -1,0 +1,12 @@
+{
+  "at": 1789679269.99,
+  "box": "Lium brave-wolf-fe (swift-orbit-39, FR), 1x RTX 5090 32607 MiB, DinD docker 27.3.1",
+  "driver": "595.84",
+  "load_s": 19.9,
+  "health_ok": true,
+  "canary_ok": true,
+  "vram_gb": 26.5,
+  "decode_tps_single": 92,
+  "prefill_tps": 10600,
+  "notes": "ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:0.5.10@sha256:d519d6ed995c... (v0.5.10, ab936d9), manifest v6 (DSpark drafter, CTX 65536, determinism off), placed by gitt controller run on testnet 422 from test. Entrypoint: both artifacts sha256 OK, DSpark on. Cold place on a box that had 0.5.9: pull 15.0 s, artifact verify 9.5 + 1.2 s, load docker run -> /v1/models 200 19.9 s, canary tool call pass. Decode (runtime usage): 91.1 tok/s over a 7000-token streamed completion (finish=length, past the old 4096 cap); 0.5.9 on the same card gave 111.5 tok/s over 800 tokens. Prefill (runtime ttft_ms): 49,782 tok in 5.09 s = 9.8k tok/s; on 0.5.9 32,842 in 3.10 s = 10.6k and 60,682 in 6.80 s = 8.9k. Needle recall at 49.8K prompt tokens: found, direct and through the public das endpoint. > 65,536 tokens: clean 400 context_length_exceeded. VRAM 27,176 MiB resident at concurrency 1 after the battery (upstream's 30.8 GB peak is 4 x 16K). Concurrency 1: 4 concurrent -> 1x 200 + 3x 429 in <= 10 ms. Tool loop (2 tools, 4 calls, 3 turns) correct with every assistant message echoed back VERBATIM including reasoning, reasoning_content and the openai-python nulls (refusal, annotations, audio, function_call): the 0.5.9 turn-2 400 is fixed. Soak rules on 0.5.9 the same day: drain waited for a 6000-token request (30.5 s), gitt down under a lease = instance_stopped with nothing withheld, gitt up re-placed warm in ~85 s."
+}

@@ -1,0 +1,12 @@
+{
+  "at": 1789687911.6,
+  "box": "Lium brave-comet-23 (swift-orbit-39, FR), 1x RTX 5090 32607 MiB, DinD docker 27.3.1",
+  "driver": "595.84",
+  "load_s": 23.2,
+  "health_ok": true,
+  "canary_ok": true,
+  "vram_gb": 26.4,
+  "decode_tps_single": 104,
+  "prefill_tps": 10600,
+  "notes": "v7 = v6 (sparkinfer 0.5.10, same digest) with concurrency 2 (SPARKINFER_MAX_QUEUE_DEPTH=2, front_door.concurrency 2), qualified 9/18 on testnet 422 from test@d53f2d9. Cold place 2.3 min (image + weights), load 23.2 s, canary x2 pass. FINDING: the server interleaves concurrent decodes, it does not batch them: aggregate is flat at 91-100 tok/s for 1, 2 and 4 streams (4 x short: 27 tok/s each; 4 x 16K: TTFT 2.3 s, 91 tok/s total; drafter off is the same, 94 tok/s, with TTFT up to 25 s at 16K, so the drafter stays). Concurrency 2: 2 x short 98 tok/s total (~63 each); 2 x 16K prompts: recall 2/2, TTFT 2.2 s, 91 tok/s; 2 x 32K prompts (27K tokens each): recall 2/2, TTFT 3.0 / 10.5 s (prefill runs in turn), 50 tok/s total; 2 x 4096-token outputs: 96 tok/s total, ~52 each, 58 s wall; 3rd request 429 in < 10 ms. VRAM 27.1 GB resident after the battery (concurrency 4 with 4 x 16K also 27.1 GB). 2 chosen over 4: ~50 tok/s per stream keeps a 16K output inside das's 330 s timeout; 4 gives ~27 tok/s per stream and no more throughput. Real capacity = more cards (or batched decode upstream)."
+}

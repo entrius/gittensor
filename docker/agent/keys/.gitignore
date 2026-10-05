@@ -1,0 +1,5 @@
+# Key material never goes in the repo: not the dev pairs make-dev-keys.sh writes here, not the real public halves.
+*
+!.gitignore
+!README.md
+!make-dev-keys.sh

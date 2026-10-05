@@ -31,11 +31,11 @@ on:
         required: false
         default: ""
       dockerfile:
-        description: "Dockerfile path inside source_repo (default: Dockerfile; this repo's sparkinfer image is docker/sparkinfer.Dockerfile)."
+        description: "Dockerfile path inside source_repo (default: Dockerfile)."
         required: false
         default: "Dockerfile"
       build_args:
-        description: "Extra --build-arg lines, newline-separated (e.g. SPARKINFER_REF=<commit>)."
+        description: "Extra --build-arg lines, newline-separated (e.g. SOME_ARG=value)."
         required: false
         default: ""
       image:

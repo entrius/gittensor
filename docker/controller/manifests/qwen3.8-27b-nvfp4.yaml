@@ -1,0 +1,104 @@
+# The Qwen3.8-27B (NVFP4) chat workload as blessed for the compute pool, v6 (9/16): sparkinfer's own release
+# container (ghcr.io/gittensor-ai-lab/sparkinfer-qwen38, built and published from their repo), blessed by digest.
+# The same document is PR'd to gittensor-ai-lab/sparkinfer as docker/gittensor-manifest.yaml (the author-owned copy,
+# baked at /manifest.yaml); at bless time the controller mounts THIS signed copy over it and pins the digest.
+#
+# What changed from v5 (entrius/sparkinfer v0.5.7 — do not bless: it predates sparkinfer#1088, so past 16K tokens the
+# decode attended only the sink and the last 4K and an agent lost its own context):
+#   * image: their v0.5.10 (ab936d9; v0.5.9 40fb1f7 = v0.5.8 b1ed168 + the compute-pool entrypoint and manifest, sparkinfer#1098; drain exits at once when idle, SPARKINFER_DRAIN_GRACE_S, 429 bodies with
+#     type/code, SPARKINFER_NO_DOWNLOAD, the #1088 fix). Their entrypoint execs the server, so SIGTERM lands.
+#   * the DSpark drafter (speculative decoding) is on: a second 1.4 GB artifact, SPARKINFER_MODE=serve-dspark.
+#   * CTX 65536 (the product caps context at 64K; 131072 with the drafter peaks ~31.4 GB on a 31.8 GB card).
+#   * no output cap at the gateway or in das (Chutes' shape: the runtime owns its limits): the container's own
+#     SPARKINFER_MAX_OUTPUT_TOKENS default (16384) is the cap, so drain.max_s 240 covers a full 16K completion at
+#     ~94 tok/s, with SPARKINFER_DRAIN_GRACE_S=0 (the runtime waits, the controller kills at 240).
+#   * SPARKINFER_MAX_QUEUE_DEPTH = front_door.concurrency and SPARKINFER_ADMISSION_WAIT_S=0: refuse, never queue.
+#   * canaries at temperature 0 (omitted sampling now follows generation_config.json).
+#   * no tokenizer.json / .tokenizer_repo artifacts: the server reads MODEL_DIR/tokenizer.json.
+#   * TODO before bless (qualification on our own card, `deploy --box`): min_vram_gb at
+#     65536 with the drafter, profile, concurrency (upstream fixed the serialised 4 × 8k case).
+name: qwen3.8-27b-nvfp4
+version: 8
+description: Qwen3.8-27B (NVFP4) chat with the DSpark drafter on sparkinfer v0.5.11's release container, one RTX 5090 per instance
+runtime: sparkinfer
+image: ghcr.io/gittensor-ai-lab/sparkinfer-qwen38:0.5.11@sha256:5395a9d39100d856201e8b38a4ef29f84cc4452814258fb8187a1f41683b3814  # tag 0.5.11 (a5c8d3e, 9/24): v0.5.10 + #1134 drop the whole-prefill graph when its scratch moved (the libcuda segfault, sparkinfer#1133) + #1123 concurrent recurrent-state width + #1135 lost context -> /health 503; bless copies it under entrius/
+placement:
+  gpu_types: {include: [RTX5090]}
+  cards_per_instance: 1
+  min_vram_gb: 31            # upstream: 30.8 GB peak of 32.1 at CTX 65536 with the drafter. NOT 32: placement compares against our 5090 spec floor (32000 MiB = 31.25 GB), so 32 never places (9/17 soak)
+  max_load_s: 180            # upstream 9/17 on their 5090: ~37 s warm (hash 18 s + start 19 s); cold page cache is disk-bound twice over 18 GB
+run:
+  env:
+    SPARKINFER_NO_DOWNLOAD: '1'       # pre-staged weights, no egress: a missing checkpoint fails loudly instead of downloading
+    SPARKINFER_MODE: serve-dspark     # the release container's drafter mode (gittensor-entrypoint.sh maps env → argument)
+    MODEL_DIR: /models/qwen38-nvfp4
+    DRAFT_DIR: /models/qwen38-dspark
+    MODEL_NAME: qwen3.8-27b           # the id the gateway republishes; the container's default is qwen38-nvfp4
+    CTX: '65536'
+    SPARKINFER_MAX_QUEUE_DEPTH: '2'   # keep equal to front_door.concurrency
+    SPARKINFER_ADMISSION_WAIT_S: '0'
+    SPARKINFER_DRAIN_GRACE_S: '0'
+    SPARKINFER_DETERMINISTIC: '0'     # no output audits; on costs TTFT
+  volumes: [{name: models, mount: /models, read_only: true}]
+network:
+  egress: []                 # none: the controller pre-stages every file the entrypoint looks for
+artifacts:
+  - path: /models/qwen38-nvfp4
+    source: hf://gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090
+    revision: 8e2c0cd25468ac5c1f85f621c2b8edb15ea1f03a
+    sha256: d4382c5ebc8c9ece150aafc831910e01b6fb022ac9a72d36c3acc9715456e632   # same files as v5; the hash is over relative paths
+  - path: /models/qwen38-dspark
+    source: hf://gittensor-model-hub/Qwen3.8-27B-DSpark-NVFP4
+    revision: eba1ac5a66c74902eaa95a4000a7c5eda96d8e95
+    sha256: 506d2ebdc91de82bb5fcd8413490eafb484731d765d7b509ee7a60dad002c865
+health:
+  # /health, not /v1/models: /v1/models answers 200 after the CUDA context is lost; /health answers 503 (0.5.11 #1135)
+  http: {path: /health, port: 8080, expect_status: 200}
+  interval_s: 60
+  failure_threshold: 3
+entry_canary:                # one picked at random each start; sent at front_door.concurrency (warmup)
+  # Every canary is a tool call: one call proves the weights decode AND that `tools` reach the chat template. Thinking
+  # is off (Qwen3.8 thinks by default and would spend max_tokens before calling); temperature 0 so the canary does not
+  # depend on the checkpoint's generation_config.json.
+  - type: http
+    http: {method: POST, path: /v1/chat/completions, port: 8080}
+    body:
+      messages: [{role: user, content: "What is 17 × 23? Use the multiply tool."}]
+      max_tokens: 64
+      temperature: 0
+      enable_thinking: false
+      tools:
+        - type: function
+          function:
+            name: multiply
+            parameters: {type: object, properties: {a: {type: number}, b: {type: number}}, required: [a, b]}
+    # Order-free lookaheads: sparkinfer serialises "arguments" before "name", so 'multiply[\s\S]*17' never matches.
+    pass: {status: 200, regex: '(?=[\s\S]*"finish_reason":\s*"tool_calls")(?=[\s\S]*"name":\s*"multiply")(?=[\s\S]*\\"[ab]\\":\s*17\b)(?=[\s\S]*\\"[ab]\\":\s*23\b)'}
+  - type: http
+    http: {method: POST, path: /v1/chat/completions, port: 8080}
+    body:
+      messages: [{role: user, content: "What's the weather in Paris right now? Use the tool."}]
+      max_tokens: 64
+      temperature: 0
+      enable_thinking: false
+      tools:
+        - type: function
+          function:
+            name: get_weather
+            parameters: {type: object, properties: {city: {type: string}}, required: [city]}
+    pass: {status: 200, regex: '(?=[\s\S]*"finish_reason":\s*"tool_calls")(?=[\s\S]*"name":\s*"get_weather")(?=[\s\S]*\\"city\\":\s*\\"Paris)'}
+profile:                     # health and standing only, never pay. Qualified 9/17 on 0.5.9 with the drafter (rented 5090, 595.84)
+  decode_tps_single: 92      # 9/17: 111 tok/s on an 800-token essay, 92 over a 7000-token reasoning stream (v5 no drafter: 94)
+  decode_tps_aggregate: 100  # 9/18: flat at 91-100 tok/s for 1, 2 and 4 concurrent streams (the old 338 was never this runtime)
+  prefill_tps: [9600, 10600]  # 9/17: 32.8K tokens in 3.10 s, 49.8K in 5.16 s (runtime ttft_ms)
+  vram_gb: 30                # upstream 9/16: 30,057 MiB idle / 30,835 MiB peak at 65536 with the drafter (v5 no-drafter: 25)
+front_door:
+  type: gateway-openai
+  port: 8080
+  concurrency: 2             # v7 (9/18). The server interleaves concurrent decodes, it does not batch them: a card gives ~100 tok/s in total however many share it (measured at 1, 4 and 6). 2 = ~50 tok/s each and half the 429s; 4 = ~27 tok/s each and a 16K output would outlast das's 330 s timeout
+  routes:
+    - {path: /v1/chat/completions, method: POST, stream: true}
+    - {path: /v1/models, method: GET}
+drain:
+  type: requests
+  max_s: 240                 # the container's own 16384-token output cap at ~94 tok/s ≈ 175 s; SPARKINFER_DRAIN_GRACE_S=0 leaves the kill to us

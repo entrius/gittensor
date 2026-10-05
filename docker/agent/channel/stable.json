@@ -1,0 +1,6 @@
+{
+  "agent": "entrius/gt-agent@sha256:41e887cc0b02e74aa4ec3ba4c3ecacfa339902d331b84087b5acae8baa3f8b43",
+  "runner": "entrius/gt-agent-runner@sha256:b3e0ef363a36b11bc255569f7cf8a9f8cd4641f7b91e5e2ff91813012db8a208",
+  "version": "5.1.0",
+  "issued_at": 1789679984
+}

@@ -25,7 +25,7 @@ from gittensor.controller.proof.slot import GpuProof, UnconfiguredProof, image_r
 class FullCheckConfig:
     """The served inputs of a full check, in one place so a test (or a future served config) can vary them."""
 
-    spec: cfg.CardSpec = cfg.RTX_5090
+    spec: Optional[cfg.CardSpec] = None  # None = the GPU catalog's entry for the card name the box reports
     agent_image_digests: Tuple[str, ...] = ()  # sha256:... digests of the agent images we published
     agent_image_ids: Tuple[str, ...] = ()  # dev only: sha256:... image IDs of local builds, which carry no repo digest
     agent_container: str = cfg.AGENT_CONTAINER_NAME

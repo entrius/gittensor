@@ -8,22 +8,11 @@ cut over in one flip, and nothing here is read by the live phase-0 path. Values 
 are marked as copies so the cutover can retire the originals without touching this file.
 """
 
-from dataclasses import dataclass
+from gittensor.controller.checks.catalog import CardSpec as CardSpec  # re-exported: cfg.CardSpec
+from gittensor.controller.checks.catalog import load_catalog
 
-
-@dataclass(frozen=True)
-class CardSpec:
-    """What every card on an admitted box must look like in ``nvidia-smi --query-gpu``."""
-
-    name: str = 'NVIDIA GeForce RTX 5090'
-    compute_cap: str = '12.0'  # sm_120, what the proof kernel (docker/proof/kernel) is compiled for
-    vram_total_mib_min: int = 32_000  # a 5090 reports 32607 MiB
-    vram_total_mib_max: int = 33_000
-    count_min: int = 1
-    count_max: int = 8
-
-
-RTX_5090 = CardSpec()
+# The card specs are the GPU catalog's (catalog.py, gpu_catalog.json); CardSpec is re-exported for the proof provider.
+RTX_5090 = load_catalog()['RTX5090']
 
 # Lium's floor (`checks/gpu_power_limit.py` MIN_POWER_LIMIT_RATIO): a card capped below 90% of its default limit is
 # throttled on purpose.

@@ -22,15 +22,13 @@ from typing import Any
 import yaml
 from jsonschema import Draft202012Validator
 
+from gittensor.controller.checks.catalog import spec_for_name
+
 SCHEMA_PATH = Path(__file__).with_name('manifest.schema.json')
 _DIGEST = re.compile(r'@(sha256:[a-f0-9]{64})$')
 _ZERO_DIGEST = 'sha256:' + '0' * 64
 _HTTP_FRONT_DOORS = ('gateway-openai', 'http')
 _OPENAI_ROUTES = ('/v1/chat/completions', '/v1/models')
-
-# nvidia-smi card name -> manifest `placement.gpu_types` name. Unknown names normalise to their alphanumerics with the
-# vendor words dropped ("NVIDIA H100 80GB HBM" -> "H10080GBHBM"), which matches nothing a manifest lists today.
-GPU_TYPE_NAMES = {'NVIDIA GeForce RTX 5090': 'RTX5090'}
 
 
 class ManifestError(ValueError):
@@ -159,9 +157,12 @@ def image_digest(image: str) -> str:
 
 
 def gpu_type_of(card_name: str) -> str:
-    """The manifest GPU type of a card as nvidia-smi names it."""
-    if card_name in GPU_TYPE_NAMES:
-        return GPU_TYPE_NAMES[card_name]
+    """The manifest GPU type of a card as nvidia-smi names it: the GPU catalog's type for a name it knows. Any other
+    name normalises to its alphanumerics with the vendor words dropped ("NVIDIA A40" -> "A40"), which matches nothing
+    a manifest lists."""
+    spec = spec_for_name(card_name)
+    if spec is not None:
+        return spec.gpu_type
     words = [w for w in card_name.split() if w.lower() not in ('nvidia', 'geforce')]
     return re.sub(r'[^A-Za-z0-9]', '', ''.join(words)).upper()
 

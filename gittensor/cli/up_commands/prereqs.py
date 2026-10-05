@@ -32,6 +32,7 @@ from gittensor.agent.config import (
     is_compute_axon,
 )
 from gittensor.agent.launch import Workload, parse_workloads, workload_list_command
+from gittensor.controller.checks.catalog import load_catalog, spec_for_name
 from gittensor.controller.checks.scrape import (
     KERNEL_DRIVER_COMMAND,
     NVML_MD5_COMMAND,
@@ -39,7 +40,6 @@ from gittensor.controller.checks.scrape import (
     parse_md5,
 )
 
-BLESSED_GPU_MARKER = '5090'  # the only card the pool blesses today (vault 24 §5: multi-type is later)
 DEFAULT_WALLET_PATH = Path.home() / '.bittensor' / 'wallets'
 PUBLIC_IP_SERVICES = ('https://checkip.amazonaws.com', 'https://api.ipify.org')  # each answers the caller's IP, plain
 PUBLIC_IP_TIMEOUT_S = 5.0
@@ -224,16 +224,22 @@ def check_driver(probe: HostProbe) -> list[CheckResult]:
     driver = rows[0][1] if len(rows[0]) > 1 else '?'
     results = [CheckResult('NVIDIA driver', True, f'{driver}; {len(rows)} GPU(s): {", ".join(names)}')]
     results.append(check_driver_vetted(probe, driver))
-    if not all(BLESSED_GPU_MARKER in n for n in names):
-        results.append(
-            CheckResult(
-                'GPU model',
-                False,
-                f'pool blesses RTX {BLESSED_GPU_MARKER} only; found {", ".join(names)}',
-                required=False,
-            )
-        )
+    model = check_gpu_model(names)
+    if model is not None:
+        results.append(model)
     return results
+
+
+def check_gpu_model(names: Sequence[str]) -> CheckResult | None:
+    """The controller's ``gpu_spec`` model rule, said here first: every card one type, and a type the pool admits."""
+    specs = [spec_for_name(n) for n in names]
+    admitted = ', '.join(sorted(t for t, s in load_catalog().items() if s.qualified))
+    found = ', '.join(names)
+    if any(s is None or not s.qualified for s in specs):
+        return CheckResult('GPU model', False, f'pool admits {admitted} only; found {found}', required=False)
+    if len({s.gpu_type for s in specs if s is not None}) > 1:
+        return CheckResult('GPU model', False, f'every card on a box must be one type; found {found}', required=False)
+    return None
 
 
 def check_driver_vetted(probe: HostProbe, driver: str) -> CheckResult:

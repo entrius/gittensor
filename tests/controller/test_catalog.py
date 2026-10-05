@@ -65,7 +65,7 @@ def test_names_map_to_types_and_an_unknown_name_normalises():
 
 
 def test_a_listed_type_is_not_admitted_until_it_is_qualified(monkeypatch):
-    listed = replace(spec_for_type('H100'), status=LISTED)
+    listed = replace(load_catalog()['H100'], status=LISTED)
     monkeypatch.setattr(ck, 'spec_for_name', lambda name: listed)
     result = ck.check_gpu_spec(card(H100))
     assert not result.passed and 'listed but not qualified' in result.evidence['reason']

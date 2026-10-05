@@ -4,6 +4,8 @@
 """The GPU catalog: the types it lists, the VRAM window of each, and how the full check's spec rule and ``gitt up``
 use it. A listed type is known but not admitted; the spec is the catalog's, picked by the name the box reports."""
 
+from dataclasses import replace
+
 import pytest
 
 from gittensor.cli.up_commands.prereqs import check_gpu_model
@@ -33,10 +35,10 @@ def card(line: str, **changes: str):
     return parse_nvidia_smi(', '.join(cols))
 
 
-def test_the_catalog_lists_every_phase_1_type_and_only_the_5090_is_qualified():
+def test_the_catalog_lists_and_admits_every_phase_1_type():
     catalog = load_catalog()
     assert set(catalog) == {'RTX5090', 'RTXPRO6000', 'L40S', 'H100', 'H200', 'B200', 'B300'}
-    assert [t for t, s in catalog.items() if s.qualified] == ['RTX5090']
+    assert all(s.qualified for s in catalog.values())
     assert all(s.status in (QUALIFIED, LISTED) for s in catalog.values())
     assert catalog['RTX5090'] is RTX_5090 and (RTX_5090.vram_total_mib_min, RTX_5090.vram_total_mib_max) == (
         32_000,
@@ -62,10 +64,17 @@ def test_names_map_to_types_and_an_unknown_name_normalises():
     assert spec_for_name('NVIDIA GeForce RTX 4090') is None and gpu_type_of('NVIDIA GeForce RTX 4090') == 'RTX4090'
 
 
-def test_a_listed_type_is_not_admitted_until_it_is_qualified():
+def test_a_listed_type_is_not_admitted_until_it_is_qualified(monkeypatch):
+    listed = replace(spec_for_type('H100'), status=LISTED)
+    monkeypatch.setattr(ck, 'spec_for_name', lambda name: listed)
     result = ck.check_gpu_spec(card(H100))
     assert not result.passed and 'listed but not qualified' in result.evidence['reason']
     assert result.evidence[w.PUBLIC] == {'code': w.SPEC_MODEL, 'n': 1}
+
+
+def test_a_qualified_type_is_admitted_by_the_name_it_reports():
+    result = ck.check_gpu_spec(card(H100))
+    assert result.passed and result.evidence['gpu_type'] == 'H100'
 
 
 def test_a_box_is_held_to_our_numbers_for_the_type_it_names():
@@ -102,7 +111,8 @@ def test_a_bad_catalog_is_refused():
 def test_gitt_up_names_the_model_rule_before_the_controller_does():
     five = 'NVIDIA GeForce RTX 5090'
     assert check_gpu_model([five, five]) is None
-    listed = check_gpu_model(['NVIDIA H100 PCIe'])
-    assert listed is not None and 'pool admits RTX5090 only' in listed.detail and not listed.required
+    assert check_gpu_model(['NVIDIA H100 PCIe', 'NVIDIA H100 80GB HBM3']) is None
+    mixed = check_gpu_model([five, 'NVIDIA H100 PCIe'])
+    assert mixed is not None and 'one type' in mixed.detail and not mixed.required
     unknown = check_gpu_model([five, 'NVIDIA GeForce RTX 4090'])
     assert unknown is not None and 'RTX 4090' in unknown.detail

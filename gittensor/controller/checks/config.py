@@ -28,9 +28,10 @@ PROOF_FILL_RATIO = 0.9  # what the binary fills: 0.9 of the total CUDA reports (
 # (Kimbo 9/14) and is still 4.5 GB above anything a 24 GB card can fill.
 PROOF_FILL_FLOOR_RATIO = 0.85
 # The SSH command timeout for one card's `docker start -a`. The proof's own verdict limit is the provider's flat
-# 30 s on our stopwatch (trust-the-seal, no 5090 speed band; Kimbo 9/14); this is only the hard stop after which we
-# give up waiting for an answer at all, kept above the verdict limit so a late answer is judged, not lost.
-PROOF_JOB_TIMEOUT_S = 60.0
+# limit on our stopwatch for the card's type (30 s for a 5090, 120 s for the larger cards; trust-the-seal, no speed
+# band; Kimbo 9/14); this is only the hard stop after which we give up waiting for an answer at all, kept above the
+# largest verdict limit so a late answer is judged, not lost.
+PROOF_JOB_TIMEOUT_S = 150.0
 # Asking the box whether it has the proof image (and starting its pull when it has not): a local docker call.
 PROOF_IMAGE_PROBE_TIMEOUT_S = 20.0
 # The proof image (docker/proof/Dockerfile): our own small signed base, `entrius/gt-proof`, with NO binary and NO

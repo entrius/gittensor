@@ -20,6 +20,7 @@ from typing import Callable, Collection, Dict, Iterable, List, Mapping, Optional
 
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks import why as w
+from gittensor.controller.checks.catalog import spec_for_name
 from gittensor.controller.checks.runner import HostRunner
 from gittensor.controller.checks.scrape import (
     PERSISTENCED_COMM,
@@ -45,10 +46,23 @@ GPU_PROOF = 'gpu_proof'
 _UUID = re.compile(r'^GPU-[0-9a-fA-F-]{20,}$')
 
 
-def check_gpu_spec(gpus: Sequence[GpuInfo], spec: cfg.CardSpec, scrape_error: str = '') -> CheckResult:
-    """Count within the spec's range and every card the pinned model: exact name, compute capability, VRAM in range,
-    a well-formed UUID."""
+def check_gpu_spec(gpus: Sequence[GpuInfo], spec: Optional[cfg.CardSpec] = None, scrape_error: str = '') -> CheckResult:
+    """Count within the spec's range and every card the one model: a name of the type, compute capability, VRAM in
+    range, a well-formed UUID. With no ``spec`` given it is the catalog's entry for the first card's name: the box
+    says which type it claims, and every card is then held to our numbers for that type. A name the catalog does not
+    know, or a type that is listed but not qualified, is not admitted."""
     cards = [g.as_dict() for g in gpus]
+    if spec is None and gpus and not scrape_error:
+        claimed = gpus[0].name.strip()
+        spec = spec_for_name(claimed)
+        if spec is None or not spec.qualified:
+            why = 'is not in the GPU catalog' if spec is None else f'({spec.gpu_type}) is listed but not qualified yet'
+            return CheckResult(
+                GPU_SPEC,
+                False,
+                {'reason': f'model {claimed!r} {why}', 'gpus': cards, w.PUBLIC: {'code': w.SPEC_MODEL, 'n': len(gpus)}},
+            )
+    spec = spec or cfg.RTX_5090  # nothing scraped: the count and unreadable-scrape answers do not depend on the type
     if scrape_error:
         return CheckResult(
             GPU_SPEC,
@@ -73,8 +87,8 @@ def check_gpu_spec(gpus: Sequence[GpuInfo], spec: cfg.CardSpec, scrape_error: st
     offending: List[str] = []
     wrong: Dict[str, int] = {}  # why code -> cards in it; the public phrase names the first kind we found
     for g in gpus:
-        if g.name.strip() != spec.name:
-            offending.append(f'{g.uuid}: model {g.name!r} != {spec.name!r}')
+        if g.name.strip() not in spec.names:
+            offending.append(f'{g.uuid}: model {g.name!r} is not a {spec.gpu_type} ({", ".join(spec.names)})')
             wrong[w.SPEC_MODEL] = wrong.get(w.SPEC_MODEL, 0) + 1
         if g.compute_cap.strip() != spec.compute_cap:
             offending.append(f'{g.uuid}: compute_cap {g.compute_cap!r} != {spec.compute_cap!r}')
@@ -94,7 +108,9 @@ def check_gpu_spec(gpus: Sequence[GpuInfo], spec: cfg.CardSpec, scrape_error: st
             False,
             {'reason': '; '.join(offending)[:500], 'gpus': cards, w.PUBLIC: {'code': code, 'n': wrong[code]}},
         )
-    return CheckResult(GPU_SPEC, True, {'count': len(gpus), 'model': spec.name, 'gpus': cards})
+    return CheckResult(
+        GPU_SPEC, True, {'count': len(gpus), 'model': gpus[0].name.strip(), 'gpu_type': spec.gpu_type, 'gpus': cards}
+    )
 
 
 def check_uuid_pin(gpus: Sequence[GpuInfo], pinned_uuids: Optional[Sequence[str]]) -> CheckResult:
@@ -431,7 +447,7 @@ def proof_result(probe: ProbeResult) -> CheckResult:
 
 def identity_checks(
     scrape: HostScrape,
-    spec: cfg.CardSpec,
+    spec: Optional[cfg.CardSpec],
     pinned_uuids: Optional[Sequence[str]],
     allowlist,
     agent_image_digests: Sequence[str],

@@ -63,6 +63,7 @@ from pathlib import Path
 from typing import Literal
 
 from gittensor.controller.checks import config as cfg
+from gittensor.controller.checks.catalog import spec_for_type
 from gittensor.controller.checks.runner import HostRunner
 from gittensor.controller.checks.state import (
     BENCHED,
@@ -116,7 +117,6 @@ from gittensor.controller.ssh.certs import CertificateError
 from gittensor.controller.standing import lease_cap_s, rank, standing
 
 _TRANSPORT = (SshTransportError, CertificateError)
-_SPEC_VRAM_GB = {'RTX5090': cfg.RTX_5090.vram_total_mib_min / 1024}  # our spec table, never the box's self-report
 
 
 # ---------------------------------------------------------------- instances.json ------------------------------------
@@ -224,7 +224,8 @@ def card_fits(box: BoxState, manifest: Manifest) -> tuple[bool, str]:
     gpu_type = gpu_type_of(box.card_name)
     if not manifest.placement.gpu_types.admits(gpu_type):
         return False, f'gpu type {gpu_type or "?"} not admitted'
-    vram_gb = _SPEC_VRAM_GB.get(gpu_type, 0.0)
+    spec = spec_for_type(gpu_type)  # our catalog, never the box's self-report
+    vram_gb = spec.vram_total_mib_min / 1024 if spec else 0.0
     if vram_gb < manifest.placement.min_vram_gb:
         return False, f'{gpu_type} spec VRAM {vram_gb:.1f} GB < min_vram_gb {manifest.placement.min_vram_gb}'
     if manifest.placement.cards_per_instance != 1:

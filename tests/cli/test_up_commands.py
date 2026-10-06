@@ -187,8 +187,13 @@ class TestPrereqs:
         wide, apart from the other ports, and free except for our own pods."""
         plain = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
         assert 'Sysbox runtime' not in [r.name for r in plain.results]
-        kw = dict(wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
-        rent = run_prereqs(probe, rent_ports=(31000, 31099), **kw)
+
+        def with_rent(ports):
+            return run_prereqs(
+                probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200, rent_ports=ports
+            )
+
+        rent = with_rent((31000, 31099))
         rows = {r.name: r for r in rent.results}
         assert (
             not rent.ok
@@ -197,21 +202,21 @@ class TestPrereqs:
         )
         assert rows['Rent ports'].status == 'pass' and 'open it on your firewall' in rows['Rent ports'].detail
         probe.runtimes = subprocess.CompletedProcess([], 0, '{"nvidia":{},"runc":{},"sysbox-runc":{}}', '')
-        assert run_prereqs(probe, rent_ports=(31000, 31099), **kw).ok
+        assert with_rent((31000, 31099)).ok
         probe.uname = '5.15.0-91-generic'
-        old = run_prereqs(probe, rent_ports=(31000, 31099), **kw)
+        old = with_rent((31000, 31099))
         sysbox = next(r for r in old.results if r.name == 'Sysbox runtime')
         assert old.ok and sysbox.status == 'warn' and '5.19' in sysbox.detail
         probe.uname = '6.8.0-45-generic'
-        narrow = run_prereqs(probe, rent_ports=(31000, 31050), **kw)
+        narrow = with_rent((31000, 31050))
         assert not narrow.ok and 'at least 100' in next(r for r in narrow.results if r.name == 'Rent ports').detail
-        overlap = run_prereqs(probe, rent_ports=(2150, 2300), **kw)
+        overlap = with_rent((2150, 2300))
         assert 'overlaps the sshd port' in next(r for r in overlap.results if r.name == 'Rent ports').detail
         probe.busy_ports = {31022}
-        busy = run_prereqs(probe, rent_ports=(31000, 31099), **kw)
+        busy = with_rent((31000, 31099))
         assert not busy.ok and '31022' in next(r for r in busy.results if r.name == 'Rent ports').detail
         probe.pod_ports = '0.0.0.0:31022->22/tcp, [::]:31022->22/tcp\n'
-        ours = run_prereqs(probe, rent_ports=(31000, 31099), **kw)
+        ours = with_rent((31000, 31099))
         assert ours.ok and 'pod of ours' in next(r for r in ours.results if r.name == 'Rent ports').detail
 
     def test_a_box_size_the_type_does_not_admit_is_named(self, probe):

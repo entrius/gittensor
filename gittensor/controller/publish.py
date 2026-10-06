@@ -29,12 +29,12 @@ from pathlib import Path
 from typing import Any
 
 from gittensor.controller.checks import config as cfg
-from gittensor.controller.checks.state import BENCHED, BoxState, ladder_rung
+from gittensor.controller.checks.state import BENCHED, IDLE, BoxState, ladder_rung
 from gittensor.controller.manifest import gpu_type_of
 from gittensor.controller.pay.ledger import Ledger, is_withheld
 from gittensor.controller.pay.rates import RatesError, load_rates
 from gittensor.controller.pay.scorecard import LATEST, ScorecardError, read_scorecard
-from gittensor.controller.standing import HARD, RELEASED, SOFT, standing
+from gittensor.controller.standing import HARD, RELEASED, SOFT, box_rentable, standing
 
 SCHEMA = 1
 PUBLIC_DIR = 'public'
@@ -238,6 +238,9 @@ def build_fleet(
     age_s = round(now - issued_at, 1) if issued_at is not None else None
     live = live_pay(root, boxes, view, now)
     by_state: dict[str, int] = {}
+    # Boxes a customer could rent right now, by GPU type and box size (29 §7: the app's offers come from here). A
+    # box counts when it is rentable and every card on it is idle; the size is its card count, the whole box.
+    offers: dict[str, dict[str, int]] = {}
     rows = []
     for box in sorted(boxes.values(), key=lambda b: b.box_id):
         if not _HOTKEY.match(box.box_id):
@@ -262,14 +265,22 @@ def build_fleet(
         benched = box.status == BENCHED
         bench_event = _last_event(box.standing_events, _BENCH_KINDS) if benched else None
         failed = _names(box.last_failed, _CHECK_NAME)
+        gpu_type = gpu_type_of(box.card_name) if box.card_name else None
+        rentable = box_rentable(box, now)
+        if rentable and gpu_type and cards and all(c['state'] == IDLE for c in cards):
+            sizes = offers.setdefault(gpu_type, {})
+            sizes[str(len(cards))] = sizes.get(str(len(cards)), 0) + 1
         rows.append(
             {
                 'hotkey': box.box_id,
                 'uid': box.uid,  # as discovery last read it; None for a hotkey not on the metagraph
                 'status': box.status,
                 'standing': standing(box.standing_events, now),
-                'gpu_type': gpu_type_of(box.card_name) if box.card_name else None,
+                'gpu_type': gpu_type,
                 'card_count': len(cards),
+                # The miner opened a rent range and the box has the standing to take a customer (29 §1 #7). The range
+                # itself is not published: a customer gets the mapped ports of their own pod, nobody else needs them.
+                'rentable': rentable,
                 'last_check_at': box.last_check_at,
                 'last_failed': failed,
                 # Why, in words, assembled from our own constants alone: no substring of anything the box reported
@@ -318,6 +329,8 @@ def build_fleet(
         if oracle
         else None,
         'totals': {'boxes': len(rows), 'cards': sum(r['card_count'] for r in rows), 'cards_by_state': by_state},
+        # gpu_type -> {box size: boxes rentable and wholly idle right now}; what the rent page sells (29 §7).
+        'offers': offers,
         'boxes': rows,
     }
 

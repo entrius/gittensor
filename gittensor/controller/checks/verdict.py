@@ -5,7 +5,7 @@
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 ADMIT = 'ADMIT'
 BENCH = 'BENCH'
@@ -42,6 +42,7 @@ class CheckVerdict:
     card_name: str = ''
     driver: str = ''
     checked_at: float = field(default_factory=time.time)
+    rent_ports: List[int] = field(default_factory=list)  # the agent's rent range (vault 29 §5); [] = not for rent
 
     @property
     def admitted(self) -> bool:
@@ -72,12 +73,19 @@ class CheckVerdict:
             'card_name': self.card_name,
             'driver': self.driver,
             'checked_at': self.checked_at,
+            'rent_ports': self.rent_ports,
             'checks': [c.as_dict() for c in self.checks],
         }
 
     @classmethod
     def from_checks(
-        cls, checks: List[CheckResult], gpu_uuids: List[str], card_name: str = '', driver: str = '', now=None
+        cls,
+        checks: List[CheckResult],
+        gpu_uuids: List[str],
+        card_name: str = '',
+        driver: str = '',
+        now=None,
+        rent_ports: Sequence[int] = (),
     ) -> 'CheckVerdict':
         clean = all(c.passed and not c.skipped for c in checks)
         # A named failure is a BENCH whatever else could not run; NOT_RUN is only "nothing failed, something never ran".
@@ -89,4 +97,5 @@ class CheckVerdict:
             card_name,
             driver,
             now if now is not None else time.time(),
+            list(rent_ports),
         )

@@ -2,7 +2,8 @@
 # Copyright © 2025 Entrius
 
 """Prerequisite checks for `gitt up`: driver, docker, NVIDIA toolkit, a free SSH port and workload port range, the
-public IP and whether the SSH port answers on it, hotkey on disk, hotkey on chain.
+public IP and whether the SSH port answers on it, hotkey on disk, hotkey on chain. With ``--rent`` (vault 29 §5): a
+box size the pool admits, the Sysbox runtime, and a free rent port range.
 
 Every probe of the host goes through :class:`HostProbe` so the checks are unit-testable with a fake; nothing in
 this module imports ``bittensor`` at module load (the chain lookups and the serve import it lazily inside the probe).
@@ -12,6 +13,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import re
 import shutil
 import socket
 import subprocess
@@ -27,7 +29,11 @@ from gittensor.agent.config import (
     COMPUTE_AXON_MARKER,
     COMPUTE_AXON_PROTOCOL,
     COMPUTE_AXON_SCHEMA,
+    RENT_PORTS_MIN,
+    RENTAL_LABEL,
     RUNNER_CONTAINER_NAME,
+    SYSBOX_RUNTIME,
+    SYSBOX_VERSION,
     WORKLOAD_PORT_RANGE,
     is_compute_axon,
 )
@@ -50,6 +56,10 @@ NVML_ALLOWLIST_URL = 'https://raw.githubusercontent.com/entrius/gittensor/main/d
 NVML_ALLOWLIST_TIMEOUT_S = 8.0
 DRIVER_VETTED_CHECK = 'Driver vetted'
 WORKLOAD_PORTS = range(WORKLOAD_PORT_RANGE[0], WORKLOAD_PORT_RANGE[1] + 1)
+SYSBOX_CHECK = 'Sysbox runtime'
+RENT_PORTS_CHECK = 'Rent ports'
+SYSBOX_SETUP_URL = 'https://raw.githubusercontent.com/entrius/gittensor/main/docker/agent/sysbox-setup.sh'
+SYSBOX_KERNEL_MIN = (5, 19)  # overlayfs over ID-mapped mounts; older kernels fall back to shiftfs (Lium's check)
 
 
 @dataclass(frozen=True)
@@ -205,6 +215,20 @@ class HostProbe:
         proc = self.run(['docker', 'inspect', '--format', '{{.State.Status}}', name])
         return proc.stdout.strip() or None if proc.returncode == 0 else None
 
+    def kernel_release(self) -> str:
+        proc = self.run(['uname', '-r'])
+        return proc.stdout.strip() if proc.returncode == 0 else ''
+
+    def rental_ports(self) -> set[int]:
+        """The host ports our customer pods (``RENTAL_LABEL``) hold on this box, from ``docker ps``."""
+        proc = self.run(['docker', 'ps', '--filter', f'label={RENTAL_LABEL}', '--format', '{{.Ports}}'])
+        if proc.returncode != 0:
+            return set()
+        found: set[int] = set()
+        for match in re.finditer(r':(\d+)->', proc.stdout):
+            found.add(int(match.group(1)))
+        return found
+
     def workload_containers(self) -> list[Workload]:
         proc = self.run(workload_list_command())
         return parse_workloads(proc.stdout) if proc.returncode == 0 else []
@@ -231,7 +255,8 @@ def check_driver(probe: HostProbe) -> list[CheckResult]:
 
 
 def check_gpu_model(names: Sequence[str]) -> CheckResult | None:
-    """The controller's ``gpu_spec`` model rule, said here first: every card one type, and a type the pool admits."""
+    """The controller's ``gpu_spec`` model rule, said here first: every card one type, a type the pool admits, and a
+    box size the type admits (a rental takes the whole box, 29 §1 #3)."""
     specs = [spec_for_name(n) for n in names]
     admitted = ', '.join(sorted(t for t, s in load_catalog().items() if s.qualified))
     found = ', '.join(names)
@@ -239,6 +264,12 @@ def check_gpu_model(names: Sequence[str]) -> CheckResult | None:
         return CheckResult('GPU model', False, f'pool admits {admitted} only; found {found}', required=False)
     if len({s.gpu_type for s in specs if s is not None}) > 1:
         return CheckResult('GPU model', False, f'every card on a box must be one type; found {found}', required=False)
+    spec = specs[0]
+    if spec is not None and len(names) not in spec.counts:
+        sizes = ', '.join(map(str, spec.counts))
+        return CheckResult(
+            'GPU model', False, f'{len(names)} cards: the pool admits {spec.gpu_type} boxes of {sizes}', required=False
+        )
     return None
 
 
@@ -297,6 +328,75 @@ def check_toolkit(probe: HostProbe) -> CheckResult:
         return CheckResult('NVIDIA container toolkit', True, 'nvidia runtime registered with docker')
     return CheckResult(
         'NVIDIA container toolkit', False, 'nvidia-ctk / nvidia-container-cli not found and no nvidia docker runtime'
+    )
+
+
+def check_sysbox(probe: HostProbe) -> CheckResult:
+    """``--rent``: every customer pod runs under Sysbox (``--runtime=sysbox-runc``), never ``--privileged``; root,
+    docker and systemd work inside without host root (29 §1 #5). Lium's executors require the same."""
+    proc = probe.run(['docker', 'info', '--format', '{{json .Runtimes}}'])
+    if proc.returncode != 0:
+        return CheckResult(SYSBOX_CHECK, False, (proc.stderr or proc.stdout).strip()[:120] or 'docker info failed')
+    if f'"{SYSBOX_RUNTIME}"' not in proc.stdout:
+        return CheckResult(
+            SYSBOX_CHECK,
+            False,
+            f'{SYSBOX_RUNTIME} is not registered with docker: install Sysbox {SYSBOX_VERSION} '
+            f'(curl -fsSL {SYSBOX_SETUP_URL} | sudo bash), then re-run',
+        )
+    kernel = probe.kernel_release()
+    if kernel and _kernel_key(kernel) < SYSBOX_KERNEL_MIN:
+        floor = '.'.join(map(str, SYSBOX_KERNEL_MIN))
+        return CheckResult(
+            SYSBOX_CHECK,
+            False,
+            f'{SYSBOX_RUNTIME} registered; kernel {kernel} is older than {floor}: pods may fail to start (Sysbox '
+            'needs overlayfs over ID-mapped mounts)',
+            required=False,
+        )
+    return CheckResult(
+        SYSBOX_CHECK, True, f'{SYSBOX_RUNTIME} registered with docker' + (f'; kernel {kernel}' if kernel else '')
+    )
+
+
+def _kernel_key(release: str) -> tuple[int, int]:
+    parts = release.split('-', 1)[0].split('.')
+    return (int(parts[0]) if parts[0].isdigit() else 0, int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0)
+
+
+def check_rent_ports(
+    probe: HostProbe,
+    ports: tuple[int, int],
+    ssh_port: int,
+    report: PrereqReport,
+    workload_ports: range = WORKLOAD_PORTS,
+) -> CheckResult:
+    """``--rent``: the range a customer's pod publishes its ports on (29 §5). Wide enough, apart from the sshd and
+    workload ports, and free on this box except for our own pods (a rental still running from a previous `gitt up`
+    is the controller's to end, not a reason to refuse)."""
+    low, high = ports
+    span = f'{low}-{high}'
+    width = high - low + 1
+    if width < RENT_PORTS_MIN:
+        return CheckResult(
+            RENT_PORTS_CHECK, False, f'{span} is {width} ports; --rent-ports needs at least {RENT_PORTS_MIN}'
+        )
+    if low <= ssh_port <= high or low <= workload_ports[-1] and workload_ports[0] <= high:
+        return CheckResult(
+            RENT_PORTS_CHECK,
+            False,
+            f'{span} overlaps the sshd port {ssh_port} or the workload ports {workload_ports[0]}-{workload_ports[-1]}',
+        )
+    busy = [p for p in range(low, high + 1) if not probe.port_free(p)]
+    ours = probe.rental_ports()
+    foreign = [p for p in busy if p not in ours]
+    if foreign:
+        shown = ', '.join(map(str, foreign[:8])) + (', …' if len(foreign) > 8 else '')
+        return CheckResult(RENT_PORTS_CHECK, False, f'{span} in use: {shown} (pick another --rent-ports range)')
+    if busy:
+        return CheckResult(RENT_PORTS_CHECK, True, f'{span}: {len(busy)} held by a pod of ours (a rental in progress)')
+    return CheckResult(
+        RENT_PORTS_CHECK, True, f'{span} free; open it on your firewall, TCP from the internet (pods publish on it)'
     )
 
 
@@ -415,12 +515,14 @@ def run_prereqs(
     workload_ports: range = WORKLOAD_PORTS,
     reclaim: bool = False,
     agent_only: bool = False,
+    rent_ports: tuple[int, int] | None = None,
 ) -> PrereqReport:
     """``no_chain`` is for our own dev boxes only: no registration lookup, nothing published (so no public IP or
     reachability rows), and no hotkey needed on disk. ``public_ip`` overrides detection. ``reclaim``: a workload
     container of ours left behind will be removed, so a port it holds passes. ``agent_only`` is the box half of
     ``--publish-only``: the wallet lives on another machine, so no hotkey is needed here and nothing is looked up or
-    published, but the public IP and reachability rows still run (they are what the wallet machine publishes)."""
+    published, but the public IP and reachability rows still run (they are what the wallet machine publishes).
+    ``rent_ports`` (``--rent``) adds the Sysbox and rent-range rows; without it the box is admitted idle-only."""
     report = PrereqReport()
     report.results.extend(check_driver(probe))
     docker = check_docker(probe)
@@ -432,6 +534,9 @@ def run_prereqs(
         report.workloads = probe.workload_containers()
     report.results.append(check_ports(probe, [ssh_port], report))
     report.results.append(check_workload_ports(probe, workload_ports, report, reclaim))
+    if rent_ports is not None:
+        report.results.append(check_sysbox(probe))
+        report.results.append(check_rent_ports(probe, rent_ports, ssh_port, report, workload_ports))
     if no_chain:
         report.results.append(CheckResult('Public IP', None, 'skipped (--no-chain: nothing published)'))
     else:

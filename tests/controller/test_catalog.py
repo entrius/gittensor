@@ -12,6 +12,7 @@ from gittensor.cli.up_commands.prereqs import check_gpu_model
 from gittensor.controller.checks import checks as ck
 from gittensor.controller.checks import why as w
 from gittensor.controller.checks.catalog import (
+    COUNTS_DEFAULT,
     LISTED,
     QUALIFIED,
     CatalogError,
@@ -97,9 +98,38 @@ def test_every_card_on_a_box_is_one_type():
     assert not result.passed and result.evidence[w.PUBLIC] == {'code': w.SPEC_MODEL, 'n': 1}
 
 
+def test_a_box_is_one_of_the_sizes_the_type_admits():
+    """29 §1 #3: a rental takes the whole box, so the pool admits the box sizes the market has and no other."""
+    assert COUNTS_DEFAULT == (1, 2, 4, 8) and all(s.counts == COUNTS_DEFAULT for s in load_catalog().values())
+    one = card(H100)
+    for n in (1, 2, 4, 8):
+        assert ck.check_gpu_spec(one * n).passed
+    for n in (3, 5, 6, 7, 9):
+        result = ck.check_gpu_spec(one * n)
+        assert not result.passed and result.evidence[w.PUBLIC] == {'code': w.SPEC_CARD_COUNT, 'n': n}
+        assert 'is 1, 2, 4, 8 cards' in result.evidence['reason']
+    # A row may name its own sizes; the full check follows them.
+    row = {
+        'names': ['NVIDIA H100 80GB HBM3'],
+        'compute_cap': '9.0',
+        'vram_mib': 81920,
+        'status': 'qualified',
+        'counts': [8, 1, 1],
+    }
+    spec = parse_catalog({'H100': row})['H100']
+    assert spec.counts == (1, 8)
+    assert ck.check_gpu_spec(one * 8, spec).passed and not ck.check_gpu_spec(one * 2, spec).passed
+
+
 def test_a_bad_catalog_is_refused():
     row = {'names': ['X'], 'compute_cap': '9.0', 'vram_mib': 1000, 'status': 'qualified'}
     assert parse_catalog({'_comment': 'skipped', 'A': row})['A'].vram_total_mib_min == 900
+    with pytest.raises(CatalogError, match='counts'):
+        parse_catalog({'A': {**row, 'counts': []}})
+    with pytest.raises(CatalogError, match='counts'):
+        parse_catalog({'A': {**row, 'counts': [0, 4]}})
+    with pytest.raises(CatalogError, match='counts'):
+        parse_catalog({'A': {**row, 'counts': [16]}})
     with pytest.raises(CatalogError, match='both A and B'):
         parse_catalog({'A': row, 'B': row})
     with pytest.raises(CatalogError, match='status'):

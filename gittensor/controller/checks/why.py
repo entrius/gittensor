@@ -120,7 +120,7 @@ PHRASES: Dict[str, str] = {
     NVML_DIGEST_MISMATCH: "this box's NVIDIA management library is not the one published for its driver",
     # gpu_spec
     SPEC_UNREADABLE: 'nvidia-smi did not answer on this box',
-    SPEC_CARD_COUNT: 'this box reports {n} GPU{s}, the pool admits {low} to {high}',
+    SPEC_CARD_COUNT: 'this box reports {n} GPU{s}, not a box size the pool admits for its GPU type',
     SPEC_MODEL: 'the GPU model on this box is not the one the pool admits ({n} card{s})',
     SPEC_COMPUTE_CAP: 'the GPU compute capability on this box is not the one the pool admits ({n} card{s})',
     SPEC_VRAM: 'the GPU memory on this box is outside the range the pool admits ({n} card{s})',

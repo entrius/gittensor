@@ -7,6 +7,10 @@ One table for the full check's spec, the manifest GPU type of a card name, place
 model check. A type is ``qualified`` (admitted: the proof has been measured on a real card of it) or ``listed``
 (known, not admitted yet). The spec is always ours, picked by the name the box reports and then held against the
 box: a card is never judged by its own numbers.
+
+``counts`` is the box sizes the pool admits for the type (vault ``29`` §1 #3): a rental takes the whole box, so a box
+is a unit we sell, and we sell the sizes the market has (Lium offers 1x, 2x, 4x and 8x). A box of five cards is not
+admitted at all, rentable or not.
 """
 
 import json
@@ -23,6 +27,7 @@ LISTED = 'listed'
 # and slightly over on some cards. One window per type, so a size between two types is no type at all.
 VRAM_FLOOR_RATIO = 0.90
 VRAM_CEIL_RATIO = 1.05
+COUNTS_DEFAULT = (1, 2, 4, 8)  # the box sizes admitted when a type's row names none
 COUNT_MAX = 8
 
 
@@ -39,8 +44,7 @@ class CardSpec:
     compute_cap: str = '12.0'  # sm_120, what the proof kernel (docker/proof/kernel) is compiled for
     vram_total_mib_min: int = 32_000  # a 5090 reports 32607 MiB
     vram_total_mib_max: int = 33_000
-    count_min: int = 1
-    count_max: int = COUNT_MAX
+    counts: Tuple[int, ...] = COUNTS_DEFAULT  # the card counts a box of this type may carry, ascending
     status: str = QUALIFIED
 
     @property
@@ -67,7 +71,7 @@ def parse_catalog(doc: dict, source: str = '') -> Dict[str, CardSpec]:
                 compute_cap=str(row['compute_cap']),
                 vram_total_mib_min=int(row.get('vram_mib_min', nominal * VRAM_FLOOR_RATIO)),
                 vram_total_mib_max=int(row.get('vram_mib_max', nominal * VRAM_CEIL_RATIO)),
-                count_max=int(row.get('count_max', COUNT_MAX)),
+                counts=tuple(sorted({int(c) for c in row.get('counts', COUNTS_DEFAULT)})),
                 status=str(row['status']),
             )
         except (KeyError, TypeError, ValueError) as e:
@@ -76,6 +80,8 @@ def parse_catalog(doc: dict, source: str = '') -> Dict[str, CardSpec]:
             raise CatalogError(f'{source}: {gpu_type}: needs at least one name and a status of qualified or listed')
         if not 0 < spec.vram_total_mib_min <= spec.vram_total_mib_max:
             raise CatalogError(f'{source}: {gpu_type}: empty VRAM window')
+        if not spec.counts or not all(1 <= c <= COUNT_MAX for c in spec.counts):
+            raise CatalogError(f'{source}: {gpu_type}: counts must be one or more box sizes between 1 and {COUNT_MAX}')
         for name in names:
             if name in seen:
                 raise CatalogError(f'{source}: {name!r} is listed under both {seen[name]} and {gpu_type}')

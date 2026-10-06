@@ -16,7 +16,7 @@ from gittensor.agent.channel import Channel, ChannelError
 from gittensor.agent.launch import Workload, parse_workloads, workload_list_command
 from gittensor.cli.main import cli
 from gittensor.cli.up_commands import prereqs
-from gittensor.cli.up_commands.prereqs import PrereqReport, check_ports, check_toolkit, run_prereqs
+from gittensor.cli.up_commands.prereqs import HostProbe, PrereqReport, check_ports, check_toolkit, run_prereqs
 
 SMI_OK = 'NVIDIA GeForce RTX 5090, 580.65.06, GPU-1111\n'
 AGENT_REF = 'entrius/gt-agent@sha256:' + 'a' * 64
@@ -52,6 +52,8 @@ class FakeProbe:
         }  # None: the list cannot be fetched
         self.md5 = 'a' * 32
         self.kernel = '580.65.06'
+        self.uname = '6.8.0-45-generic'
+        self.pod_ports: str = ''  # `docker ps --format {{.Ports}}` for our rental pods
 
     def nvml_allowlist(self, url=''):
         return self.allowlist
@@ -92,7 +94,17 @@ class FakeProbe:
             return self.smi
         if cmd[:2] == ['docker', 'info']:
             return self.runtimes if 'Runtimes' in cmd[-1] else self.docker_info
+        if cmd[:2] == ['uname', '-r']:
+            return subprocess.CompletedProcess(cmd, 0, self.uname + '\n', '')
+        if cmd[:2] == ['docker', 'ps'] and 'label=io.gittensor.rental' in cmd:
+            return subprocess.CompletedProcess(cmd, 0, self.pod_ports, '')
         raise AssertionError(f'unexpected command {cmd}')
+
+    def kernel_release(self):
+        return HostProbe.kernel_release(self)  # type: ignore[arg-type]
+
+    def rental_ports(self):
+        return HostProbe.rental_ports(self)  # type: ignore[arg-type]
 
     def which(self, name):
         return self.binaries.get(name)
@@ -169,6 +181,51 @@ class TestPrereqs:
         report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
         assert not report.ok
         assert report.results[0].name == 'NVIDIA driver' and report.results[0].status == 'fail'
+
+    def test_rent_adds_the_sysbox_and_rent_port_rows_and_nothing_else(self, probe):
+        """vault 29 §5: without --rent the table is as before; with it, Sysbox must be registered and the range must be
+        wide, apart from the other ports, and free except for our own pods."""
+        plain = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
+        assert 'Sysbox runtime' not in [r.name for r in plain.results]
+
+        def with_rent(ports):
+            return run_prereqs(
+                probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200, rent_ports=ports
+            )
+
+        rent = with_rent((31000, 31099))
+        rows = {r.name: r for r in rent.results}
+        assert (
+            not rent.ok
+            and rows['Sysbox runtime'].status == 'fail'
+            and 'sysbox-setup.sh' in rows['Sysbox runtime'].detail
+        )
+        assert rows['Rent ports'].status == 'pass' and 'open it on your firewall' in rows['Rent ports'].detail
+        probe.runtimes = subprocess.CompletedProcess([], 0, '{"nvidia":{},"runc":{},"sysbox-runc":{}}', '')
+        assert with_rent((31000, 31099)).ok
+        probe.uname = '5.15.0-91-generic'
+        old = with_rent((31000, 31099))
+        sysbox = next(r for r in old.results if r.name == 'Sysbox runtime')
+        assert old.ok and sysbox.status == 'warn' and '5.19' in sysbox.detail
+        probe.uname = '6.8.0-45-generic'
+        narrow = with_rent((31000, 31050))
+        assert not narrow.ok and 'at least 100' in next(r for r in narrow.results if r.name == 'Rent ports').detail
+        overlap = with_rent((2150, 2300))
+        assert 'overlaps the sshd port' in next(r for r in overlap.results if r.name == 'Rent ports').detail
+        probe.busy_ports = {31022}
+        busy = with_rent((31000, 31099))
+        assert not busy.ok and '31022' in next(r for r in busy.results if r.name == 'Rent ports').detail
+        probe.pod_ports = '0.0.0.0:31022->22/tcp, [::]:31022->22/tcp\n'
+        ours = with_rent((31000, 31099))
+        assert ours.ok and 'pod of ours' in next(r for r in ours.results if r.name == 'Rent ports').detail
+
+    def test_a_box_size_the_type_does_not_admit_is_named(self, probe):
+        from gittensor.cli.up_commands.prereqs import check_gpu_model
+
+        five = ['NVIDIA GeForce RTX 5090'] * 5
+        result = check_gpu_model(five)
+        assert result is not None and '5 cards' in result.detail and 'boxes of 1, 2, 4, 8' in result.detail
+        assert check_gpu_model(five[:4]) is None
 
     def test_wrong_gpu_is_a_warning_not_a_failure(self, probe):
         probe.smi = subprocess.CompletedProcess([], 0, 'NVIDIA GeForce RTX 4090, 580.65.06, GPU-9\n', '')
@@ -384,6 +441,19 @@ class TestUpCommand:
         assert cmd[:5] == ['docker', 'run', '-d', '--name', 'gt-agent-runner'] and cmd[-1] == RUNNER_REF
         assert f'GT_AGENT_MINER_HOTKEY={probe.ss58}' in cmd
         assert 'Started gt-agent-runner' in result.output
+
+    def test_rent_rides_to_the_runner_and_the_agent_line(self, runner, docker_calls, probe):
+        probe.runtimes = subprocess.CompletedProcess([], 0, '{"nvidia":{},"runc":{},"sysbox-runc":{}}', '')
+        result = runner.invoke(cli, [*UP, '--rent', '--json'])
+        assert result.exit_code == 0, result.output
+        doc = json.loads(result.output)
+        assert doc['endpoint']['rent_ports'] == [31000, 31099]
+        assert 'GT_AGENT_RENT_PORTS=31000-31099' in docker_calls[0]
+        assert '--label io.gittensor.rent_ports=31000-31099' in doc['agent_command']
+        bad = runner.invoke(cli, [*UP, '--rent', '--rent-ports', '31000-31010'])
+        assert bad.exit_code == 2 and 'at least 100' in bad.output
+        without = runner.invoke(cli, [*UP, '--dry-run', '--json'])
+        assert json.loads(without.output)['endpoint']['rent_ports'] is None
 
     def test_no_update_starts_the_agent_directly(self, runner, docker_calls, probe):
         result = runner.invoke(cli, [*UP, '--no-update', '--image', 'local/gt-agent:dev', '--ssh-port', '2201'])
@@ -624,6 +694,7 @@ class TestPublish:
             'port': 2200,
             'netuid': 74,
             'workload_ports': [20000, 20015],
+            'rent_ports': None,
             'published': 'served',
         }
         assert _json_checks(result)['Endpoint published']['detail'] == 'served 44.10.0.1:2200 on netuid 74'

@@ -116,4 +116,4 @@ def proof_skipped(checks: Sequence[CheckResult]) -> CheckResult:
 
 def finish_verdict(checks: List[CheckResult], scrape: HostScrape, now: Optional[float] = None) -> CheckVerdict:
     card_name = scrape.gpus[0].name if scrape.gpus else ''
-    return CheckVerdict.from_checks(checks, scrape.uuids, card_name, scrape.driver, now)
+    return CheckVerdict.from_checks(checks, scrape.uuids, card_name, scrape.driver, now, rent_ports=scrape.rent_ports)

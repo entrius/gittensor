@@ -65,6 +65,20 @@ WORKLOAD_STOP_DEFAULT_S = 30  # the wait for a container whose label names no dr
 # may carry) and a replacement starting beside each.
 WORKLOAD_PORT_RANGE = (20000, 20015)  # inclusive
 
+# --- Rentals (vault 29) ------------------------------------------------------------------------------------------------
+# A miner who passes `gitt up --rent` offers the whole box for rental: a customer's pod (a Sysbox container, never
+# --privileged) with its ports published on the box's own public address, Lium-style. The box opens a contiguous range
+# for that (`--rent-ports LOW-HIGH`, at least RENT_PORTS_MIN wide: one pod maps a handful of ports, and the range also
+# absorbs the ones a stopped pod leaves in TIME_WAIT). The runner passes the range to the agent, and the agent container
+# carries it as a label; the controller reads the label on every visit, so a box that was not started with --rent is
+# never rented. Nothing listens on the range until a pod is placed: docker publishes on start and unpublishes on stop.
+RENT_PORTS_LABEL = 'io.gittensor.rent_ports'  # on the agent container: "LOW-HIGH", inclusive; absent = not rentable
+RENT_PORTS_DEFAULT = (31000, 31099)  # inclusive, what `--rent` opens when `--rent-ports` is not given
+RENT_PORTS_MIN = 100
+RENTAL_LABEL = 'io.gittensor.rental'  # on a customer's pod: the rental id (29 §4); `gitt down` stops these too
+SYSBOX_RUNTIME = 'sysbox-runc'  # the runtime every pod runs under (Lium's executors: nvidia_docker_sysbox_setup.sh)
+SYSBOX_VERSION = '0.7.1'
+
 # --- The box on chain ------------------------------------------------------------------------------------------------
 # `gitt up` serves the box's public IP and sshd port as the hotkey's axon (the standard `serve_axon` extrinsic, signed by
 # the miner's hotkey); the controller reads the metagraph and admits every endpoint carrying this marker. `protocol`
@@ -105,3 +119,20 @@ ENV_CONTAINER_NAME = 'GT_AGENT_CONTAINER_NAME'
 ENV_UPDATE_INTERVAL = 'GT_AGENT_UPDATE_INTERVAL_S'
 ENV_CHANNEL_URL = 'GT_AGENT_CHANNEL_URL'
 ENV_ALLOW_DEV_KEYS = 'GT_AGENT_ALLOW_DEV_KEYS'
+ENV_RENT_PORTS = 'GT_AGENT_RENT_PORTS'  # "LOW-HIGH"; the runner turns it into RENT_PORTS_LABEL on the agent
+
+
+def rent_ports_label(ports: tuple[int, int] | None) -> str:
+    """What the agent container carries for ``ports``; '' when the box is not rentable."""
+    return f'{ports[0]}-{ports[1]}' if ports else ''
+
+
+def parse_rent_ports(text: str) -> tuple[int, int] | None:
+    """``LOW-HIGH`` (inclusive) -> the pair, or None for '' / anything that is not a range of RENT_PORTS_MIN+ ports."""
+    low, sep, high = text.strip().partition('-')
+    if not sep or not low.isdigit() or not high.isdigit():
+        return None
+    lo, hi = int(low), int(high)
+    if not 1024 <= lo <= hi <= 65535 or hi - lo + 1 < RENT_PORTS_MIN:
+        return None
+    return lo, hi

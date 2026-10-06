@@ -25,6 +25,7 @@ from gittensor.controller.checks.scrape import (
     disk_free_command,
     network_command,
     nvidia_smi_command,
+    rent_ports_command,
 )
 from gittensor.controller.proof.slot import (
     BoxIdentity,
@@ -218,6 +219,7 @@ def passing_runner(
     device_holders: str = NO_DEVICE_HOLDERS,
     network_targets=NETWORK_TARGETS,
     job=None,
+    rent_ports: str = '\n',  # the agent's rent label; '' or a bare newline = not started with --rent
 ) -> FakeRunner:
     """A box that passes everything. Tests override one command with ``runner.on(...)`` to make one check fail."""
     runner = FakeRunner(
@@ -227,6 +229,7 @@ def passing_runner(
             KERNEL_DRIVER_COMMAND: kernel_driver,
             agent_image_command(): agent_image,
             agent_image_id_command(): agent_image_id,
+            rent_ports_command(): rent_ports,
             disk_free_command(): df,
             DEVICE_HOLDERS_COMMAND: device_holders,
         }

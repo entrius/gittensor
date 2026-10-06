@@ -310,6 +310,9 @@ class Reconciler:
     box_locks: BoxLocks | None = None
     background: bool = False
     on_background: Callable[[ReconcileReport], None] | None = None
+    # Cards a rental holds on a box (``RentalStore.held_cards``, vault 29): the rental reconciler's, so a busy card with
+    # no instance record behind it is not a lost instance here, and a rentable box takes no placement at all.
+    held_cards: Callable[[str], AbstractSet[str]] | None = None
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
     _in_flight: dict[str, threading.Thread] = field(default_factory=dict, repr=False)
 
@@ -523,6 +526,7 @@ class Reconciler:
                 )  # fmt: skip
             # Busy cards with nothing behind them (the instance vanished before any record or container existed).
             live = {r.uuid for r in self.instances.on_box(box_id)}
+            live |= set(self.held_cards(box_id)) if self.held_cards else set()  # a rental's pod, not ours to judge
             for uuid, card in sorted(self._box(box_id).cards.items()):
                 if card.state in BUSY and uuid not in live:
                     action = Action('lost', box_id, card.instance_id, '', uuid, False, 'no instance behind a busy card')
@@ -678,6 +682,7 @@ class Reconciler:
             and not box.endpoint_changed
             and box.box_id not in report.unreachable
             and box.box_id not in busy
+            and not box.rent_ports  # a rentable box is for whole-box rentals (29 §1 #4), never a placement
             and (lease_cooldown_until(box) or 0.0) <= now  # no new lease right after an external_use event
             for uuid in box.pinned_uuids
             if box.card(uuid).state == IDLE and (box.box_id, uuid) not in used

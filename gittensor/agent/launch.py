@@ -159,8 +159,10 @@ _PS_FORMAT = '\t'.join(
 )
 
 
-def workload_list_command() -> list[str]:
-    return ['docker', 'ps', '-a', '--no-trunc', '--filter', f'label={INSTANCE_LABEL}', '--format', _PS_FORMAT]
+def workload_list_command(label: str = INSTANCE_LABEL) -> list[str]:
+    """Our containers on the box by label: placement instances (``INSTANCE_LABEL``) or customers' pods
+    (``RENTAL_LABEL``, vault 29; no port or drain label, so a pod drains with ``WORKLOAD_STOP_DEFAULT_S``)."""
+    return ['docker', 'ps', '-a', '--no-trunc', '--filter', f'label={label}', '--format', _PS_FORMAT]
 
 
 def parse_workloads(stdout: str) -> list[Workload]:
@@ -195,8 +197,8 @@ def down_commands(
     workloads: list[Workload] | None = None,
     now: bool = False,
 ) -> list[list[str]]:
-    """The runner first (so it cannot resurrect the agent), then the agent, then our workloads (drained, then removed,
-    so no orphan holds a workload port for the next `gitt up`). The agent goes before the workloads on purpose: with
+    """The runner first (so it cannot resurrect the agent), then the agent, then our workloads and any customer's pod
+    (drained, then removed, so no orphan holds a port for the next `gitt up`). The agent goes before the workloads on purpose: with
     the agent gone the controller can only ever see "unreachable" and then "gone after unreachable" (the lease ends at
     the last good heartbeat, no bench); a workload removed under a live agent looks like a killed placement."""
     return [

@@ -40,7 +40,7 @@ async def forward(self: 'Validator') -> None:
     4. Blend emission pools and update scores
 
     Emission blending:
-    - Combined scoring pool: OSS_EMISSION_SHARE (100% today), allocated by repository emission_share
+    - Combined scoring pool: OSS_EMISSION_SHARE (70%), allocated by repository emission_share
     - Maintainer cut:        per-repo carve-out routed to maintainer miner neurons
     - Compute pool:          1 - OSS_EMISSION_SHARE, paid by the controller's signed scorecard (COMPUTE_SCORECARD_PATH);
                              recycled when it is stale, invalid or unset

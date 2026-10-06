@@ -55,7 +55,7 @@ from gittensor.controller.pay.oracle import Quote
 from gittensor.controller.pay.rates import GpuRate
 
 DAY_S = 86_400.0
-COMPUTE_SHARE = 1.0 - OSS_EMISSION_SHARE  # the part of miner weights the compute pool pays (0 while OSS holds 100%)
+COMPUTE_SHARE = 1.0 - OSS_EMISSION_SHARE  # the part of miner weights the compute pool pays (0.30)
 
 
 def utc_day(t: float) -> str:

@@ -1,4 +1,11 @@
 {
-  "_doc": "Per-GPU-type pay targets in USD per card-hour (vault 23 section 7a). USD is the target; alpha is what is paid: each window the ledger converts these to alpha weights at the oracle price, holds the last good price if the oracle fails, and splits the serving emission across cards by accrued weight. Below target_fleet the unspent remainder recycles; above it per-card pay dilutes. idle: while IDLE and proof-passing. leased: while LEASED and healthy (the four pay conditions). STARTING, DRAINING, CHECKING earn nothing. Set by hand (Kimbo 2026-09-14); the leased/idle ratio must stay above 1.",
-  "RTX5090": {"idle_usd_per_hr": 0.35, "leased_usd_per_hr": 1.00, "target_fleet": 64}
+  "_doc": "Per-GPU-type pay targets in USD per card-hour (vault 23 section 7a). USD is the target; alpha is what is paid: each window the ledger converts these to alpha weights at the oracle price, holds the last good price if the oracle fails, and splits the serving emission across cards by accrued weight. Below target_fleet the unspent remainder recycles; above it per-card pay dilutes. idle: while IDLE and proof-passing. leased: while LEASED and healthy (the four pay conditions). STARTING, DRAINING, CHECKING earn nothing. Set by hand; the leased/idle ratio must stay above 1. 5090: Kimbo 2026-09-14. The six types added 2026-10-05 take their leased rate from the midpoint of the published on-demand rental prices in the 10/5 pricing sheet (Runpod, Lambda, DigitalOcean) and idle at 35% of leased, the 5090's own ratio; target fleets are starting sizes, not forecasts.",
+  "_future": "Dynamic target fleets (design intention, 2026-10-05, Alex): target_fleet per type should follow demand once the rental product exists. Start from these defaults; when one type is rented a lot and another not at all, move target slots from the idle type to the busy one (e.g. RTX5090 10 -> 12, RTXPRO6000 5 -> 4), clamped to at least 1 of every type, on a slow cadence (daily or weekly). Over-supplied types dilute among themselves as today; the targets move, the rule for a card's pay does not. Not built: it waits for the rental seam (gittensor-app) to produce the demand signal.",
+  "RTX5090": {"idle_usd_per_hr": 0.35, "leased_usd_per_hr": 1.0, "target_fleet": 10},
+  "RTXPRO6000": {"idle_usd_per_hr": 0.74, "leased_usd_per_hr": 2.1, "target_fleet": 5},
+  "L40S": {"idle_usd_per_hr": 0.47, "leased_usd_per_hr": 1.35, "target_fleet": 4},
+  "H100": {"idle_usd_per_hr": 1.28, "leased_usd_per_hr": 3.65, "target_fleet": 4},
+  "H200": {"idle_usd_per_hr": 1.59, "leased_usd_per_hr": 4.55, "target_fleet": 2},
+  "B200": {"idle_usd_per_hr": 2.4, "leased_usd_per_hr": 6.85, "target_fleet": 2},
+  "B300": {"idle_usd_per_hr": 2.76, "leased_usd_per_hr": 7.89, "target_fleet": 1}
 }

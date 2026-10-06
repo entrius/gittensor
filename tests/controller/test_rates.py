@@ -12,10 +12,15 @@ from gittensor.controller.pay.rates import RatesError
 
 
 def test_shipped_table():
+    from gittensor.controller.checks.catalog import load_catalog
+
     rates = load_rates()
     r = rates['RTX5090']
-    assert (r.idle_usd_per_hr, r.leased_usd_per_hr, r.target_fleet) == (0.35, 1.0, 64)
+    assert (r.idle_usd_per_hr, r.leased_usd_per_hr, r.target_fleet) == (0.35, 1.0, 10)
     assert r.leased_to_idle == pytest.approx(1.0 / 0.35)
+    # every catalog type has a row, and every row is a catalog type; idle is ~35% of leased throughout
+    assert set(rates) == set(load_catalog())
+    assert all(0.33 <= v.idle_usd_per_hr / v.leased_usd_per_hr <= 0.36 for v in rates.values())
 
 
 def test_invariants(tmp_path):

@@ -291,9 +291,11 @@ def test_the_published_driver_list_is_what_the_controller_loads():
 
     path = Path(__file__).resolve().parents[2] / 'docker' / 'controller' / 'nvml_allowlist.json'
     allowlist = NvmlAllowlist.from_file(path)
-    assert '595.84' in allowlist.drivers and len(allowlist.drivers) >= 40
+    assert '595.91.07' in allowlist.drivers and len(allowlist.drivers) >= 76
     assert all(len(m) == 32 for md5s in allowlist.by_driver.values() for m in md5s)
-    assert all(int(d.split('.')[0]) >= 570 for d in allowlist.drivers)  # Blackwell needs 570+
+    # 535+ since the catalog admits Hopper and Ada cards (an H100 runs fine on 535); a 5090 itself needs 570+, which
+    # nvidia-smi enforces on the box, not this list.
+    assert all(int(d.split('.')[0]) >= 535 for d in allowlist.drivers)
 
 
 class TestUpCommand:

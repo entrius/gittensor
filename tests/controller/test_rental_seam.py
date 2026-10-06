@@ -180,6 +180,12 @@ def test_a_bad_order_is_skipped_with_an_error_and_the_rest_are_taken(tmp_path):
     assert report.placed == ['rnt_ok'] and 'rnt_bad' in report.errors[0] and 'rnt_bad' not in store.rentals
 
 
+def test_an_end_the_app_ordered_keeps_the_apps_reason():
+    r = rt.RentalRecord('rnt_x', state=rt.ENDED, reason='app_ending', ended_at=NOW)
+    assert report_body(r)['reason'] == ''
+    assert report_body(rt.RentalRecord('rnt_y', state=rt.ENDED, reason='ends_at', ended_at=NOW))['reason'] == 'ends_at'
+
+
 def test_report_body_is_the_section_3_shape():
     r = rt.RentalRecord('rnt_x', state=rt.FAILED, reason=rt.NO_BOX_FITS, ended_at=NOW)
     assert report_body(r) == {

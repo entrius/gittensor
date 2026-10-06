@@ -100,7 +100,8 @@ def report_body(r: RentalRecord) -> dict:
         'gpu_uuids': list(r.uuids) or None,
         'started_at': int(r.started_at) if r.started_at is not None else None,
         'ended_at': int(r.ended_at) if r.ended_at is not None else None,
-        'reason': r.reason or '',
+        # An end the app ordered keeps the app's own reason (customer_stop / balance / ends_at): we say nothing.
+        'reason': '' if r.reason == APP_ENDING_REASON else (r.reason or ''),
     }
 
 

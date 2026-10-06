@@ -34,7 +34,7 @@ from gittensor.controller.manifest import gpu_type_of
 from gittensor.controller.pay.ledger import Ledger, is_withheld
 from gittensor.controller.pay.rates import RatesError, load_rates
 from gittensor.controller.pay.scorecard import LATEST, ScorecardError, read_scorecard
-from gittensor.controller.standing import HARD, RELEASED, SOFT, box_rentable, standing
+from gittensor.controller.standing import HARD, RELEASED, SOFT, STANDARD, box_rentable, standing
 
 SCHEMA = 1
 PUBLIC_DIR = 'public'
@@ -228,6 +228,7 @@ def build_fleet(
     netuid: int | None = None,
     publish_interval_s: float = cfg.PUBLISH_INTERVAL_S,
     rentals: Mapping[str, Any] | None = None,
+    rentable_min_standing: str = STANDARD,
 ) -> dict:
     """The public document. ``boxes`` / ``instances`` are the controller's records, ``status`` its
     ``controller.json``, ``image_of(entry_id)`` the registry's image reference (None: unknown), ``rentals`` the
@@ -272,7 +273,7 @@ def build_fleet(
         bench_event = _last_event(box.standing_events, _BENCH_KINDS) if benched else None
         failed = _names(box.last_failed, _CHECK_NAME)
         gpu_type = gpu_type_of(box.card_name) if box.card_name else None
-        rentable = box_rentable(box, now)
+        rentable = box_rentable(box, now, min_level=rentable_min_standing)
         if rentable and gpu_type and cards and all(c['state'] == IDLE for c in cards):
             sizes = offers.setdefault(gpu_type, {})
             sizes[str(len(cards))] = sizes.get(str(len(cards)), 0) + 1

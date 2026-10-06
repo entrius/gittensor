@@ -495,6 +495,7 @@ class Controller:
                 self.network,
                 self.netuid,
                 rentals=rentals,
+                rentable_min_standing=self.rental_reconciler.min_standing,
             )
             self.publisher.write(doc)
         except Exception as e:

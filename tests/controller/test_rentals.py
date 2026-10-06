@@ -123,6 +123,10 @@ def test_the_pods_bridge_has_icc_off_and_the_firewall_keeps_the_miners_lan_out()
 def test_keys_go_in_over_stdin_and_never_on_a_command_line():
     cmd = rt.authorized_keys_command(CID, [KEY])
     assert KEY not in cmd and 'docker exec -i' in cmd and 'authorized_keys' in cmd
+    # ... except as the PUBLIC_KEY env Lium's and RunPod's images start sshd by (a public key is public)
+    line = rt.pod_run_command(rt.RentalRecord('rnt_1', uuids=[U1], image='x', ssh_pubkeys=[KEY, KEY + '2']))
+    assert f"-e 'PUBLIC_KEY={KEY}\n{KEY}2'" in line
+    assert 'PUBLIC_KEY' not in rt.pod_run_command(rt.RentalRecord('rnt_1', uuids=[U1], image='x'))
     assert rt.keys_stdin([KEY, '', ' ' + KEY + ' ']) == ((KEY + '\n') * 2).encode()
 
 
@@ -396,3 +400,12 @@ def test_the_dev_overrides_run_a_pod_under_runc_without_the_firewall_on_a_probat
     run_line = next(c for c in runner.calls if c.startswith('docker run'))
     assert '--runtime=runc' in run_line and not any('iptables' in c for c in runner.calls)
     assert rt.pod_run_command(rt.RentalRecord('rnt_1', uuids=[U1], image='x')).count('--runtime=sysbox-runc') == 1
+
+
+def test_the_controller_records_a_dev_boxs_narrow_rent_range():
+    """The width rule is `gitt up`'s; a 4-port range on a Lium pod (--allow-dev-keys) reaches the state as is."""
+    from gittensor.controller.checks.scrape import parse_rent_ports_label
+
+    assert parse_rent_ports_label('31000-31003\n') == [31000, 31003]
+    assert parse_rent_ports_label('31000-31099\n') == [31000, 31099]
+    assert parse_rent_ports_label('\n') == [] and parse_rent_ports_label('junk') == []

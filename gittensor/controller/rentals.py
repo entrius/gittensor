@@ -104,6 +104,9 @@ LOST_AFTER_MISSES = 3
 # Images the rent page promises run sshd on :22 (gittensor-app rental-images.ts: keep the lists equal). Pre-pulled on
 # idle rentable boxes.
 QUICK_PICK_IMAGES = ('daturaai/pytorch:2.12.0-py3.12-cuda12.8-devel-ubuntu24.04-dind',)
+# What a runc dev box can run: the same image family without docker-in-docker (its entrypoint starts dockerd first and
+# exits without privileges). The production quick-pick stays the dind image, under Sysbox.
+QUICK_PICK_NO_DIND = 'daturaai/pytorch:2.6.0-py3.12-cuda12.6.3-devel-ubuntu24.04'
 # What a pod must not reach from a miner's box: the miner's LAN and the host itself (29 §4). Link-local covers the
 # cloud metadata address; 100.64/10 is carrier NAT.
 PRIVATE_NETS = ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '169.254.0.0/16', '100.64.0.0/10')
@@ -289,7 +292,12 @@ def pod_run_command(r: RentalRecord, network: str = RENTAL_NETWORK, runtime: str
     ]
     for inside, public in sorted(r.port_map.items(), key=lambda kv: int(kv[0])):
         parts.append(f'-p {shlex.quote(f"{public}:{inside}")}')
-    parts += [f'-e {shlex.quote(f"{k}={v}")}' for k, v in sorted(r.env.items())]
+    # The convention Lium's and RunPod's images start sshd by: their start.sh runs sshd only when PUBLIC_KEY is set
+    # and appends it to authorized_keys. Set it (every key, newline-separated) so a quick-pick image comes up with
+    # sshd; the docker exec after start writes the same keys for an image that runs sshd regardless.
+    if r.ssh_pubkeys:
+        parts.append(f'-e {shlex.quote("PUBLIC_KEY=" + chr(10).join(k.strip() for k in r.ssh_pubkeys if k.strip()))}')
+    parts += [f'-e {shlex.quote(f"{k}={v}")}' for k, v in sorted(r.env.items()) if k != 'PUBLIC_KEY']
     parts.append(shlex.quote(r.image))
     return ' '.join(parts)
 
@@ -392,9 +400,12 @@ class RentalReconciler:
         self.wall, self.sleep, self.probe = wall, sleep, probe
         self.pull_token = pull_token
         self.background = background
-        self.prepull_images = prepull
         self.no_fit_grace_s = no_fit_grace_s
         self.runtime, self.firewall, self.min_standing = runtime, firewall, min_standing
+        # under runc the dind quick-pick cannot start (no privileges for its dockerd); pre-pull what can
+        self.prepull_images = (
+            (QUICK_PICK_NO_DIND,) if runtime != SYSBOX_RUNTIME and prepull == QUICK_PICK_IMAGES else prepull
+        )
         self._threads: dict[str, threading.Thread] = {}  # rental id -> its start / stop thread
         self._prepulling: dict[str, threading.Thread] = {}  # box id -> its pull thread
 

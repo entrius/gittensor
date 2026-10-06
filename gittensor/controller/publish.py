@@ -227,9 +227,12 @@ def build_fleet(
     network: str | None = None,
     netuid: int | None = None,
     publish_interval_s: float = cfg.PUBLISH_INTERVAL_S,
+    rentals: Mapping[str, Any] | None = None,
 ) -> dict:
     """The public document. ``boxes`` / ``instances`` are the controller's records, ``status`` its
-    ``controller.json``, ``image_of(entry_id)`` the registry's image reference (None: unknown)."""
+    ``controller.json``, ``image_of(entry_id)`` the registry's image reference (None: unknown), ``rentals`` the
+    rental store (a card held by one is marked ``rental``; nothing else of a rental is published)."""
+    rentals = rentals or {}
     image_of = image_of or (lambda entry: None)
     view = scorecard_view(root, now)
     doc = view.get('scorecard') or {}
@@ -250,7 +253,10 @@ def build_fleet(
             record = instances.get(card.instance_id) if card.instance_id else None
             if record is not None and (record.box != box.box_id or record.uuid != uuid):
                 record = None
-            cards.append(_card(uuid, card, record, image_of, now))
+            published = _card(uuid, card, record, image_of, now)
+            if card.instance_id and card.instance_id in rentals:
+                published['rental'] = True  # a customer's pod; whose, and where, stays private
+            cards.append(published)
             by_state[card.state] = by_state.get(card.state, 0) + 1
         scored, since = paid.get(box.box_id) or {}, live.get(box.box_id)
         pay = None

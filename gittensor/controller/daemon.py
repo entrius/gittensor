@@ -66,6 +66,7 @@ from gittensor.controller.pay.scorecard import build_scorecard, write_scorecard
 from gittensor.controller.publish import Publisher, build_fleet
 from gittensor.controller.reconcile import InstanceStore, Reconciler, ReconcileReport
 from gittensor.controller.registry import DeploymentStore, Registry
+from gittensor.controller.rentals import RentalReconciler, RentalReport, RentalStore
 from gittensor.controller.runspec import BIND_PRIVATE, BoxHttp, HttpClient, PullToken
 from gittensor.controller.ssh import write_host_key
 
@@ -170,6 +171,7 @@ class Controller:
         self.box_locks = BoxLocks()
         self.boxes = StateStore(state.boxes)
         self.instances = InstanceStore(state.instances)
+        self.rentals = RentalStore(state.rentals)
         self.stop = threading.Event()
         self._run_round, self._load_proof = run_round, load_proof
         self._reprove = reprove
@@ -187,6 +189,7 @@ class Controller:
             'intervals': asdict(self.intervals),
             'round': {},
             'reconcile': {},
+            'rentals': {},
             'watch': {},
             'pay': {},
         }
@@ -205,7 +208,20 @@ class Controller:
             box_locks=self.box_locks,
             background=True,
             on_background=self._background_done,
+            held_cards=self.rentals.held_cards,
             _lock=self.write_lock,
+        )
+        # Rentals (vault 29): the whole-box lease, beside placement. Same box locks, so a pod start and the proof round
+        # never share a box; same write lock, so one writer touches boxes.json at a time.
+        self.rental_reconciler = RentalReconciler(
+            self.boxes,
+            self.rentals,
+            lambda box: make_runner(box, 'rentals'),
+            box_locks=self.box_locks,
+            lock=self.write_lock,
+            sleep=sleep,
+            pull_token=pull_token,
+            background=True,
         )
         self.watch = Watch(
             self.boxes,
@@ -335,6 +351,7 @@ class Controller:
             self.remove_requested_boxes()
         self.reconciler.deployments = DeploymentStore(self.state.deployments)  # operator-owned: read fresh each pass
         report = self.reconciler.run_pass()
+        self.rentals_once()
         self._set_status(
             'reconcile',
             {
@@ -353,13 +370,40 @@ class Controller:
         self.reporter.reconcile(report, n)
         return report
 
+    def rentals_once(self) -> RentalReport:
+        """The rental reconciler's pass (orders placed by the poller or the CLI beside us are read from disk first)."""
+        with self.write_lock:
+            self.rentals.reload()  # orders the poller or the CLI wrote beside us
+        report = self.rental_reconciler.run_pass()
+        self._set_status(
+            'rentals',
+            {
+                'at': time.time(),
+                'ok': report.ok,
+                'open': report.open,
+                'actions': [asdict(a) for a in report.actions],
+                'errors': report.errors,
+                'launched': report.launched,
+            },
+        )
+        for action in report.actions:
+            if action.kind != 'prepull':
+                self.reporter.note(
+                    'rentals', f'{action.rental or action.box[:16]}: {action.kind} {action.detail}'[:300]
+                )
+        return report
+
+    def _leases(self) -> dict[str, Any]:
+        """Every lease the ledger pays: placement instances and rentals, one mapping by id (``ledger.accrue``)."""
+        return {**self.instances.instances, **self.rentals.rentals}
+
     def remove_requested_boxes(self) -> list[str]:
         """Drop every box an operator asked to remove (`gitt controller remove` beside us) once nothing runs on it:
         the record and its pinned host key. A box still carrying an instance waits for the reconciler to drain it.
         Under the write lock. Returns the boxes removed."""
         removed = []
         for box_id, box in sorted(self.boxes.boxes.items()):
-            if not remove_requested(box) or self.instances.on_box(box_id):
+            if not remove_requested(box) or self.instances.on_box(box_id) or self.rentals.on_box(box_id):
                 continue
             self.boxes.remove(box_id)
             if box.host:
@@ -374,7 +418,7 @@ class Controller:
         if not self.ledger.due(now):
             return None
         with self.write_lock:
-            return len(self.ledger.settle(list(self.boxes.boxes.values()), self.instances.instances, now))
+            return len(self.ledger.settle(list(self.boxes.boxes.values()), self._leases(), now))
 
     def scorecard_once(self, now: float | None = None) -> dict:
         """Settle the trailing window at the oracle's price and write the scorecard. Returns the document."""
@@ -426,7 +470,7 @@ class Controller:
         try:
             with self.write_lock:
                 boxes, instances = dict(self.boxes.boxes), dict(self.instances.instances)
-                status = dict(self.status)
+                rentals, status = dict(self.rentals.rentals), dict(self.status)
             doc = build_fleet(
                 self.state.root,
                 boxes,
@@ -437,6 +481,7 @@ class Controller:
                 self._image_of,
                 self.network,
                 self.netuid,
+                rentals=rentals,
             )
             self.publisher.write(doc)
         except Exception as e:
@@ -470,6 +515,9 @@ class Controller:
             out: dict[str, set[str]] = {}
             for record in self.instances.instances.values():
                 out.setdefault(record.box, set()).add(record.uuid)
+            for rental in self.rentals.rentals.values():
+                if rental.open and rental.box:
+                    out.setdefault(rental.box, set()).update(rental.uuids)
             return out
 
     def _our_containers(self, box_id: str) -> set[str]:
@@ -478,7 +526,7 @@ class Controller:
         box's lock, never before: a rotation mints a new container ID, so a set taken earlier can miss the container
         a start wrote while the round waited for the lock."""
         with self.write_lock:
-            return self.instances.containers_on(box_id)
+            return self.instances.containers_on(box_id) | self.rentals.containers_on(box_id)
 
     def reprove_once(self) -> list[str]:
         """Launch the one-box probe on every box that is due one and not already being probed (or waiting to retry

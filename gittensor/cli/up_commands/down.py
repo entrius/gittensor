@@ -9,6 +9,7 @@ from typing import Any
 
 import click
 
+from gittensor.agent.config import INSTANCE_LABEL, RENTAL_LABEL
 from gittensor.agent.launch import Workload, down_commands, parse_workloads, render, workload_list_command
 from gittensor.cli.helpers import console, err_console
 from gittensor.cli.json_output import emit_json
@@ -17,11 +18,14 @@ from . import docker_exec
 
 
 def list_workloads() -> tuple[list[Workload], str]:
-    """The controller's workload containers on this box, and '' or why they could not be listed."""
-    proc = docker_exec.run_docker(workload_list_command())
-    if proc.returncode != 0:
-        return [], (proc.stderr or proc.stdout).strip()[:200]
-    return parse_workloads(proc.stdout), ''
+    """The controller's workload containers and customers' pods on this box, and '' or why they could not be listed."""
+    found: list[Workload] = []
+    for label in (INSTANCE_LABEL, RENTAL_LABEL):
+        proc = docker_exec.run_docker(workload_list_command(label))
+        if proc.returncode != 0:
+            return [], (proc.stderr or proc.stdout).strip()[:200]
+        found += parse_workloads(proc.stdout)
+    return found, ''
 
 
 @click.command('down')

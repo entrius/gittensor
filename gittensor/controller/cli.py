@@ -193,6 +193,10 @@ class StateDir:
     def instances(self) -> Path:
         return self.root / 'instances.json'
 
+    @property
+    def rentals(self) -> Path:
+        return self.root / 'rentals.json'
+
     def ensure(self) -> StateDir:
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         return self
@@ -2107,6 +2111,103 @@ def instances_command(state_dir, json_mode):
             'yes' if r['draining'] else 'no',
         )
     console.print(table)
+
+
+# ---------------------------------------------------------------- rentals: the whole-box lease (vault 29) ---------------
+
+
+@controller_group.group('rentals', cls=StyledGroup)
+def rentals_group():
+    """Rentals: a customer's pod on a whole box. Orders normally arrive from gittensor-app through the poller; these
+    commands read the same rentals.json beside the running controller (the daemon re-reads it every pass)."""
+
+
+@rentals_group.command('list')
+@_state_options
+def rentals_list_command(state_dir, json_mode):
+    """Every rental this controller knows, open first."""
+    from gittensor.controller.rentals import RentalStore
+
+    state = StateDir(Path(state_dir).expanduser())
+    store = RentalStore(state.rentals)
+    rows = sorted(store.rentals.values(), key=lambda r: (not r.open, -r.created_at))
+    if json_mode:
+        emit_json({'success': True, 'rentals': [asdict(r) for r in rows]})
+        return
+    if not rows:
+        err_console.print('[dim]no rentals[/dim]')
+        return
+    table = Table(title=escape(str(state.rentals)), show_header=True)
+    for column in ('Rental', 'State', 'Type', 'Box', 'Cards', 'SSH', 'Started', 'Ends', 'Reason'):
+        table.add_column(column, no_wrap=True)
+    for r in rows:
+        ssh = f'{r.host}:{r.port_map.get("22", "")}' if r.host and r.port_map else ''
+        table.add_row(
+            escape(r.id),
+            r.state,
+            escape(f'{r.gpu_type} x{r.gpu_count}'),
+            escape(r.box[:16]),
+            str(len(r.uuids)),
+            escape(ssh),
+            _when(r.started_at),
+            _when(r.ends_at or None),
+            escape(r.reason),
+        )
+    console.print(table)
+
+
+@rentals_group.command('order')
+@click.option('--gpu-type', required=True, help='A catalog type (RTX5090, H100, ...).')
+@click.option('--count', type=int, default=1, show_default=True, help='The box size: 1, 2, 4 or 8 cards.')
+@click.option('--image', required=True, help='The pod image; it must run an sshd on 22.')
+@click.option('--ssh-pubkey', 'pubkeys', multiple=True, required=True, help='An OpenSSH public key line (repeatable).')
+@click.option('--hours', type=float, default=1.0, show_default=True)
+@click.option('--port', 'ports', multiple=True, type=int, help='A pod port to publish besides 22 (repeatable).')
+@click.option('--box-uid', type=int, default=None, help='Pin the order to one box by UID.')
+@_state_options
+def rentals_order_command(gpu_type, count, image, pubkeys, hours, ports, box_uid, state_dir, json_mode):
+    """Place an order by hand (a test, or an operator renting a box to someone directly). The daemon places it on its
+    next pass; `rentals list` shows the SSH address once it is active."""
+    from gittensor.controller.rentals import RentalError, RentalStore, place_order
+
+    state = StateDir(Path(state_dir).expanduser()).ensure()
+    keys = [Path(k).expanduser().read_text().strip() if Path(k).expanduser().is_file() else k for k in pubkeys]
+    try:
+        r = place_order(
+            RentalStore(state.rentals),
+            gpu_type=gpu_type,
+            gpu_count=count,
+            image=image,
+            ssh_pubkeys=keys,
+            hours=hours,
+            ports=[22, *ports],
+            box_uid=box_uid,
+        )
+    except RentalError as e:
+        _fail(str(e), json_mode, 2)
+    if json_mode:
+        emit_json({'success': True, 'rental': asdict(r)})
+    else:
+        console.print(f'[green]ordered[/green] {r.id}: {gpu_type} x{count}, {hours:g} h, {image}')
+
+
+@rentals_group.command('end')
+@click.argument('rental_id')
+@click.option('--reason', default='operator_stop', show_default=True)
+@_state_options
+def rentals_end_command(rental_id, reason, state_dir, json_mode):
+    """Order a rental ended: the daemon drains the pod on its next pass and the cards go back through the proof."""
+    from gittensor.controller.rentals import RentalError, RentalStore, order_end
+
+    state = StateDir(Path(state_dir).expanduser())
+    try:
+        r = order_end(RentalStore(state.rentals), rental_id, reason)
+    except RentalError as e:
+        _fail(str(e), json_mode, 2)
+    if json_mode:
+        emit_json({'success': True, 'rental': asdict(r)})
+    else:
+        console.print(f'{r.id}: {r.state} ({r.reason})')
 
 
 # ---------------------------------------------------------------- tunnels: the traffic path, its own process --------

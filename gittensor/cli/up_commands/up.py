@@ -16,8 +16,12 @@ from gittensor.agent.config import (
     AGENT_CONTAINER_NAME,
     AGENT_IMAGE,
     AGENT_SSH_PORT,
+    RENT_PORTS_DEFAULT,
+    RENT_PORTS_MIN,
     RUNNER_CONTAINER_NAME,
     WORKLOAD_PORT_RANGE,
+    parse_rent_ports,
+    rent_ports_label,
 )
 from gittensor.agent.launch import agent_run_command, render, runner_run_command, workload_stop_commands
 from gittensor.cli.helpers import NETWORK_CHOICE, console, err_console
@@ -49,23 +53,31 @@ def plan_commands(
     channel: release_channel.Channel | None = None,
     channel_url: str = AGENT_CHANNEL_URL,
     reclaim: bool = False,
+    rent_ports: tuple[int, int] | None = None,
 ) -> list[list[str]]:
     """The docker commands `gitt up` will issue, in order. With ``reclaim``, our own workload containers left behind
     (``report.workloads``) are drained and removed first; a stopped-but-present agent / runner is removed next.
 
     With the runner (the default) the runner image comes from the verified ``channel``, by digest; ``image`` is
-    only used by ``--no-update`` (a local build started directly)."""
+    only used by ``--no-update`` (a local build started directly). ``rent_ports`` (``--rent``) rides along to the
+    agent as its label, through the runner or directly."""
     hotkey = report.hotkey_ss58 or ''
     if no_update:
         target = AGENT_CONTAINER_NAME
-        cmd = agent_run_command(image=image, ssh_port=ssh_port, miner_hotkey=hotkey, allow_dev_keys=allow_dev_keys)
+        cmd = agent_run_command(
+            image=image, ssh_port=ssh_port, miner_hotkey=hotkey, allow_dev_keys=allow_dev_keys, rent_ports=rent_ports
+        )
         state = report.agent_state
     else:
         if channel is None:
             raise ValueError('a verified channel is required to start the runner')
         target = RUNNER_CONTAINER_NAME
         cmd = runner_run_command(
-            runner_image=channel.runner, ssh_port=ssh_port, miner_hotkey=hotkey, channel_url=channel_url
+            runner_image=channel.runner,
+            ssh_port=ssh_port,
+            miner_hotkey=hotkey,
+            channel_url=channel_url,
+            rent_ports=rent_ports,
         )
         state = report.runner_state
     plan = workload_stop_commands(report.workloads) if reclaim else []
@@ -148,6 +160,20 @@ def publish_endpoint(
     'predates the clean leave) before starting.',
 )
 @click.option(
+    '--rent',
+    is_flag=True,
+    default=False,
+    help='Offer this box for rental: customers get a Sysbox pod on the whole box, reached on the rent ports. Needs '
+    'Sysbox installed and the rent ports open. Without it the box is proved and paid idle, never rented.',
+)
+@click.option(
+    '--rent-ports',
+    'rent_ports_text',
+    default=rent_ports_label(RENT_PORTS_DEFAULT),
+    show_default=True,
+    help=f'LOW-HIGH, the range pods publish on (with --rent). At least {RENT_PORTS_MIN} ports, open on your firewall.',
+)
+@click.option(
     '--dry-run', is_flag=True, default=False, help='Print what would be published and run, without doing either.'
 )
 @click.option('--json', 'json_mode', is_flag=True, default=False, help='Output results as JSON.')
@@ -168,6 +194,8 @@ def up_command(
     agent_only,
     publish_only,
     reclaim,
+    rent,
+    rent_ports_text,
     dry_run,
     json_mode,
 ):
@@ -185,11 +213,14 @@ def up_command(
         the sshd port (--ssh-port, default {ssh})
     Keep free on this box, nothing to open:
         the workload ports {low}-{high} (the controller places each instance on one and reaches it over the sshd port)
+    With --rent, also open the rent ports (--rent-ports, default {rent_low}-{rent_high}): a customer's pod publishes
+    its ports there, on this box's own address; nothing listens on them between rentals.
     A home connection behind carrier-grade NAT cannot be reached and cannot join as-is.
 
     \b
     Examples:
         gitt up --wallet alice --hotkey default
+        gitt up --rent                                      (whole-box rentals; Sysbox + the rent ports needed)
         gitt up --dry-run
         gitt up --agent-only                                (on the GPU box; the wallet is on another machine)
         gitt up --publish-only --ip 203.0.113.7             (on the wallet machine, for that box)
@@ -198,6 +229,21 @@ def up_command(
     wallet_name = wallet_name or _load_config_value('wallet') or 'default'
     wallet_hotkey = wallet_hotkey or _load_config_value('hotkey') or 'default'
     endpoint = _resolve_endpoint(network, rpc_url)
+    rent_ports = None
+    if rent:
+        rent_ports = parse_rent_ports(rent_ports_text)
+        if rent_ports is None:
+            _error(
+                f'--rent-ports {rent_ports_text!r}: give LOW-HIGH, at least {RENT_PORTS_MIN} ports above 1023.',
+                json_mode,
+            )
+            sys.exit(2)
+    if publish_only and rent:
+        _error(
+            '--rent is a box setting: pass it with the box step (--agent-only or plain gitt up), not --publish-only.',
+            json_mode,
+        )
+        sys.exit(2)
     if allow_dev_keys and not no_update:
         _error('--allow-dev-keys only applies to --no-update (a locally built image).', json_mode)
         sys.exit(2)
@@ -241,6 +287,7 @@ def up_command(
         public_ip=public_ip,
         skip_reachability=skip_reachability,
         reclaim=reclaim,
+        rent_ports=rent_ports,
     )
 
     channel = None
@@ -296,6 +343,7 @@ def up_command(
             channel=channel,
             channel_url=channel_url,
             reclaim=reclaim and not report.already_up,
+            rent_ports=rent_ports,
         )
         # What the runner itself will issue: printed so the miner can see exactly what runs privileged on their box.
         agent_image, agent_digest = (
@@ -307,6 +355,7 @@ def up_command(
             miner_hotkey=report.hotkey_ss58 or '',
             image_digest=agent_digest,
             allow_dev_keys=allow_dev_keys,
+            rent_ports=rent_ports,
         )
 
     if json_mode:
@@ -323,6 +372,7 @@ def up_command(
                     'port': ssh_port,
                     'netuid': netuid,
                     'workload_ports': list(WORKLOAD_PORT_RANGE),
+                    'rent_ports': list(rent_ports) if rent_ports else None,
                     'published': published,
                 },
                 'channel': None if channel is None else channel.__dict__,
@@ -383,7 +433,11 @@ def up_command(
 
 
 up_command.help = (up_command.help or '').format(
-    ssh=AGENT_SSH_PORT, low=WORKLOAD_PORT_RANGE[0], high=WORKLOAD_PORT_RANGE[1]
+    ssh=AGENT_SSH_PORT,
+    low=WORKLOAD_PORT_RANGE[0],
+    high=WORKLOAD_PORT_RANGE[1],
+    rent_low=RENT_PORTS_DEFAULT[0],
+    rent_high=RENT_PORTS_DEFAULT[1],
 )
 
 

@@ -44,6 +44,18 @@ class TestRunLines:
         line = render(agent_run_command(image='entrius/gt-agent:dev', ssh_port=2200, allow_dev_keys=True))
         assert '-e GT_AGENT_ALLOW_DEV_KEYS=1' in line
 
+    def test_rent_ports_ride_on_the_agent_as_a_label_and_reach_it_through_the_runner(self):
+        """vault 29 §5: `gitt up --rent` -> runner env -> agent label; no label, not for rent. Nothing is published
+        on the range by the agent itself: a pod publishes its own ports when it starts."""
+        plain = render(agent_run_command(image=AGENT_REF, ssh_port=2200))
+        assert 'rent' not in plain
+        line = render(agent_run_command(image=AGENT_REF, ssh_port=2200, rent_ports=(31000, 31099)))
+        assert '--label io.gittensor.rent_ports=31000-31099' in line
+        assert '31000' not in line.replace('io.gittensor.rent_ports=31000-31099', '')  # no -p on the range
+        runner = render(runner_run_command(runner_image=RUNNER_REF, ssh_port=2200, rent_ports=(31000, 31099)))
+        assert '-e GT_AGENT_RENT_PORTS=31000-31099' in runner
+        assert 'RENT' not in render(runner_run_command(runner_image=RUNNER_REF, ssh_port=2200))
+
     def test_runner_line_needs_only_the_socket_and_follows_the_channel(self):
         cmd = runner_run_command(runner_image=RUNNER_REF, ssh_port=2200, miner_hotkey='5Hot')
         line = render(cmd)
@@ -83,6 +95,7 @@ class TestRunLines:
         ):
             assert needle in run_block, needle
         assert '8200' not in run_block and 'HTTP_PORT' not in script
+        assert f'--label {config.RENT_PORTS_LABEL}=$RENT_PORTS' in script and '$rent_label' in run_block
         # every env var the runner reads is one the CLI sets on it
         for env in (
             config.ENV_CHANNEL_URL,
@@ -90,6 +103,7 @@ class TestRunLines:
             config.ENV_SSH_PORT,
             config.ENV_MINER_HOTKEY,
             config.ENV_UPDATE_INTERVAL,
+            config.ENV_RENT_PORTS,
         ):
             assert f'${{{env}' in script, env
 
@@ -101,9 +115,20 @@ class TestRunLines:
         assert f'"{config.RELEASE_SIGN_NAMESPACE}"' in script or f'{config.RELEASE_SIGN_NAMESPACE}}}' in script
 
     def test_shell_scripts_parse(self):
-        for script in ('runner.sh', 'entrypoint.sh', 'keys/make-dev-keys.sh', 'channel/sign.sh'):
+        for script in ('runner.sh', 'entrypoint.sh', 'keys/make-dev-keys.sh', 'channel/sign.sh', 'sysbox-setup.sh'):
             proc = subprocess.run(['bash', '-n', str(AGENT_DIR / script)], capture_output=True, text=True)
             assert proc.returncode == 0, proc.stderr
+
+    def test_sysbox_setup_is_pinned_and_verified(self):
+        """29 §1 #5: the version the prereq names, a checksum before install, never a mutable URL."""
+        script = (AGENT_DIR / 'sysbox-setup.sh').read_text()
+        assert f'SYSBOX_VERSION="{config.SYSBOX_VERSION}"' in script
+        assert 'SYSBOX_SHA256="9d6d5484f980d0a17f86c492c1262015c2afb66280bdb97215b79fde6a0261c5"' in script
+        assert 'sha256sum' in script and 'checksum mismatch' in script and 'latest' not in script
+        assert '"sysbox-runc":{"path":"/usr/bin/sysbox-runc"}' in script and '"cdi":false' in script
+        assert '--runtime=sysbox-runc --gpus all' in script  # the verify step is a GPU pod
+        commands = '\n'.join(line for line in script.splitlines() if not line.lstrip().startswith('#'))
+        assert '--privileged' not in commands
 
     def test_agent_image_is_sshd_only_by_certificate(self):
         sshd = (AGENT_DIR / 'sshd.conf').read_text()

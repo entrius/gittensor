@@ -47,7 +47,7 @@ _UUID = re.compile(r'^GPU-[0-9a-fA-F-]{20,}$')
 
 
 def check_gpu_spec(gpus: Sequence[GpuInfo], spec: Optional[cfg.CardSpec] = None, scrape_error: str = '') -> CheckResult:
-    """Count within the spec's range and every card the one model: a name of the type, compute capability, VRAM in
+    """A box size the type admits and every card the one model: a name of the type, compute capability, VRAM in
     range, a well-formed UUID. With no ``spec`` given it is the catalog's entry for the first card's name: the box
     says which type it claims, and every card is then held to our numbers for that type. A name the catalog does not
     know, or a type that is listed but not qualified, is not admitted."""
@@ -73,15 +73,16 @@ def check_gpu_spec(gpus: Sequence[GpuInfo], spec: Optional[cfg.CardSpec] = None,
                 w.PUBLIC: {'code': w.SPEC_UNREADABLE},
             },  # fmt: skip
         )
-    if not spec.count_min <= len(gpus) <= spec.count_max:
+    if len(gpus) not in spec.counts:
+        sizes = ', '.join(map(str, spec.counts))
         return CheckResult(
             GPU_SPEC,
             False,
             {
-                'reason': f'{len(gpus)} GPUs, spec allows {spec.count_min}-{spec.count_max}',
+                'reason': f'{len(gpus)} GPUs: a {spec.gpu_type} box is {sizes} cards',
                 'gpus': cards,
-                # The count is the box's, but the range is ours and the count alone says nothing it did not advertise.
-                w.PUBLIC: {'code': w.SPEC_CARD_COUNT, 'n': len(gpus), 'low': spec.count_min, 'high': spec.count_max},
+                # The count is the box's and says nothing it did not advertise; the sizes are ours (29 §1 #3).
+                w.PUBLIC: {'code': w.SPEC_CARD_COUNT, 'n': len(gpus)},
             },
         )
     offending: List[str] = []

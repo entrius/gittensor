@@ -13,6 +13,7 @@ import shlex
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from gittensor.agent.config import RENT_PORTS_LABEL, parse_rent_ports
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import HostRunner
 
@@ -54,6 +55,19 @@ def agent_image_id_command(container: str = cfg.AGENT_CONTAINER_NAME) -> str:
     """The running agent container's image ID. A local build has no repo digest; on a dev box this exact ID is what
     ``FullCheckConfig.agent_image_ids`` pins instead."""
     return f"docker inspect --format '{{{{.Image}}}}' {shlex.quote(container)}"
+
+
+def rent_ports_command(container: str = cfg.AGENT_CONTAINER_NAME) -> str:
+    """The agent container's ``RENT_PORTS_LABEL`` (vault 29 §5): "LOW-HIGH" when the miner started it with
+    ``gitt up --rent``, '' otherwise. Read on every visit: the label is on the running container, so a box is rentable
+    exactly as long as its agent says so, and a controller restart rebuilds the fact from the box like everything else."""
+    return f'docker inspect --format \'{{{{index .Config.Labels "{RENT_PORTS_LABEL}"}}}}\' {shlex.quote(container)}'
+
+
+def parse_rent_ports_label(stdout: str) -> List[int]:
+    """``[low, high]`` for a well-formed label, else ``[]`` (no label, or a range the agent would not have accepted)."""
+    ports = parse_rent_ports(stdout)
+    return list(ports) if ports else []
 
 
 def disk_free_command(path: str = cfg.DISK_PATH) -> str:
@@ -239,6 +253,7 @@ class HostScrape:
     kernel_driver: str = ''
     agent_image_digests: List[str] = field(default_factory=list)
     agent_image_id: str = ''
+    rent_ports: List[int] = field(default_factory=list)  # [low, high] from the agent's label; [] = not for rent
     disk_free_gb: Optional[float] = None
     network: Dict[str, Tuple[int, float]] = field(default_factory=dict)
     device_holders: str = ''  # DEVICE_HOLDERS_COMMAND's raw stdout; ``checks.check_card_free`` parses and judges it
@@ -296,6 +311,9 @@ def scrape_host(
     out = _run(runner, scrape, 'agent_image_id', agent_image_id_command(agent_container), timeout)
     if out is not None:
         scrape.agent_image_id = parse_image_id(out)
+    out = _run(runner, scrape, 'rent_ports', rent_ports_command(agent_container), timeout)
+    if out is not None:
+        scrape.rent_ports = parse_rent_ports_label(out)
     out = _run(runner, scrape, 'disk_free', disk_free_command(disk_path), timeout)
     if out is not None:
         scrape.disk_free_gb = parse_df_available_gb(out)

@@ -28,6 +28,7 @@ import random
 from collections.abc import Iterable, Mapping
 
 from gittensor.controller.checks import config as cfg
+from gittensor.controller.checks.state import BENCHED
 
 PROBATION = 'probation'
 STANDARD = 'standard'
@@ -93,6 +94,15 @@ def standing(
 def rank(level: str) -> int:
     """Lease priority: higher leases first (trusted 2, standard 1, probation 0)."""
     return LEVELS.index(level) if level in LEVELS else 0
+
+
+RENTABLE_LEVELS = (STANDARD, TRUSTED)  # vault 29 §1 #7: a box on probation takes no paying customer
+
+
+def box_rentable(box, now: float | None = None) -> bool:
+    """Whether a box may take a rental (29 §1 #7): its agent offers a rent range, it is not benched, and it has the
+    standing. Where the cards are (idle, leased) is placement's question, not this one."""
+    return bool(box.rent_ports) and box.status != BENCHED and standing(box.standing_events, now) in RENTABLE_LEVELS
 
 
 def lease_cap_s(

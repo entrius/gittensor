@@ -110,6 +110,10 @@ class BoxState:
     # [low, high] host ports instances are given, inclusive. Empty: the range every `gitt up` box keeps free
     # (``WORKLOAD_PORT_RANGE``); a dev box whose provider has other ports free sets it at admit.
     workload_ports: List[int] = field(default_factory=list)
+    # [low, high] the miner opened for rentals (`gitt up --rent`, vault 29 §5), as the agent's label said at the last
+    # verdict. Empty: not for rent; the box is proved and paid idle only. Every full check re-reads it, so a miner who
+    # restarts without --rent stops being rentable at the next round.
+    rent_ports: List[int] = field(default_factory=list)
     # Who put the box here: 'chain' (discovery read its endpoint off the metagraph and removes it when the hotkey
     # deregisters) or 'operator' (`gitt controller admit`; discovery leaves it alone). '' is a file from before this.
     source: str = ''
@@ -252,6 +256,7 @@ def apply_verdict(
     new.last_check_at = now
     _set_failed(new, verdict.failed, why)
     new.unreachable_count = 0
+    new.rent_ports = list(verdict.rent_ports)
     if verdict.admitted:
         new.identity = identity_baseline(verdict) or new.identity
         new.not_run_count = 0

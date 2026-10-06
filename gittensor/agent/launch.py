@@ -31,16 +31,19 @@ from gittensor.agent.config import (
     ENV_IMAGE,
     ENV_IMAGE_DIGEST,
     ENV_MINER_HOTKEY,
+    ENV_RENT_PORTS,
     ENV_SSH_PORT,
     ENV_UPDATE_INTERVAL,
     INSTANCE_LABEL,
     PORT_LABEL,
+    RENT_PORTS_LABEL,
     RUNNER_CONTAINER_NAME,
     RUNNER_IMAGE,
     SSH_HOSTKEY_VOLUME,
     SSH_HOSTKEY_VOLUME_MOUNT,
     UPDATE_INTERVAL_S,
     WORKLOAD_STOP_DEFAULT_S,
+    rent_ports_label,
 )
 
 DOCKER_SOCK = '/var/run/docker.sock'
@@ -58,9 +61,12 @@ def agent_run_command(
     image_digest: str = '',
     name: str = AGENT_CONTAINER_NAME,
     allow_dev_keys: bool = False,
+    rent_ports: tuple[int, int] | None = None,
 ) -> list[str]:
     """The agent container: what the runner starts (and restarts when the channel's digest moves). One published port,
-    sshd. ``allow_dev_keys`` lets an image built on docker/agent/keys/make-dev-keys.sh keys start (local builds)."""
+    sshd. ``allow_dev_keys`` lets an image built on docker/agent/keys/make-dev-keys.sh keys start (local builds).
+    ``rent_ports`` (``gitt up --rent``) is carried as a label for the controller to read: the box offers itself for
+    rental on that range (vault 29). docker/agent/runner.sh issues the same line; keep them together."""
     cmd = [
         'docker',
         'run',
@@ -89,6 +95,8 @@ def agent_run_command(
     ]
     if allow_dev_keys:
         cmd += ['-e', f'{ENV_ALLOW_DEV_KEYS}=1']
+    if rent_ports:
+        cmd += ['--label', f'{RENT_PORTS_LABEL}={rent_ports_label(rent_ports)}']
     return [*cmd, image]
 
 
@@ -101,9 +109,11 @@ def runner_run_command(
     update_interval_s: int = UPDATE_INTERVAL_S,
     agent_name: str = AGENT_CONTAINER_NAME,
     name: str = RUNNER_CONTAINER_NAME,
+    rent_ports: tuple[int, int] | None = None,
 ) -> list[str]:
     """The runner container: what ``gitt up`` actually issues. Needs only the docker socket. It follows the signed
-    channel at ``channel_url``, never a tag."""
+    channel at ``channel_url``, never a tag. ``rent_ports`` is handed on to every agent it starts."""
+    rent = ['-e', f'{ENV_RENT_PORTS}={rent_ports_label(rent_ports)}'] if rent_ports else []
     return [
         'docker',
         'run',
@@ -124,6 +134,7 @@ def runner_run_command(
         f'{ENV_MINER_HOTKEY}={miner_hotkey}',
         '-e',
         f'{ENV_UPDATE_INTERVAL}={update_interval_s}',
+        *rent,
         runner_image,
     ]
 

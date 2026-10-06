@@ -94,7 +94,7 @@ def test_render_takes_a_constant_and_integers_and_nothing_else():
     assert w.render({'code': w.DESKTOP_SESSION, 'n': float('nan')}) == ''
     # a count the box chose is clamped: it stays a count, not a message
     assert '(999 processes' in w.render({'code': w.DESKTOP_SESSION, 'n': 80085})
-    assert w.render({'code': w.SPEC_CARD_COUNT, 'n': -5, 'low': 1, 'high': 8}).startswith('this box reports 0 GPUs')
+    assert w.render({'code': w.SPEC_CARD_COUNT, 'n': -5}).startswith('this box reports 0 GPUs')
 
 
 def test_a_phrase_that_is_not_ours_is_not_published(tmp_path):
@@ -250,7 +250,9 @@ def test_gpu_spec_and_the_uuid_pin_count_cards_and_name_nothing():
     assert phrase_of(ck.check_gpu_spec([], RTX_5090, scrape_error='command not found')) == (
         'nvidia-smi did not answer on this box'
     )
-    assert phrase_of(ck.check_gpu_spec([], RTX_5090)) == 'this box reports 0 GPUs, the pool admits 1 to 8'
+    assert phrase_of(ck.check_gpu_spec([], RTX_5090)) == (
+        'this box reports 0 GPUs, not a box size the pool admits for its GPU type'
+    )
     gpus = parse_nvidia_smi(fixture('nvidia_smi_4090.csv'))
     wrong_model = ck.check_gpu_spec(gpus, RTX_5090)
     assert phrase_of(wrong_model) == 'the GPU model on this box is not the one the pool admits (1 card)'

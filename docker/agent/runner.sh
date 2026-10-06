@@ -10,6 +10,7 @@ CHANNEL_URL="${GT_AGENT_CHANNEL_URL:?GT_AGENT_CHANNEL_URL is required}"
 NAME="${GT_AGENT_CONTAINER_NAME:-gt-agent}"
 SSH_PORT="${GT_AGENT_SSH_PORT:-2200}"
 MINER_HOTKEY="${GT_AGENT_MINER_HOTKEY:-}"
+RENT_PORTS="${GT_AGENT_RENT_PORTS:-}"  # "LOW-HIGH" from `gitt up --rent`; empty = the box is not for rent
 INTERVAL="${GT_AGENT_UPDATE_INTERVAL_S:-60}"
 VOLUME="${GT_AGENT_SSH_VOLUME:-gt-agent-ssh}"
 ALLOWED_SIGNERS="${GT_AGENT_ALLOWED_SIGNERS:-/etc/gt-agent/allowed_signers}"
@@ -44,7 +45,12 @@ start_agent() {
     image="$1"
     digest="${image#*@}"
     docker rm -f "$NAME" >/dev/null 2>&1 || true
-    docker run -d --name "$NAME" --restart unless-stopped --privileged --pid host --gpus all \
+    # The rent range rides on the agent as a label (io.gittensor.rent_ports): the controller reads it on every visit.
+    # Mirror gittensor/agent/launch.py agent_run_command.
+    rent_label=""
+    [ -n "$RENT_PORTS" ] && rent_label="--label io.gittensor.rent_ports=$RENT_PORTS"
+    # shellcheck disable=SC2086  # $rent_label is empty or one --label flag pair, never user text with spaces
+    docker run -d --name "$NAME" --restart unless-stopped --privileged --pid host --gpus all $rent_label \
         -v /var/run/docker.sock:/var/run/docker.sock \
         -v "$VOLUME:/var/lib/gt-agent" \
         -p "$SSH_PORT:$SSH_PORT" \

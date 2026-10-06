@@ -382,3 +382,17 @@ def test_an_interrupted_start_is_failed_on_the_next_pass(tmp_path, boxes):
     assert report.actions[0].kind == 'failed' and 'interrupted' in report.actions[0].detail
     assert store.rentals[r.id].state == rt.FAILED
     assert all(c.state == CHECKING for c in boxes.boxes[HK].cards.values())
+
+
+def test_the_dev_overrides_run_a_pod_under_runc_without_the_firewall_on_a_probation_box(tmp_path, boxes):
+    """Our own test boxes (a Lium pod cannot run Sysbox, has no reachable host namespaces, and is on probation): the
+    reconciler takes the overrides; a miner's box never gets them (the CLI warns)."""
+    runner, clock = pod_runner(), Clock()
+    boxes.put(rentable_box(standing_s=0))  # probation
+    store, rec = reconciler(tmp_path, boxes, runner, clock, runtime='runc', firewall=False, min_standing='probation')
+    r = order(store)
+    rec.run_pass()
+    assert store.rentals[r.id].state == rt.ACTIVE
+    run_line = next(c for c in runner.calls if c.startswith('docker run'))
+    assert '--runtime=runc' in run_line and not any('iptables' in c for c in runner.calls)
+    assert rt.pod_run_command(rt.RentalRecord('rnt_1', uuids=[U1], image='x')).count('--runtime=sysbox-runc') == 1

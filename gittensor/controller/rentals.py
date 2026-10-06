@@ -73,7 +73,7 @@ from gittensor.controller.manifest import gpu_type_of
 from gittensor.controller.runspec import PlacementError, PullToken, image_present_command, pull_command
 from gittensor.controller.ssh import SshTransportError
 from gittensor.controller.ssh.certs import CertificateError
-from gittensor.controller.standing import box_rentable, rank, standing
+from gittensor.controller.standing import STANDARD, box_rentable, rank, standing
 
 # -- the states (the app's names, 29 §3) -----------------------------------------------------------------------------
 REQUESTED = 'requested'
@@ -156,6 +156,8 @@ class RentalRecord:
     pay_through: float | None = None
     pay_open: bool = False
     stopped_at: float | None = None
+    # what the app has been told (``rental_seam.RentalPoller``): a report goes out whenever this differs from ``state``
+    reported_state: str = ''
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> RentalRecord:
@@ -267,15 +269,16 @@ def assign_ports(ports: Iterable[int], rent_range: list[int], taken: Iterable[in
     return out
 
 
-def pod_run_command(r: RentalRecord, network: str = RENTAL_NETWORK) -> str:
+def pod_run_command(r: RentalRecord, network: str = RENTAL_NETWORK, runtime: str = SYSBOX_RUNTIME) -> str:
     """The pod: Sysbox (root, docker and systemd inside, no host root), every card of the box, the ports published on
     every address of the box (the miner's firewall opened the range), caps, labels, never a restart by itself, no
-    host mounts, no extra capabilities."""
+    host mounts, no extra capabilities. ``runtime`` is ``runc`` only on a dev box that cannot run Sysbox (a Lium pod
+    is one: it is a Sysbox container itself)."""
     devices = ','.join(r.uuids)
     parts = [
         'docker run -d',
         f'--name {shlex.quote(r.name)}',
-        f'--runtime={SYSBOX_RUNTIME}',
+        f'--runtime={runtime}',
         f'--label {shlex.quote(f"{RENTAL_LABEL}={r.id}")}',
         f'--label {shlex.quote(f"{UUID_LABEL}={devices}")}',
         f'--gpus {shlex.quote(f'"device={devices}"')}',  # docker reads the value as CSV: quoted, commas survive
@@ -376,7 +379,12 @@ class RentalReconciler:
         background: bool = True,
         prepull: tuple[str, ...] = QUICK_PICK_IMAGES,
         no_fit_grace_s: float = NO_FIT_GRACE_S,
+        runtime: str = SYSBOX_RUNTIME,
+        firewall: bool = True,
+        min_standing: str = STANDARD,
     ):
+        """``runtime`` / ``firewall`` / ``min_standing`` are the dev overrides (`gitt controller run --rental-runtime
+        runc --no-rental-firewall --rental-min-standing probation`): our own test boxes, never a miner's."""
         self.boxes, self.rentals = boxes, rentals
         self.make_runner = make_runner
         self.box_locks = box_locks or BoxLocks()
@@ -386,6 +394,7 @@ class RentalReconciler:
         self.background = background
         self.prepull_images = prepull
         self.no_fit_grace_s = no_fit_grace_s
+        self.runtime, self.firewall, self.min_standing = runtime, firewall, min_standing
         self._threads: dict[str, threading.Thread] = {}  # rental id -> its start / stop thread
         self._prepulling: dict[str, threading.Thread] = {}  # box id -> its pull thread
 
@@ -585,7 +594,9 @@ class RentalReconciler:
         """The best rentable box of the type and size, wholly idle, not already carrying an open rental."""
         fits: list[BoxState] = []
         for box in self.boxes.boxes.values():
-            if box.box_id in taken or box.status != IDLE or not box_rentable(box, now) or not box.cards:
+            if box.box_id in taken or box.status != IDLE or not box.cards:
+                continue
+            if not box_rentable(box, now, min_level=self.min_standing):
                 continue
             if r.want_box_uid is not None and box.uid != r.want_box_uid:
                 continue
@@ -604,7 +615,7 @@ class RentalReconciler:
             return
         now = self.wall()
         for box in list(self.boxes.boxes.values()):
-            if box.status != IDLE or not box_rentable(box, now) or not box.cards:
+            if box.status != IDLE or not box_rentable(box, now, min_level=self.min_standing) or not box.cards:
                 continue
             if any(c.state != IDLE for c in box.cards.values()) or self.rentals.on_box(box.box_id):
                 continue
@@ -660,7 +671,8 @@ class RentalReconciler:
             runner = self.make_runner(box)
             t = cfg.SSH_COMMAND_TIMEOUT_S
             self._check(runner.run(ensure_rental_network_command(), timeout=t), 'network')
-            self._check(runner.run(firewall_commands(), timeout=t), 'firewall')
+            if self.firewall:
+                self._check(runner.run(firewall_commands(), timeout=t), 'firewall')
             if not runner.run(image_present_command(r.image), timeout=t).ok:
                 pull = runner.run(
                     pull_command(r.image, self.pull_token.username if self.pull_token else None),
@@ -669,7 +681,7 @@ class RentalReconciler:
                 )
                 if not pull.ok:
                     raise RentalError(f'{PULL_FAILED}: {(pull.stderr or pull.stdout).strip()[-200:]}')
-            run = runner.run(pod_run_command(r), timeout=t)
+            run = runner.run(pod_run_command(r, runtime=self.runtime), timeout=t)
             cid = self._check(run, 'docker run').strip().splitlines()[-1].strip() if run.ok else ''
             if len(cid) != 64:
                 raise RentalError(f'{START_FAILED}: docker run gave no container id')

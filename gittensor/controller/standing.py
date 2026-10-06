@@ -96,13 +96,13 @@ def rank(level: str) -> int:
     return LEVELS.index(level) if level in LEVELS else 0
 
 
-RENTABLE_LEVELS = (STANDARD, TRUSTED)  # vault 29 §1 #7: a box on probation takes no paying customer
-
-
-def box_rentable(box, now: float | None = None) -> bool:
+def box_rentable(box, now: float | None = None, min_level: str = STANDARD) -> bool:
     """Whether a box may take a rental (29 §1 #7): its agent offers a rent range, it is not benched, and it has the
-    standing. Where the cards are (idle, leased) is placement's question, not this one."""
-    return bool(box.rent_ports) and box.status != BENCHED and standing(box.standing_events, now) in RENTABLE_LEVELS
+    standing (``min_level`` or better; ``probation`` is the dev override for our own test boxes). Where the cards are
+    (idle, leased) is placement's question, not this one."""
+    if not box.rent_ports or box.status == BENCHED:
+        return False
+    return rank(standing(box.standing_events, now)) >= rank(min_level)
 
 
 def lease_cap_s(

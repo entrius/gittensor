@@ -224,6 +224,21 @@ class TestPrereqs:
         ours = with_rent((31000, 31099))
         assert ours.ok and 'pod of ours' in next(r for r in ours.results if r.name == 'Rent ports').detail
 
+    def test_a_dev_box_skips_sysbox_and_may_open_a_narrow_range(self, probe):
+        """--allow-dev-keys (a local build on our own box, e.g. a Lium pod): no Sysbox row, 4 ports are enough."""
+        report = run_prereqs(
+            probe,
+            wallet='a',
+            hotkey='h',
+            netuid=74,
+            endpoint='ws://x',
+            ssh_port=2200,
+            rent_ports=(31000, 31003),
+            dev_box=True,
+        )
+        rows = {r.name: r for r in report.results}
+        assert report.ok and rows['Sysbox runtime'].status == 'skip' and rows['Rent ports'].status == 'pass'
+
     def test_a_box_size_the_type_does_not_admit_is_named(self, probe):
         from gittensor.cli.up_commands.prereqs import check_gpu_model
 

@@ -2141,7 +2141,8 @@ def rentals_list_command(state_dir, json_mode):
     for column in ('Rental', 'State', 'Type', 'Box', 'Cards', 'SSH', 'Started', 'Ends', 'Reason'):
         table.add_column(column, no_wrap=True)
     for r in rows:
-        ssh = f'{r.host}:{r.port_map.get("22", "")}' if r.host and r.port_map else ''
+        public = r.public_map or r.port_map
+        ssh = f'{r.host}:{public.get("22", "")}' if r.host and public else ''
         table.add_row(
             escape(r.id),
             r.state,

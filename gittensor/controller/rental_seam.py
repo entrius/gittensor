@@ -96,7 +96,7 @@ def report_body(r: RentalRecord) -> dict:
         'state': r.state,
         'box_uid': r.box_uid,
         'host': r.host or None,
-        'ports': {k: int(v) for k, v in r.port_map.items()} or None,
+        'ports': {k: int(v) for k, v in (r.public_map or r.port_map).items()} or None,  # what the world dials
         'gpu_uuids': list(r.uuids) or None,
         'started_at': int(r.started_at) if r.started_at is not None else None,
         'ended_at': int(r.ended_at) if r.ended_at is not None else None,

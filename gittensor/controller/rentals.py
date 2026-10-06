@@ -147,7 +147,10 @@ class RentalRecord:
     uuids: list[str] = field(default_factory=list)
     container_id: str = ''
     host: str = ''
-    port_map: dict[str, int] = field(default_factory=dict)  # str(pod port) -> the box's public port
+    port_map: dict[str, int] = field(default_factory=dict)  # str(pod port) -> the host port docker publishes it on
+    # str(pod port) -> the port the world reaches it on: the same, except on a host that remaps published ports (a
+    # Lium pod, BoxState.port_map). What the customer is told; what the probe dials.
+    public_map: dict[str, int] = field(default_factory=dict)
     started_at: float | None = None  # active: the SSH banner answered
     ended_at: float | None = None
     reason: str = ''
@@ -587,6 +590,7 @@ class RentalReconciler:
                 self._finish(r, FAILED, START_FAILED)
                 report.actions.append(RentalAction('failed', r.id, box.box_id, str(e)))
                 continue
+            r.public_map = {inside: box.public_port(host_port) for inside, host_port in r.port_map.items()}
             r.box, r.box_uid, r.state = box.box_id, box.uid, STARTING_R
             r.uuids = sorted(box.cards)
             r.uuid = r.uuids[0]
@@ -702,7 +706,7 @@ class RentalReconciler:
                 runner.run(authorized_keys_command(cid, r.ssh_pubkeys), timeout=t, stdin=keys_stdin(r.ssh_pubkeys)),
                 'authorized_keys',
             )
-            public = box.public_port(r.port_map[str(RENTAL_SSH_PORT)])
+            public = r.public_map.get(str(RENTAL_SSH_PORT)) or box.public_port(r.port_map[str(RENTAL_SSH_PORT)])
             deadline = self.wall() + SSHD_PROBE_TIMEOUT_S
             while not self.probe(r.host, public):
                 if self.wall() >= deadline:

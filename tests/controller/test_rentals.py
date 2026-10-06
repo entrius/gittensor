@@ -373,6 +373,25 @@ def test_the_public_document_marks_a_rented_card_and_nothing_else(tmp_path, boxe
     assert not re.search(r'GPU-[0-9a-f-]{20,}', text)
 
 
+def test_a_host_that_remaps_ports_is_reported_and_probed_by_its_public_ports(tmp_path, boxes):
+    """A Lium pod as the box (the testnet run): docker publishes on 31000, the world reaches 60037 (BoxState.port_map).
+    The probe dials the public port and the customer is told the public port; the docker line keeps the host port."""
+    from gittensor.controller.rental_seam import report_body
+
+    box = boxes.boxes[HK]
+    box.port_map = {'31000': 60037}
+    boxes.put(box)
+    runner, clock = pod_runner(), Clock()
+    dialed = []
+    store, rec = reconciler(tmp_path, boxes, runner, clock, probe=lambda h, p: dialed.append((h, p)) or True)
+    r = order(store)
+    rec.run_pass()
+    r = store.rentals[r.id]
+    assert r.port_map == {'22': 31000} and r.public_map == {'22': 60037} and dialed == [('203.0.113.7', 60037)]
+    assert '-p 31000:22' in next(c for c in runner.calls if c.startswith('docker run'))
+    assert report_body(r)['ports'] == {'22': 60037}
+
+
 def test_an_interrupted_start_is_failed_on_the_next_pass(tmp_path, boxes):
     runner, clock = pod_runner(), Clock()
     store, rec = reconciler(tmp_path, boxes, runner, clock)

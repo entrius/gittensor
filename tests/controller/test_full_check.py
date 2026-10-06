@@ -109,7 +109,7 @@ def test_wrong_gpu_model_fails_gpu_spec_and_stages_nothing(proof, allowlist):
     verdict = run_full_check(runner, allowlist, proof, config=CONFIG)
     assert verdict.verdict == BENCH and verdict.failed == [ck.GPU_SPEC] and verdict.skipped == [ck.GPU_PROOF]
     reason = check(verdict, ck.GPU_SPEC).evidence['reason']
-    assert "'NVIDIA GeForce RTX 4090'" in reason and 'compute_cap' in reason and 'VRAM 24564' in reason
+    assert "'NVIDIA GeForce RTX 4090'" in reason and 'not in the GPU catalog' in reason
     assert proof.staged == [] and proof_calls(runner) == []
 
 

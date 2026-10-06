@@ -54,21 +54,6 @@ gitt miner check --wallet <name> --hotkey <hotkey>
 
 See full guide **[here](https://docs.gittensor.io/miner.html)**
 
-### Compute miners
-
-Gittensor also pays GPU time. A compute miner runs one command on a GPU box; the agent it starts is the whole
-miner, and the subnet's controller checks the cards, leases them out and pays per card.
-
-```bash
-# Needs Docker with the NVIDIA runtime and a registered hotkey
-gitt up --wallet <name> --hotkey <hotkey>
-
-# Leave cleanly: drain and stop the workloads placed here, then the agent and its runner
-gitt down
-```
-
-`gitt up --help` lists every option.
-
 ## Validators
 
 **Recommended: Deploy with Docker and Docker Watchtower for automatic updates**

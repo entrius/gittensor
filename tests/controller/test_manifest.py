@@ -19,7 +19,8 @@ from gittensor.controller.manifest import (
 )
 
 FIXTURE = Path(__file__).parent / 'fixtures' / 'manifest_27b.yaml'
-TEMPLATE_SCHEMA = Path('/home/kimbo/github-repos/project-gittensor/gittensor-compute-template/manifest.schema.json')
+# The template repo checked out beside this one (project-gittensor/gittensor-compute-template).
+TEMPLATE_SCHEMA = Path(__file__).resolve().parents[3] / 'gittensor-compute-template' / 'manifest.schema.json'
 
 
 def doc():

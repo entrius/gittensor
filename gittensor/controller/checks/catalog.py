@@ -1,0 +1,100 @@
+# The MIT License (MIT)
+# Copyright © 2025 Entrius
+
+"""The GPU catalog (``gpu_catalog.json``): every card type the pool knows and what a card of it must look like.
+
+One table for the full check's spec, the manifest GPU type of a card name, placement's spec VRAM and ``gitt up``'s
+model check. A type is ``qualified`` (admitted: the proof has been measured on a real card of it) or ``listed``
+(known, not admitted yet). The spec is always ours, picked by the name the box reports and then held against the
+box: a card is never judged by its own numbers.
+"""
+
+import json
+from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
+from typing import Dict, Optional, Tuple
+
+CATALOG_PATH = Path(__file__).with_name('gpu_catalog.json')
+QUALIFIED = 'qualified'
+LISTED = 'listed'
+# The accepted window around a type's nominal size (Lium's gpu_spec_table.py): NVML's total is the physical memory
+# less the vendor's and the driver's reservations, seen up to ~7% under nominal (an L40S reports 46068 MiB of 49152),
+# and slightly over on some cards. One window per type, so a size between two types is no type at all.
+VRAM_FLOOR_RATIO = 0.90
+VRAM_CEIL_RATIO = 1.05
+COUNT_MAX = 8
+
+
+class CatalogError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class CardSpec:
+    """What every card on an admitted box must look like in ``nvidia-smi --query-gpu``."""
+
+    gpu_type: str = 'RTX5090'  # the manifest `placement.gpu_types` name and the pay table's row
+    names: Tuple[str, ...] = ('NVIDIA GeForce RTX 5090',)
+    compute_cap: str = '12.0'  # sm_120, what the proof kernel (docker/proof/kernel) is compiled for
+    vram_total_mib_min: int = 32_000  # a 5090 reports 32607 MiB
+    vram_total_mib_max: int = 33_000
+    count_min: int = 1
+    count_max: int = COUNT_MAX
+    status: str = QUALIFIED
+
+    @property
+    def name(self) -> str:
+        return self.names[0]
+
+    @property
+    def qualified(self) -> bool:
+        return self.status == QUALIFIED
+
+
+def parse_catalog(doc: dict, source: str = '') -> Dict[str, CardSpec]:
+    specs: Dict[str, CardSpec] = {}
+    seen: Dict[str, str] = {}
+    for gpu_type, row in doc.items():
+        if gpu_type.startswith('_'):
+            continue
+        try:
+            names = tuple(str(n) for n in row['names'])
+            nominal = int(row['vram_mib'])
+            spec = CardSpec(
+                gpu_type=gpu_type,
+                names=names,
+                compute_cap=str(row['compute_cap']),
+                vram_total_mib_min=int(row.get('vram_mib_min', nominal * VRAM_FLOOR_RATIO)),
+                vram_total_mib_max=int(row.get('vram_mib_max', nominal * VRAM_CEIL_RATIO)),
+                count_max=int(row.get('count_max', COUNT_MAX)),
+                status=str(row['status']),
+            )
+        except (KeyError, TypeError, ValueError) as e:
+            raise CatalogError(f'{source}: {gpu_type}: {e!r}') from e
+        if not names or spec.status not in (QUALIFIED, LISTED):
+            raise CatalogError(f'{source}: {gpu_type}: needs at least one name and a status of qualified or listed')
+        if not 0 < spec.vram_total_mib_min <= spec.vram_total_mib_max:
+            raise CatalogError(f'{source}: {gpu_type}: empty VRAM window')
+        for name in names:
+            if name in seen:
+                raise CatalogError(f'{source}: {name!r} is listed under both {seen[name]} and {gpu_type}')
+            seen[name] = gpu_type
+        specs[gpu_type] = spec
+    return specs
+
+
+@lru_cache(maxsize=1)
+def load_catalog() -> Dict[str, CardSpec]:
+    return parse_catalog(json.loads(CATALOG_PATH.read_text()), str(CATALOG_PATH))
+
+
+def spec_for_name(card_name: str) -> Optional[CardSpec]:
+    """The catalog entry for a card as nvidia-smi names it, qualified or not; None for a card the catalog does not
+    know."""
+    name = card_name.strip()
+    return next((spec for spec in load_catalog().values() if name in spec.names), None)
+
+
+def spec_for_type(gpu_type: str) -> Optional[CardSpec]:
+    return load_catalog().get(gpu_type)

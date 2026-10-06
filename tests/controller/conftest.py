@@ -239,6 +239,14 @@ def passing_runner(
 
 
 @pytest.fixture(autouse=True)
+def compute_share_tenth(monkeypatch):
+    """The pay tests are written for a 10% compute share; the live constant is 0 while OSS holds the whole round."""
+    from gittensor.controller.pay import ledger
+
+    monkeypatch.setattr(ledger, 'COMPUTE_SHARE', 0.10)
+
+
+@pytest.fixture(autouse=True)
 def no_drain_grace(monkeypatch):
     """A drain with no gateway to ask sleeps ``DRAIN_GRACE_S`` first: real seconds in the daemon tests. Tests of the
     wait itself set their own."""

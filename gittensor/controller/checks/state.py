@@ -629,13 +629,18 @@ class StateStore:
     def __init__(self, path):
         self.path = Path(path)
         self.boxes: Dict[str, BoxState] = {}
-        self._mtime_ns = 0
+        self._stamp: tuple = ()
         self._removed: set = set()
         if self.path.exists():
             self.boxes = self._read()
 
+    def _disk_stamp(self) -> tuple:
+        # Not the mtime alone: two writes inside one timestamp tick (a few ms on some kernels) carry the same mtime.
+        st = self.path.stat()
+        return (st.st_mtime_ns, st.st_ino, st.st_size)
+
     def _read(self) -> Dict[str, BoxState]:
-        self._mtime_ns = self.path.stat().st_mtime_ns
+        self._stamp = self._disk_stamp()
         raw = json.loads(self.path.read_text() or '{}')
         return {k: BoxState.from_dict(v) for k, v in raw.items()}
 
@@ -654,7 +659,7 @@ class StateStore:
 
     def merge_from_disk(self) -> List[str]:
         """Pick up what someone else wrote since our last read or write. Returns the box ids added or changed."""
-        if not self.path.exists() or self.path.stat().st_mtime_ns == self._mtime_ns:
+        if not self.path.exists() or self._disk_stamp() == self._stamp:
             return []
         changed = []
         for box_id, theirs in self._read().items():
@@ -675,7 +680,7 @@ class StateStore:
         tmp = self.path.with_suffix(self.path.suffix + '.tmp')
         tmp.write_text(json.dumps({k: v.as_dict() for k, v in sorted(self.boxes.items())}, indent=1))
         tmp.replace(self.path)
-        self._mtime_ns = self.path.stat().st_mtime_ns
+        self._stamp = self._disk_stamp()
 
     def by_status(self, status: str) -> List[BoxState]:
         return [b for b in self.boxes.values() if b.status == status]

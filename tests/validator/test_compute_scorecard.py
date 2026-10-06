@@ -17,8 +17,10 @@ import bittensor as bt
 import numpy as np
 import pytest
 
-from gittensor.constants import OSS_EMISSION_SHARE, RECYCLE_UID
+from gittensor.constants import RECYCLE_UID
+from gittensor.controller.pay import ledger
 from gittensor.controller.pay.scorecard import write_scorecard
+from gittensor.validator import emission_allocation
 from gittensor.validator.compute_pool import (
     COMMIT_LOG,
     DEFAULT_COMMIT_DIR,
@@ -30,7 +32,15 @@ from gittensor.validator.compute_pool import (
 from gittensor.validator.emission_allocation import blend_emission_pools
 from tests.controller.test_scorecard import HK_A, HK_B, ISSUED, example_scorecard
 
+OSS_EMISSION_SHARE = 0.90
 COMPUTE_SHARE = 1.0 - OSS_EMISSION_SHARE
+
+
+@pytest.fixture(autouse=True)
+def _tenth_to_compute(monkeypatch):
+    """These tests cover a 10% compute share; the live constant gives OSS the whole round."""
+    monkeypatch.setattr(emission_allocation, 'OSS_EMISSION_SHARE', OSS_EMISSION_SHARE)
+    monkeypatch.setattr(ledger, 'COMPUTE_SHARE', COMPUTE_SHARE)
 
 
 class FakeSubtensor:

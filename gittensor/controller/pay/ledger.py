@@ -55,7 +55,7 @@ from gittensor.controller.pay.oracle import Quote
 from gittensor.controller.pay.rates import GpuRate
 
 DAY_S = 86_400.0
-COMPUTE_SHARE = 1.0 - OSS_EMISSION_SHARE  # the part of miner weights the compute pool pays (0.10)
+COMPUTE_SHARE = 1.0 - OSS_EMISSION_SHARE  # the part of miner weights the compute pool pays (0.30)
 
 
 def utc_day(t: float) -> str:
@@ -302,10 +302,12 @@ def settle_window(
     quote: Quote,
     start: float,
     end: float,
-    compute_share: float = COMPUTE_SHARE,
+    compute_share: float | None = None,  # None = COMPUTE_SHARE, read when called
     miner_alpha_per_block: float = cfg.MINER_ALPHA_PER_BLOCK,
     block_s: float = cfg.BLOCK_S,
 ) -> Settlement:
+    if compute_share is None:
+        compute_share = COMPUTE_SHARE
     seconds = max(end - start, 1e-9)
     hotkeys: dict[str, HotkeyPay] = {}
     gpus: dict[str, GpuPay] = {}

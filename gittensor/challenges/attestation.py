@@ -7,10 +7,15 @@
 * ``dev``: a local ed25519 key (a 32-byte seed file, created 0600 on first use). Proves only which key signed, so a
   maintainer accepts it only from the challenge's ``dev_attestation_pubkey``; it exists for dry runs.
 * ``polaris``: the evaluator's key released by a Polaris appraisal of the blessed image. Not wired yet.
+* ``cathedral``: Cathedral (cathedral.computer) ran the official run itself and signed with a platform key the
+  challenge pins in ``challenge.json`` (``attestation.trusted_keys``). The signature here is the same ed25519 over the
+  same digest as ``dev``; the Cathedral receipt in ``signer.receipt`` is checked by ``challenges/cathedral.py``.
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import os
@@ -22,7 +27,8 @@ from Crypto.Signature import eddsa
 
 from gittensor.challenges.head_to_head import canonical
 
-DEV, POLARIS = 'dev', 'polaris'
+DEV, POLARIS, CATHEDRAL = 'dev', 'polaris', 'cathedral'
+TRUSTED_STATUSES = ('active', 'retired')  # a revoked key fails every receipt, whatever its date
 POLARIS_DOCS = 'https://docs.fr0ntierx.com/attestation/'
 
 
@@ -86,16 +92,48 @@ def sign_dev(key_path: str | Path, result: dict, seed_block: int, image: str | N
     return Attestation(result, seed_block, image, {'kind': DEV, 'pubkey': public_hex(key)}, signature.hex())
 
 
-def verify(att: Attestation, dev_pubkey: str | None) -> bool:
-    """The signature is genuine, and a ``dev`` signer is exactly ``dev_pubkey`` (``None`` accepts no dev signer)."""
-    kind = att.signer.get('kind')
-    if kind == POLARIS:
-        raise NotImplementedError(f'Polaris attestation is not wired yet; see {POLARIS_DOCS}')
-    if kind != DEV or not dev_pubkey or att.signer.get('pubkey') != dev_pubkey:
-        return False
+def trusted_pubkey(trusted_keys: dict | None, key_id: object) -> bytes | None:
+    """The raw public key ``challenge.json`` pins under ``key_id`` (``trusted_keys``), or ``None`` when it is unknown,
+    not ed25519, revoked or malformed. The key is never taken from the attestation itself."""
+    entry = (trusted_keys or {}).get(key_id) if isinstance(key_id, str) else None
+    if (
+        not isinstance(entry, dict)
+        or entry.get('algorithm') != 'ed25519'
+        or entry.get('status') not in TRUSTED_STATUSES
+    ):
+        return None
     try:
-        key = eddsa.import_public_key(bytes.fromhex(dev_pubkey))
-        eddsa.new(key, 'rfc8032').verify(digest(att.result, att.seed_block, att.image), bytes.fromhex(att.signature))
+        key = base64.b64decode(entry['public_key_base64'], validate=True)
+    except (KeyError, TypeError, binascii.Error):
+        return None
+    return key if len(key) == 32 else None
+
+
+def ed25519_ok(pubkey: bytes, signature_hex: str, message: bytes) -> bool:
+    try:
+        eddsa.new(eddsa.import_public_key(pubkey), 'rfc8032').verify(message, bytes.fromhex(signature_hex))
     except (TypeError, ValueError):
         return False
     return True
+
+
+def verify(att: Attestation, dev_pubkey: str | None, trusted_keys: dict | None = None) -> bool:
+    """The signature is genuine, and a ``dev`` signer is exactly ``dev_pubkey`` (``None`` accepts no dev signer) and a
+    ``cathedral`` signer is a key pinned in ``trusted_keys`` (``None`` accepts none)."""
+    kind = att.signer.get('kind')
+    if kind == POLARIS:
+        raise NotImplementedError(f'Polaris attestation is not wired yet; see {POLARIS_DOCS}')
+    message = digest(att.result, att.seed_block, att.image)
+    if kind == CATHEDRAL:
+        pubkey = trusted_pubkey(trusted_keys, att.signer.get('key_id'))
+        return (
+            pubkey is not None
+            and att.signer.get('pubkey') == pubkey.hex()
+            and ed25519_ok(pubkey, att.signature, message)
+        )
+    if kind != DEV or not dev_pubkey or att.signer.get('pubkey') != dev_pubkey:
+        return False
+    try:
+        return ed25519_ok(bytes.fromhex(dev_pubkey), att.signature, message)
+    except ValueError:
+        return False

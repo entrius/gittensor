@@ -32,6 +32,7 @@ from rich.table import Table
 
 from gittensor.challenges import runner
 from gittensor.challenges.attestation import Attestation, dev_pubkey, sign_dev
+from gittensor.challenges.cathedral import Author
 from gittensor.challenges.checkout import (
     ATTESTATION,
     CONFIG,
@@ -392,7 +393,10 @@ def submit_command(challenge, agree_cla, login, network):
         tree = git(root, 'write-tree', env=env)
     challenger_sha = git(root, 'rev-parse', f'{tree}:{path}')
     block, seed_block_hash = chain_now(network, att.seed_block)
-    if error := submission_error(att, upstream.config, challenger_sha, upstream.king_sha, block, seed_block_hash):
+    author = Author(login, gh_user_id())
+    if error := submission_error(
+        att, upstream.config, challenger_sha, upstream.king_sha, block, seed_block_hash, author
+    ):
         raise click.ClickException(f'not submitted: {error}')
     try:
         registered = miner_hotkey(gh_user_id()) is not None

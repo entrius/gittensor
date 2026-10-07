@@ -17,8 +17,8 @@ COPY pyproject.toml uv.lock README.md ./
 
 # Install dependencies only (no project install yet — source code not copied)
 ENV PATH="/app/.venv/bin:$PATH"
-RUN uv sync --no-install-project
+RUN uv sync --no-install-project --extra validator
 
 # Copy application code and install the project
 COPY . .
-RUN uv sync
+RUN uv sync --extra validator

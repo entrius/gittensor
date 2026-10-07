@@ -5,21 +5,28 @@ description = "gittensor"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
+# What every `gitt` command needs (miner, controller, renter). The validator's own packages are the `validator`
+# extra: tree-sitter's language pack, wandb and psycopg are ~290 MB of a ~480 MB install that a miner or a customer
+# running `gitt rent` never imports.
 dependencies = [
     "bittensor==10.3.1",
     "bittensor-cli==9.21.1",
     "click==8.3.2",
     "jsonschema==4.25.1",
-    "psycopg[binary]==3.3.4",
     "pyyaml==6.0.3",
+    "requests>=2.32,<3",  # imported directly (mirror, github tools, controller checks); pinned by bittensor
     "rich==14.3.3",
+]
+
+[project.optional-dependencies]
+validator = [
+    "psycopg[binary]==3.3.4",
     "tree-sitter==0.24.0",
     "tree-sitter-language-pack==0.7.2",
     "wandb==0.26.1",
 ]
-
-[project.optional-dependencies]
 dev = [
+    "gittensor[validator]",
     "httpx==0.28.1",
     "pre-commit==4.6.0",
     "pyright==1.1.408",

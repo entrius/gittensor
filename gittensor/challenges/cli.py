@@ -30,9 +30,9 @@ import requests
 from rich.markup import escape
 from rich.table import Table
 
-from gittensor.challenges import runner
-from gittensor.challenges.attestation import Attestation, dev_pubkey, sign_dev
-from gittensor.challenges.cathedral import Author
+from gittensor.challenges import cathedral_runner, runner
+from gittensor.challenges.attestation import Attestation, dev_pubkey, sign_dev, verify
+from gittensor.challenges.cathedral import Author, receipt_error
 from gittensor.challenges.checkout import (
     ATTESTATION,
     CONFIG,
@@ -317,42 +317,100 @@ def head_to_head(
 @click.option(
     '--image', envvar='GT_CHALLENGE_IMAGE', help='The evaluator image this runs in [env: GT_CHALLENGE_IMAGE].'
 )
+@click.option(
+    '--runner',
+    'runner_name',
+    type=click.Choice(['local', 'cathedral']),
+    default='local',
+    show_default=True,
+    help='Where the official run happens: here (dev signer), or on Cathedral [env: CATHEDRAL_API_KEY].',
+)
+@click.option(
+    '--resume', metavar='RUN_ID', help='With --runner cathedral: keep waiting for this run, start no new one.'
+)
 @LOGIN_OPTION
 @NETWORK_OPTION
-def attest_command(challenge, dev_key, image, login, network):
+def attest_command(challenge, dev_key, image, runner_name, resume, login, network):
     """The official run: your newest solver vs KING with challenge.json's settings on the latest finalized block.
 
-    [dim]Run it in the checkout on the Polaris VM. Before running it fetches upstream main and refuses a dev signer its
-    challenge.json does not accept, a KING that is not main's and gitignored files in the solver. Writes a signed
-    attestation.json only when the result is a crown, so a loser is never submitted. Signed with a dev key for now;
-    Polaris signing is not wired yet.[/dim]
+    [dim]Before running it fetches upstream main and refuses a KING that is not main's and gitignored files in the
+    solver. Writes a signed attestation.json only when the result is a crown, so a loser is never submitted.
+    `--runner local` signs with a dev key challenge.json accepts. `--runner cathedral` sends the solver and KING to
+    Cathedral, which runs the pinned image itself and returns an attestation with its receipt; it is checked here
+    against challenge.json before it is written.[/dim]
     """
     checkout = require_checkout(challenge)
     root, solver = checkout.root, newest_solver(checkout, github_login(login))
     upstream, path = fetch_upstream(root), solver.relative_to(root).as_posix()
     config = upstream.config
-    try:
-        pubkey = dev_pubkey(dev_key)
-    except ValueError as e:
-        raise click.ClickException(str(e)) from e
-    if dev_key.expanduser().stat().st_mode & 0o077:
-        err_console.print(f'[yellow]{dev_key} is readable by others: chmod 600 it[/yellow]')
-    if pubkey != config.dev_attestation_pubkey:
-        raise click.ClickException(f'challenge.json on {MAIN} does not accept dev signer {pubkey}: nothing was run')
+    if runner_name == 'local':
+        try:
+            pubkey = dev_pubkey(dev_key)
+        except ValueError as e:
+            raise click.ClickException(str(e)) from e
+        if dev_key.expanduser().stat().st_mode & 0o077:
+            err_console.print(f'[yellow]{dev_key} is readable by others: chmod 600 it[/yellow]')
+        if pubkey != config.dev_attestation_pubkey:
+            raise click.ClickException(f'challenge.json on {MAIN} does not accept dev signer {pubkey}: nothing was run')
     if checkout.king != upstream.king or solver_sha(root / checkout.king) != upstream.king_sha:
         raise click.ClickException(f"your KING is not {MAIN}'s ({upstream.king}): `git pull upstream {MAIN}` first")
     refuse_ignored(root, path)
-    block, block_hash = finalized_block(network)
-    console.print(f'{path} vs KING {upstream.king} on block {block}')
     king = root / upstream.king
-    doc = head_to_head(config.module, solver, king, config.tier, config.seeds, block_hash, config.margin)
+    if runner_name == 'cathedral':
+        att = cathedral_attestation(checkout, upstream, solver, resume, canonical_login(login))
+        doc, signer = att.result, f'Cathedral key {att.signer.get("key_id")}'
+    else:
+        block, block_hash = finalized_block(network)
+        console.print(f'{path} vs KING {upstream.king} on block {block}')
+        doc = head_to_head(config.module, solver, king, config.tier, config.seeds, block_hash, config.margin)
+        att, signer = None, f'dev signer {pubkey}'
     if not doc['crown']:
         invalid = doc['n'] - doc['challenger']['valid']
         why = f'{invalid} of {doc["n"]} seeds are invalid' if invalid else 'the 99% lower bound is under the margin'
         raise click.ClickException(f'no crown ({why}): nothing written, so nothing to submit')
-    att = sign_dev(dev_key, doc, block, image)
+    att = att or sign_dev(dev_key, doc, block, image)
     (checkout.root / ATTESTATION).write_text(att.to_json())
-    console.print(f'wrote {ATTESTATION} (dev signer {pubkey}); next: gitt challenge submit --agree-cla')
+    console.print(f'wrote {ATTESTATION} ({signer}); next: gitt challenge submit --agree-cla')
+
+
+def cathedral_attestation(checkout: Checkout, upstream: Upstream, solver: Path, resume: str | None, login: str):
+    """The attestation Cathedral returns for ``solver``, checked against upstream's challenge.json and this solver."""
+    root, path = checkout.root, solver.relative_to(checkout.root).as_posix()
+    try:
+        client = cathedral_runner.Client.from_env()
+        if resume:
+            run_id = resume
+        else:
+            body = cathedral_runner.run_request(
+                upstream.repo,
+                git(root, 'rev-parse', BASE),
+                git(root, 'show', f'{BASE}:{CONFIG}'),
+                (path, solver),
+                (upstream.king, root / upstream.king),
+                {'github_login': login, 'github_id': gh_user_id()},
+            )
+            run = client.create_run(body)
+            run_id = run['run_id']
+            console.print(f'Cathedral accepted run {run_id}: seed block {run["seed_block"]}, attempt {run["attempt"]}')
+            console.print(f'if this stops, `gitt challenge attest --runner cathedral --resume {run_id}` keeps waiting')
+        text = cathedral_runner.wait_for_run(client, run_id, lambda status: console.print(f'run {run_id}: {status}'))
+    except cathedral_runner.CathedralError as e:
+        raise click.ClickException(str(e)) from e
+    except KeyError as e:
+        raise click.ClickException(f'Cathedral accepted the run but left out {e}') from e
+    try:
+        att = Attestation.from_json(text)
+    except ValueError as e:
+        raise click.ClickException(f'Cathedral returned something that is not an attestation: {e}') from e
+    config = upstream.config
+    if not verify(att, None, config.attestation.get('trusted_keys')):
+        raise click.ClickException('the attestation is not signed by a Cathedral key that challenge.json pins')
+    if error := receipt_error(att, config, Author(login, gh_user_id())):
+        raise click.ClickException(f'the Cathedral receipt is not acceptable: {error}')
+    ran = att.result['challenger']['sha'], att.result['king']['sha']
+    if ran != (solver_sha(solver), upstream.king_sha):
+        raise click.ClickException(f'Cathedral ran {ran}, not this solver and KING: nothing written')
+    return att
 
 
 @challenge_group.command('submit')

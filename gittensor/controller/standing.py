@@ -15,7 +15,9 @@ number, the clean lease-seconds since the last reset, walked through the events 
   Trusted falls to the start of standard, standard to zero.
 * ``folded`` is what ``add_event`` leaves when it trims the oldest events: their fold, as a clean-seconds value.
 * Neutral, recorded but not folded: ``instance_stopped`` (our container gone after the agent was unreachable: a
-  clean leave or a reboot, Kimbo 9/16) and ``instance_unreachable`` (a lease ended by missed heartbeats).
+  clean leave or a reboot, Kimbo 9/16), ``instance_unreachable`` (a lease ended by missed heartbeats) and
+  ``pull_failed`` (a customer's image that would not pull: the customer's name, not the box's fault, so an order for
+  a bogus image cannot cost a miner its standing).
 
 The level is ``trusted`` from ``STANDING_TRUSTED_AFTER_S``, ``standard`` from ``STANDING_STANDARD_AFTER_S``, probation
 below (and for a new box with no events). Standing sets lease priority (``rank``) and lease length (``lease_cap_s``).
@@ -97,10 +99,12 @@ def rank(level: str) -> int:
 
 
 def box_rentable(box, now: float | None = None, min_level: str = STANDARD) -> bool:
-    """Whether a box may take a rental (29 §1 #7): its agent offers a rent range, it is not benched, and it has the
-    standing (``min_level`` or better; ``probation`` is the dev override for our own test boxes). Where the cards are
-    (idle, leased) is placement's question, not this one."""
-    if not box.rent_ports or box.status == BENCHED:
+    """Whether a box may take a rental (29 §1 #7): its agent offers a rent range, it is not benched, it answered its
+    last visit (``unanswered_at``: a box that went dark is off the market until it answers, even when the round did
+    not count it unreachable because no box did), and it has the standing (``min_level`` or better; ``probation`` is
+    the dev override for our own test boxes). Where the cards are (idle, leased) is placement's question, not this
+    one."""
+    if not box.rent_ports or box.status == BENCHED or getattr(box, 'unanswered_at', None) is not None:
         return False
     return rank(standing(box.standing_events, now)) >= rank(min_level)
 

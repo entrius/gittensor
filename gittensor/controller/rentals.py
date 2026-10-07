@@ -15,7 +15,8 @@ keys, container ports and ``ends_at``) that this reconciler carries through its 
   the image pull, ``docker run --runtime=sysbox-runc`` with every card and the ports published on the box's own
   address, the keys written into the pod, then an SSH banner on the mapped port 22 from here. That banner is
   ``active``: cards LEASED, pay span open, ``started_at``. A failed start undeploys, sends the cards to CHECKING and
-  fails the rental (``pull_failed`` / ``start_failed``); the box gets the ordinary ``start_failed`` standing event.
+  fails the rental (``pull_failed`` / ``start_failed``); a failed start is the ordinary ``start_failed`` standing
+  event, a failed pull a neutral ``pull_failed`` one (the customer's image name, not the box's fault).
   An order nothing fits waits ``NO_FIT_GRACE_S`` (a card may be CHECKING between rounds), then fails ``no_box_fits``.
 * **Confirm** (every pass, ``starting`` with a container / ``active`` / ``ending``): the pod is inspected. Running
   extends the pay span. Gone or stopped without our stop is ``box_lost``: with the agent answering throughout that is
@@ -733,7 +734,12 @@ class RentalReconciler:
             self._finish(r, FAILED, reason)
             with self._lock:
                 if r.box in self.boxes.boxes:
-                    self._put_box(record_start(self._box(r.box), False, self.wall(), rental=r.id, reason=str(e)[:200]))
+                    b, detail = self._box(r.box), str(e)[:200]
+                    if reason == PULL_FAILED:  # the customer's image, not the box: recorded, neutral for standing
+                        b = add_event(b, PULL_FAILED, self.wall(), rental=r.id, reason=detail)
+                    else:
+                        b = record_start(b, False, self.wall(), rental=r.id, reason=detail)
+                    self._put_box(b)
             report.actions.append(RentalAction('failed', r.id, r.box, f'{reason}: {e}'[:300]))
         finally:
             if runner is not None:

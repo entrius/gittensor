@@ -24,7 +24,7 @@ from gittensor.controller.checks.state import (
 )
 from gittensor.controller.pay.ledger import Cursors, accrue
 from gittensor.controller.publish import build_fleet
-from gittensor.controller.standing import CLEAN_LEASE
+from gittensor.controller.standing import CLEAN_LEASE, standing
 
 NOW = 1_760_000_000.0
 HK = '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY'  # a well-formed ss58: publish drops any other id
@@ -207,6 +207,13 @@ def test_a_pull_that_fails_is_pull_failed(tmp_path, boxes):
     rec.run_pass()
     assert store.rentals[r.id].state == rt.FAILED and store.rentals[r.id].reason == rt.PULL_FAILED
     assert not any(c.startswith('docker run') for c in runner.calls)
+    # the customer's image name, not the box's fault: recorded on the box, but no start_failed and no standing drop
+    box = boxes.boxes[HK]
+    assert box.standing_events[-1]['kind'] == 'pull_failed' and box.standing_events[-1]['rental'] == r.id
+    assert box.failed_starts == 0 and standing(box.standing_events, NOW) == standing(
+        rentable_box().standing_events, NOW
+    )
+    assert all(c.state == CHECKING for c in box.cards.values())  # freed and re-proved next round, as any failed start
 
 
 def test_the_rental_ends_at_ends_at_and_the_box_earns_a_clean_lease(tmp_path, boxes):
@@ -304,6 +311,8 @@ def test_only_a_rentable_wholly_idle_box_of_the_type_and_size_is_picked(tmp_path
     boxes.put(probation)
     assert rec._pick(order(store), set(), NOW) is None
     boxes.put(rentable_box(rent_ports=[]))  # not started with --rent
+    assert rec._pick(order(store), set(), NOW) is None
+    boxes.put(rentable_box(unanswered_at=NOW - 60))  # did not answer its last visit: off the market until it does
     assert rec._pick(order(store), set(), NOW) is None
     boxes.put(rentable_box())
     busy = rentable_box()

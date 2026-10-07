@@ -52,6 +52,7 @@ FAILED_STARTS = 'failed_starts'  # the bench reason when too many starts fail in
 CHECK_FAILED = 'check_failed'
 UNREACHABLE_BENCHED = 'unreachable_benched'
 START_FAILED = 'start_failed'
+PULL_FAILED = 'pull_failed'  # the customer's image would not pull: recorded on the box, neutral for standing
 DRAIN_FAILED = 'drain_failed'
 CLEAN_LEASE = 'clean_lease'
 CHECK_NOT_RUN = 'check_not_run'
@@ -89,6 +90,10 @@ class BoxState:
     last_failed_why: Dict[str, str] = field(default_factory=dict)
     admitted_at: Optional[float] = None
     unreachable_count: int = 0  # consecutive rounds with no verdict because SSH failed; reset by any verdict
+    # When the last visit got no answer over SSH, until the box answers again. Set on every such visit, including the
+    # ones no unreachable round is counted for (every box dialled failed: the controller's own link is the suspect);
+    # while set the box is off the rental market (``standing.box_rentable``): a dead box must not take an order.
+    unanswered_at: Optional[float] = None
     # Consecutive checks that could not be carried out (``apply_not_run``), and when the last one was. A pass or a
     # bench starts the count over.
     not_run_count: int = 0
@@ -256,6 +261,7 @@ def apply_verdict(
     new.last_check_at = now
     _set_failed(new, verdict.failed, why)
     new.unreachable_count = 0
+    new.unanswered_at = None
     new.rent_ports = list(verdict.rent_ports)
     if verdict.admitted:
         new.identity = identity_baseline(verdict) or new.identity
@@ -295,6 +301,7 @@ def apply_not_run(
     dodge a proof by breaking its own container runtime. Pure."""
     new = BoxState.from_dict(state.as_dict())
     new.unreachable_count = 0  # the box answered
+    new.unanswered_at = None
     new.not_run_count += 1
     new.not_run_at = now
     if new.not_run_count >= bench_after:
@@ -319,6 +326,15 @@ def not_run_retry_at(state: BoxState, retry_s: float = cfg.COULD_NOT_RUN_RETRY_S
 UNREACHABLE = 'ssh_unreachable'
 
 
+def mark_unanswered(state: BoxState, now: float) -> BoxState:
+    """A visit the box did not answer over SSH, whether or not it counts as an unreachable round: the box leaves the
+    rental market until it answers (``unanswered_at``; cleared by any verdict). Pure."""
+    new = BoxState.from_dict(state.as_dict())
+    if new.unanswered_at is None:
+        new.unanswered_at = now
+    return new
+
+
 def apply_unreachable(
     state: BoxState,
     now: float,
@@ -328,7 +344,7 @@ def apply_unreachable(
     """The state after a proof round in which SSH could not reach the box: no verdict, the count goes up, and at
     ``bench_after`` in a row the box is BENCHED for a flat ``bench_s`` without climbing the fraud ladder. A missed
     in-lease heartbeat is counted on the instance instead (``heartbeat.py``; Kimbo 9/16). Pure."""
-    new = BoxState.from_dict(state.as_dict())
+    new = mark_unanswered(state, now)
     new.unreachable_count += 1
     _pause_clean(new, now)
     if new.unreachable_count >= bench_after and new.status != BENCHED:

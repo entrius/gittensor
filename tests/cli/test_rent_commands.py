@@ -212,7 +212,11 @@ def test_up_without_a_key_file_or_login_says_what_to_do(product, monkeypatch, tm
     assert r.exit_code == 2 and 'no SSH public key' in r.stderr
     monkeypatch.delenv('GT_API_KEY')
     r = invoke('ls')
-    assert r.exit_code == 2 and 'gitt rent login' in r.stderr
+    assert r.exit_code == 2 and 'gitt rent login' in r.stderr and 'GITTENSOR_API_KEY' in r.stderr
+    # the runbook's variable name works too, and wins over the short one
+    monkeypatch.setenv('GITTENSOR_API_KEY', 'gt_testkey')
+    monkeypatch.setenv('GT_API_KEY', 'gt_wrong')
+    assert invoke('balance').exit_code == 0
 
 
 def test_the_apis_own_refusal_is_printed_as_is(product):

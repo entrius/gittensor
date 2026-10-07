@@ -5,8 +5,10 @@
 benched with the right check named, and the GPU proof is never staged on a box that already failed identity."""
 
 from gittensor.controller.checks import checks as ck
+from gittensor.controller.checks import why
 from gittensor.controller.checks.full_check import FullCheckConfig, run_full_check
-from gittensor.controller.checks.runner import regex
+from gittensor.controller.checks.rent_probe import listener_run_command, probe_rent_ports
+from gittensor.controller.checks.runner import CommandResult, FakeRunner, regex
 from gittensor.controller.checks.scrape import (
     KERNEL_DRIVER_COMMAND,
     NVML_MD5_COMMAND,
@@ -18,6 +20,7 @@ from gittensor.controller.checks.scrape import (
 from gittensor.controller.checks.verdict import ADMIT, BENCH, NOT_RUN, CheckResult, CheckVerdict
 from gittensor.controller.proof.slot import UnconfiguredProof
 from tests.controller.conftest import (
+    AGENT_IMAGE_ID,
     CONFIG,
     DRIVER,
     FAKE_BINARY,
@@ -317,3 +320,95 @@ def test_no_gpu_at_all(proof, allowlist):
     assert verdict.verdict == BENCH and ck.GPU_SPEC in verdict.failed and ck.POWER_LIMIT in verdict.failed
     assert verdict.gpu_uuids == [] and proof.staged == []
     assert 'nvidia-smi' in check(verdict, ck.GPU_SPEC).evidence['reason']
+
+
+# ---------------------------------------------------------------- the rent-range probe (29 §5) ------------------------
+
+LISTENER = regex(r'^docker rm -f gt-rent-probe-\d+ >/dev/null 2>&1; docker run --rm -d --name gt-rent-probe-\d+ ')
+RUNNING = "docker inspect --format '{{.State.Running}}' gt-rent-probe-31099"
+REMOVE = 'docker rm -f gt-rent-probe-31099'
+
+
+class Clock:
+    """Time that only moves when the probe sleeps."""
+
+    def __init__(self):
+        self.t = 0.0
+        self.slept = []
+
+    def now(self):
+        return self.t
+
+    def sleep(self, s):
+        self.slept.append(s)
+        self.t += s
+
+
+def listener_runner(running='true\n'):
+    return FakeRunner({LISTENER: 'c' * 64 + '\n', RUNNING: running, regex(r'^docker rm -f gt-rent-probe-\d+$'): ''})
+
+
+def probe(runner, dial, host='203.0.113.7', ports=(31000, 31099), image=AGENT_IMAGE_ID, clock=None, **kw):
+    clock = clock or Clock()
+    return probe_rent_ports(runner, host, list(ports), image, dial=dial, clock=clock.now, sleep=clock.sleep, **kw)
+
+
+def test_the_rent_probe_starts_a_listener_on_the_top_port_dials_it_where_the_box_is_public_and_removes_it():
+    runner, dialled = listener_runner(), []
+    result = probe(runner, lambda host, port: dialled.append((host, port)) or True)
+    assert result.ok and (result.port, result.public_port, result.code, result.reason) == (31099, 31099, '', '')
+    assert dialled == [('203.0.113.7', 31099)]  # the top of the range: pods take the bottom first
+    run, rm = runner.calls
+    assert run == listener_run_command(AGENT_IMAGE_ID, 31099) and rm == REMOVE
+    assert '-p 31099:31099' in run and '-e GT_AGENT_SSH_PORT=31099' in run and ' ' + 'b' * 64 + ' ' in run
+    assert 'sha256:' not in run and '--entrypoint timeout' in run and run.endswith('/entrypoint.sh')
+    assert result.as_dict() == {
+        'host': '203.0.113.7', 'port': 31099, 'public_port': 31099, 'ok': True, 'reason': '', 'code': '',
+    }  # fmt: skip
+
+    # a dev box behind a remapping host (a Lium pod): published on the range's port, dialled on the mapped one
+    dialled.clear()
+    result = probe(listener_runner(), lambda h, p: dialled.append((h, p)) or True, host='10.0.0.1',
+                   ports=(31000, 31003), public_port_of={31003: 45003}.__getitem__)  # fmt: skip
+    assert result.ok and (result.port, result.public_port) == (31003, 45003) and dialled == [('10.0.0.1', 45003)]
+
+
+def test_a_range_the_controller_cannot_reach_is_told_apart_from_a_listener_that_would_not_start():
+    # closed: the listener runs, nothing answers the dial until the deadline, the listener is still removed
+    runner, clock = listener_runner(), Clock()
+    result = probe(runner, lambda h, p: False, clock=clock, timeout_s=3.0)
+    assert not result.ok and result.code == why.RENT_PORT_UNREACHABLE
+    assert result.reason == '203.0.113.7:31099 unreachable from the controller (firewall?)'
+    assert clock.t >= 3.0 and runner.calls[1] == RUNNING and runner.calls[-1] == REMOVE
+
+    # the listener exited (the image refused to start): not the firewall's doing
+    result = probe(listener_runner(running='false\n'), lambda h, p: False, timeout_s=0.0)
+    assert not result.ok and result.code == why.RENT_LISTENER_FAILED and 'exited' in result.reason
+
+    # docker refused the run: the error is kept for the operator, the name is still cleaned up
+    runner = FakeRunner({LISTENER: CommandResult(125, '', 'port is already allocated'), REMOVE: ''})
+    result = probe(runner, lambda h, p: True)
+    assert not result.ok and result.code == why.RENT_LISTENER_FAILED and 'already allocated' in result.reason
+    assert runner.calls[-1] == REMOVE
+
+    # no agent image id to run from, or a transport that died: the same answer, no dial
+    assert probe(FakeRunner(), lambda h, p: True, image='').code == why.RENT_LISTENER_FAILED
+    result = probe(FakeRunner({LISTENER: OSError('connection reset')}), lambda h, p: True)
+    assert not result.ok and result.code == why.RENT_LISTENER_FAILED and 'connection reset' in result.reason
+
+    # the phrases are ours alone and carry no port
+    for code in (why.RENT_PORT_UNREACHABLE, why.RENT_LISTENER_FAILED):
+        text = why.render({'code': code})
+        assert text and 'idle only' in text and '31099' not in text and '?' not in text
+
+
+def test_a_range_the_probe_could_not_reach_is_no_range_in_the_verdict_and_never_a_failure():
+    checks = [CheckResult(ck.GPU_SPEC, True)]
+    closed = probe(listener_runner(), lambda h, p: False, timeout_s=0.0).as_dict()
+    verdict = CheckVerdict.from_checks(checks, [UUID_5090], rent_ports=[31000, 31099], rent_probe=closed)
+    assert verdict.admitted and verdict.failed == [] and verdict.rent_ports == [] and verdict.rent_probe == closed
+    assert verdict.as_dict()['rent_probe'] == closed
+    opened = probe(listener_runner(), lambda h, p: True).as_dict()
+    assert CheckVerdict.from_checks(checks, [UUID_5090], rent_ports=[31000, 31099], rent_probe=opened).rent_ports == [31000, 31099]  # fmt: skip
+    unprobed = CheckVerdict.from_checks(checks, [UUID_5090], rent_ports=[31000, 31099])  # run_full_check: no address
+    assert unprobed.rent_ports == [31000, 31099] and unprobed.rent_probe is None

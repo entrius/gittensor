@@ -95,7 +95,11 @@ def fleet(now: float = NOW) -> tuple[dict[str, BoxState], dict[str, InstanceReco
             last_failed_why={'gpu_uuid_pin': WHY_PINNED},
             standing_events=[{'at': now - 1_500, 'kind': CHECK_FAILED, 'failed': ['gpu_uuid_pin']}],
         ),
-        HK_C: BoxState(HK_C, status=ADMIT, host='203.0.113.79', port=2200, source='chain'),
+        HK_C: BoxState(  # a --rent box whose range the probe could not reach: idle-only, the reason on it (29 §5)
+            HK_C, status=ADMIT, host='203.0.113.79', port=2200, source='chain',
+            rent_probe={'host': '203.0.113.79', 'port': PRIVATE['rent_low'] + 99, 'public_port': PRIVATE['rent_low'] + 99,
+                        'ok': False, 'reason': PRIVATE['transport'], 'code': why.RENT_PORT_UNREACHABLE},
+        ),
     }  # fmt: skip
     heartbeat = {'at': now - 20, 'ok': None, 'error': PRIVATE['transport']}
     instances = {
@@ -147,10 +151,15 @@ def test_the_contract(tmp_path):
     assert doc['totals'] == {'boxes': 3, 'cards': 2, 'cards_by_state': {LEASED: 1, DRAINING: 1}}
     a, b, c = (next(x for x in doc['boxes'] if x['hotkey'] == hk) for hk in (HK_A, HK_B, HK_C))
     assert set(a) == {
-        'hotkey', 'uid', 'status', 'standing', 'gpu_type', 'card_count', 'rentable', 'last_check_at', 'last_failed',
-        'last_failed_why', 'bench_until', 'benched_reason', 'ladder_rung', 'strikes', 'pay', 'last_event', 'cards',
+        'hotkey', 'uid', 'status', 'standing', 'gpu_type', 'card_count', 'rentable', 'rentable_why', 'last_check_at',
+        'last_failed', 'last_failed_why', 'bench_until', 'benched_reason', 'ladder_rung', 'strikes', 'pay',
+        'last_event', 'cards',
     }  # fmt: skip
     assert (a['rentable'], b['rentable'], c['rentable']) == (False, False, False) and doc['offers'] == {}
+    # why a --rent box is off the market: the probe's phrase, ours alone; None for a box that is rentable or never
+    # offered a range (or, b, is off it for a bench: that is last_failed_why's story)
+    assert (a['rentable_why'], b['rentable_why']) == (None, None)
+    assert c['rentable_why'] == why.PHRASES[why.RENT_PORT_UNREACHABLE] and '?' not in c['rentable_why']
     assert (a['status'], a['standing'], a['gpu_type'], a['card_count'], a['uid']) == (
         IDLE, 'probation', 'RTX5090', 2, 61,
     )  # fmt: skip

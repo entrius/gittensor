@@ -202,6 +202,14 @@ SETTLEMENT_WINDOW_S = 3_600.0
 # reaches its full length, so a fresh deployment is not two days of zero pay. A box joining later waits the full lag
 # for its first pay, as it does at steady state.
 PAY_LAG_S = 48 * 3_600.0
+# The rent-range probe (29 §5, ``checks/rent_probe.py``): a throwaway listener on the top port of a `--rent` box's
+# range, dialled from the controller. The listener gets RENT_PROBE_TIMEOUT_S to answer (sshd in a fresh container is
+# up within a second or two), each dial lasting RENT_PROBE_DIAL_S, one every RENT_PROBE_DIAL_INTERVAL_S; it ends
+# itself after RENT_PROBE_LISTENER_TTL_S in case the visit dies before it is removed.
+RENT_PROBE_TIMEOUT_S = 6.0
+RENT_PROBE_DIAL_S = 2.0
+RENT_PROBE_DIAL_INTERVAL_S = 0.5
+RENT_PROBE_LISTENER_TTL_S = 60.0
 # Idle pay needs a passing proof no older than this: one missed 20-min round is tolerated, a second stops idle pay.
 IDLE_PROOF_MAX_AGE_S = 1.5 * FULL_CHECK_INTERVAL_S
 # A hard failure forfeits the box's leased accrual over [its UTC day - 1 day, its UTC day + 1 day) (23 §5). The window

@@ -79,6 +79,7 @@ from gittensor.controller.checks.full_check import (
     scrape_box,
 )
 from gittensor.controller.checks.nvml_allowlist import NvmlAllowlist
+from gittensor.controller.checks.rent_probe import RentProbe, probe_rent_ports
 from gittensor.controller.checks.runner import CommandResult, HostRunner
 from gittensor.controller.checks.scrape import (
     KERNEL_DRIVER_COMMAND,
@@ -149,7 +150,7 @@ from gittensor.controller.ssh import (
     write_host_key,
 )
 from gittensor.controller.ssh.certs import CertificateError
-from gittensor.controller.standing import standing
+from gittensor.controller.standing import box_rentable, standing
 
 DEFAULT_STATE_DIR = Path.home() / '.gittensor' / 'controller'
 EXIT_ADMIT, EXIT_BENCH, EXIT_NO_VERDICT = 0, 1, 2  # 2: transport failure or nothing to check; no state changed
@@ -466,6 +467,18 @@ def _provable_gpus(box: BoxState, gpus: Sequence[GpuInfo]) -> list[GpuInfo]:
     return [g for g in gpus if g.uuid in provable]
 
 
+def probe_rent_range(
+    runner: HostRunner, box: BoxState, scrape: HostScrape, config: FullCheckConfig
+) -> RentProbe | None:
+    """The rent-range probe (29 §5) for a box whose agent carries a rent label, dialled at the box's address as a
+    pod's customer would be (``port_map`` on a dev box); None for a box that offers no range."""
+    if not scrape.rent_ports:
+        return None
+    return probe_rent_ports(
+        runner, box.host, scrape.rent_ports, scrape.agent_image_id, box.public_port, ssh_timeout_s=config.ssh_timeout_s
+    )
+
+
 def check_box(
     runner: HostRunner,
     box: BoxState,
@@ -503,9 +516,11 @@ def check_box(
             return CheckOutcome(None, busy=PROOF_IMAGE_PULLING)
         proved = [g.uuid for g in gpus]
         checks.append(ck.check_gpu_proof(runner, gpus, proof, config.proof_image, config.proof_timeout_s))
+        rent_probe = probe_rent_range(runner, box, scrape, config)
     else:
         checks.append(proof_skipped(checks))
-    return CheckOutcome(finish_verdict(checks, scrape, now), proved=proved)
+        rent_probe = None  # a box about to be benched is not probed; its next passing check does
+    return CheckOutcome(finish_verdict(checks, scrape, now, rent_probe), proved=proved)
 
 
 # ---------------------------------------------------------------- the fleet round ------------------------------------
@@ -520,6 +535,7 @@ class BoxRound:
     checks: list[CheckResult] = field(default_factory=list)
     staged: StagedProof | None = None
     stage_error: str = ''
+    rent_probe: RentProbe | None = None  # the rent-range probe, run beside the staging on a box with a rent label
     proved: list[GpuInfo] = field(default_factory=list)  # the IDLE / CHECKING cards staged and fired this round
     skipped: dict[str, str] = field(default_factory=dict)  # uuid -> the busy card state it was skipped in
     cards: list[dict] = field(default_factory=list)
@@ -669,6 +685,8 @@ def run_round(
             r.stage_error = clip(str(e))
         except Exception as e:  # transport died mid-stage
             r.stage_error = clip(f'staging failed: {type(e).__name__}: {e}')
+            return
+        r.rent_probe = probe_rent_range(r.runner, r.box, r.scrape, config)
 
     def cleanup(r: BoxRound) -> None:
         if r.runner is None or r.staged is None:
@@ -759,7 +777,7 @@ def run_round(
                     r.checks.append(ck.proof_result(ProbeResult(provider, cards=r.cards, error=r.stage_error)))
                 else:
                     r.checks.append(ck.proof_result(ProbeResult(provider, cards=r.cards)))
-                r.verdict = finish_verdict(r.checks, r.scrape, now)
+                r.verdict = finish_verdict(r.checks, r.scrape, now, r.rent_probe)
                 proved = [g.uuid for g in r.proved]
                 r.after = store.boxes[r.box.box_id] = apply_verdict(current, r.verdict, now, proved=proved)
             store.save()
@@ -1501,6 +1519,9 @@ def _print_round(report: RoundReport, n: int, json_mode: bool) -> None:
             reason = '; '.join(
                 f'{c.name}: {check_detail(c)}' for c in r.verdict.checks if not c.passed and not c.skipped
             )
+            probe = r.verdict.rent_probe or {}
+            if probe and not probe.get('ok'):  # admitted, but idle-only: the range the agent offers is not reachable
+                reason += ('; ' if reason else '') + f'idle-only: rent ports closed ({probe.get("reason", "")})'
         if r.busy:
             verdict_cell = '[dim]busy[/dim]'
         elif r.verdict is not None or r.scrape is None:
@@ -2346,9 +2367,15 @@ class _DaemonPrinter:
                     f'{c.name}: {check_detail(c)}' for c in r.verdict.checks if not c.passed and not c.skipped
                 )
             mark = _verdict_markup(r.verdict) if r.verdict is not None else ('[dim]busy[/dim]' if r.busy else '')
+            probe = (r.verdict.rent_probe if r.verdict is not None else None) or {}
             parts.append(
                 f'{escape(r.box.box_id[:16])} {r.status_before}→{after} {mark} {escape(_cards_text(r))}'
                 + (f' ({escape(why[:200])})' if why else '')
+                + (
+                    f' [yellow]idle-only: rent ports closed ({escape(str(probe.get("reason", ""))[:200])})[/yellow]'
+                    if probe and not probe.get('ok')
+                    else ''
+                )
             )
             rows.append(
                 {
@@ -2361,6 +2388,7 @@ class _DaemonPrinter:
                     'failed': r.verdict.failed if r.verdict else [],
                     'not_run': r.verdict.not_run if r.verdict else [],
                     'strikes': (r.after or r.box).not_run_count,
+                    'rent_probe': r.verdict.rent_probe if r.verdict else None,
                     # why each failed: the operator's log only (fleet.json publishes the names, never the detail)
                     'why': {c.name: clip(check_detail(c)) for c in r.verdict.checks if not c.passed and not c.skipped}
                     if r.verdict
@@ -2754,6 +2782,9 @@ def status_command(state_dir, json_mode):
                 'remove_requested': remove_requested(box),
                 'source': box.source,
                 'endpoint_changed': box.endpoint_changed,
+                'rent_ports': box.rent_ports,
+                'rentable': box_rentable(box, now),  # at the default gate; `run --rental-min-standing` may raise it
+                'rent_probe': box.rent_probe,
                 'standing_events': box.standing_events[-5:],
                 'pay': pay_entry(entry, live, age_s) if entry or live else {},
             }
@@ -2810,6 +2841,16 @@ def status_command(state_dir, json_mode):
         if b['withheld_from']:
             bench += f'{" · " if bench else ""}pay withheld from {_when(b["withheld_from"])}'
         event = b['standing_events'][-1] if b['standing_events'] else None
+        probe = b['rent_probe'] or {}
+        market = (
+            ' · [green]rentable[/green]'
+            if b['rentable']
+            else (
+                f' · [yellow]idle-only: rent ports closed[/yellow] ({escape(str(probe.get("reason", ""))[:120])})'
+                if probe and not probe.get('ok')
+                else ''
+            )
+        )
         pay = b['pay']
         if pay:
             total, live = pay['total'], pay['live']
@@ -2833,7 +2874,8 @@ def status_command(state_dir, json_mode):
                 f' [red]endpoint changed → {b["endpoint_changed"].get("host")}:{b["endpoint_changed"].get("port")}[/red]'
                 if b['endpoint_changed']
                 else ''
-            ),
+            )
+            + market,
             b['standing'],
             escape(cards) or '[dim]—[/dim]',
             pay_cell,

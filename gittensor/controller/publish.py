@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from gittensor.controller.checks import config as cfg
+from gittensor.controller.checks import why as w
 from gittensor.controller.checks.state import BENCHED, IDLE, BoxState, ladder_rung
 from gittensor.controller.manifest import gpu_type_of
 from gittensor.controller.pay.ledger import Ledger, is_withheld
@@ -163,6 +164,17 @@ def _phrases(why: Any, names: Sequence[str]) -> dict[str, str]:
     return out
 
 
+def _rentable_why(box: BoxState) -> str | None:
+    """Why a `--rent` box is not on the market although its agent offers a range: the rent-range probe's phrase
+    (29 §5), from our own vocabulary alone like ``last_failed_why``; None when the box is rentable or never offered
+    a range. The port stays private with the range."""
+    probe = box.rent_probe or {}
+    if not probe or probe.get('ok'):
+        return None
+    text = w.render({'code': probe.get('code')})
+    return text if text and _PHRASE.match(text) else None
+
+
 def _num(value: Any) -> float | None:
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
@@ -289,6 +301,7 @@ def build_fleet(
                 # The miner opened a rent range and the box has the standing to take a customer (29 §1 #7). The range
                 # itself is not published: a customer gets the mapped ports of their own pod, nobody else needs them.
                 'rentable': rentable,
+                'rentable_why': _rentable_why(box),
                 'last_check_at': box.last_check_at,
                 'last_failed': failed,
                 # Why, in words, assembled from our own constants alone: no substring of anything the box reported

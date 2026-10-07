@@ -196,6 +196,12 @@ DECODE_TPS_WINDOW = 100  # the gateway's rolling window per instance
 # the scorecard pays the trailing SETTLEMENT_WINDOW_S (phase 0's settlement window was one hour too).
 SETTLEMENT_TICK_S = 12.0
 SETTLEMENT_WINDOW_S = 3_600.0
+# The holdback (issue #1818): the scorecard pays the window that ended PAY_LAG_S ago, not the one ending now, so a
+# hard failure forfeits what was accrued and not yet paid (Lium pays about two days behind for the same reason). While
+# the ledger is younger than that the lag is what history allows: the first hour on record is paid until the lag
+# reaches its full length, so a fresh deployment is not two days of zero pay. A box joining later waits the full lag
+# for its first pay, as it does at steady state.
+PAY_LAG_S = 48 * 3_600.0
 # Idle pay needs a passing proof no older than this: one missed 20-min round is tolerated, a second stops idle pay.
 IDLE_PROOF_MAX_AGE_S = 1.5 * FULL_CHECK_INTERVAL_S
 # A hard failure forfeits the box's leased accrual over [its UTC day - 1 day, its UTC day + 1 day) (23 §5).

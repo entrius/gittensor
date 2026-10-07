@@ -59,7 +59,7 @@ from gittensor.controller.checks.state import (
 from gittensor.controller.discovery import ChainEndpoint, DiscoverReport, Discovery
 from gittensor.controller.heartbeat import Watch, WatchReport
 from gittensor.controller.locks import BoxLocks
-from gittensor.controller.pay.ledger import Ledger, settle_window
+from gittensor.controller.pay.ledger import Ledger, pay_lag, settle_window
 from gittensor.controller.pay.oracle import FailSafeOracle, StaticOracle
 from gittensor.controller.pay.rates import GpuRate, load_rates
 from gittensor.controller.pay.scorecard import build_scorecard, write_scorecard
@@ -434,13 +434,15 @@ class Controller:
             return len(self.ledger.settle(list(self.boxes.boxes.values()), self._leases(), now))
 
     def scorecard_once(self, now: float | None = None) -> dict:
-        """Settle the trailing window at the oracle's price and write the scorecard. Returns the document."""
+        """Settle the window that ended ``pay_lag`` ago at the oracle's price and write the scorecard. Returns the
+        document."""
         now = time.time() if now is None else now
         quote = self.oracle.quote()  # may read the network: outside the state lock
         with self.write_lock:
             boxes = dict(self.boxes.boxes)
-        start = now - cfg.SETTLEMENT_WINDOW_S
-        settlement = settle_window(self.ledger.rows(start, now), boxes, self.rates, quote, start, now)
+        end = now - pay_lag(now, self.ledger.first_row_at())
+        start = end - cfg.SETTLEMENT_WINDOW_S
+        settlement = settle_window(self.ledger.rows(start, end), boxes, self.rates, quote, start, end)
         doc = build_scorecard(settlement, boxes, self.rates, now, self.intervals.scorecard_s)
         path, sha = write_scorecard(self.state.root / 'scorecard', doc)
         implied = doc['pool']['implied_usd_per_card_hour']
@@ -463,7 +465,8 @@ class Controller:
         self.reporter.note(
             'pay',
             f'scorecard {sha[:12]}: {paying} hotkey(s) paid, recycle {doc["recycle_share"] * 100:.1f}%, '
-            f'idle/leased per card-hour {rates}' + (' (oracle held)' if quote.held else ''),
+            f'idle/leased per card-hour {rates}, window ended {(now - end) / 3600:.1f} h ago'
+            + (' (oracle held)' if quote.held else ''),
         )
         self.publish_once(force=True)
         return doc

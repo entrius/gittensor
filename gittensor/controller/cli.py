@@ -2535,9 +2535,10 @@ class _DaemonPrinter:
 @click.option(
     '--rental-min-standing',
     type=click.Choice(['probation', 'standard', 'trusted']),
-    default='standard',
+    default='probation',
     show_default=True,
-    help='DEV: the standing a box needs to be rented; probation lets a fresh test box take an order.',
+    help='The standing a box needs to be rented. Probation (any admitted box) since issue #1818: the 48 h pay '
+    'holdback is what a new box has at stake; standing only sets lease caps and placement order.',
 )
 @click.option('--max-seconds', type=float, default=0, hidden=True)
 @_chain_options
@@ -2606,9 +2607,9 @@ def run_command(
         'firewall': not no_rental_firewall,
         'min_standing': rental_min_standing,
     }
-    if rental_runtime != 'sysbox-runc' or no_rental_firewall or rental_min_standing != 'standard':
+    if rental_runtime != 'sysbox-runc' or no_rental_firewall:
         err_console.print(
-            '[bold red]WARNING: rental dev overrides on (runtime / firewall / standing): for our own test boxes only, '
+            '[bold red]WARNING: rental dev overrides on (runtime / firewall): for our own test boxes only, '
             'never for a miner.[/bold red]'
         )
     try:

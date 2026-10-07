@@ -24,7 +24,9 @@
 Rows go to ``<ledger>/<UTC date>.jsonl``, one per card per tick (the row schema is ``LedgerRow``), with a per-day rollup
 beside them (``<UTC date>.rollup.json``) and the cursors in ``cursor.json``.
 
-**The window** (``settle_window``): over the trailing ``SETTLEMENT_WINDOW_S``, each hotkey's USD is
+**The window** (``settle_window``): ``SETTLEMENT_WINDOW_S`` long and ending ``pay_lag`` seconds ago (``PAY_LAG_S``,
+48 h, once the ledger has that much history: the holdback of issue #1818, so a hard failure forfeits the accrual not
+yet paid), each hotkey's USD is
 ``Σ cards (idle_s × idle_rate + leased_s × leased_rate) / 3600``, rates from ``fleet_pay.json``. One weighted pool:
 
 * per GPU type, above ``target_fleet`` accruing cards (card-seconds over the window) everyone of that type dilutes by
@@ -60,6 +62,16 @@ COMPUTE_SHARE = 1.0 - OSS_EMISSION_SHARE  # the part of miner weights the comput
 
 def utc_day(t: float) -> str:
     return datetime.fromtimestamp(t, timezone.utc).strftime('%Y-%m-%d')
+
+
+def pay_lag(
+    now: float, first_row_at: float | None, lag_s: float = cfg.PAY_LAG_S, window_s: float = cfg.SETTLEMENT_WINDOW_S
+) -> float:
+    """How far behind ``now`` the paid window ends: ``lag_s`` once the ledger is old enough, else what history allows
+    (the window must still hold the first hour on record), never negative; nothing on record is no lag."""
+    if first_row_at is None:
+        return 0.0
+    return max(0.0, min(lag_s, now - first_row_at - window_s))
 
 
 def withheld_window(
@@ -228,6 +240,16 @@ class Ledger:
         tmp = path.with_suffix(path.suffix + '.tmp')
         tmp.write_text(json.dumps(doc, indent=1))
         tmp.replace(path)
+
+    def first_row_at(self) -> float | None:
+        """When the oldest row on record began (``t0``), or None with no rows yet; what ``pay_lag`` ramps from."""
+        for path in sorted(self.root.glob('????-??-??.jsonl')):
+            for line in path.read_text().splitlines():
+                try:
+                    return float(json.loads(line)['t0'])
+                except (TypeError, ValueError, KeyError):
+                    continue
+        return None
 
     def rows(self, start: float, end: float) -> list[LedgerRow]:
         """Rows settled in (start, end]."""

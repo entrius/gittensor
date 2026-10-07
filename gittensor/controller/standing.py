@@ -98,12 +98,13 @@ def rank(level: str) -> int:
     return LEVELS.index(level) if level in LEVELS else 0
 
 
-def box_rentable(box, now: float | None = None, min_level: str = STANDARD) -> bool:
-    """Whether a box may take a rental (29 §1 #7): its agent offers a rent range, it is not benched, it answered its
-    last visit (``unanswered_at``: a box that went dark is off the market until it answers, even when the round did
-    not count it unreachable because no box did), and it has the standing (``min_level`` or better; ``probation`` is
-    the dev override for our own test boxes). Where the cards are (idle, leased) is placement's question, not this
-    one."""
+def box_rentable(box, now: float | None = None, min_level: str = PROBATION) -> bool:
+    """Whether a box may take a rental (29 §1 #7 as amended by issue #1818): its agent offers a rent range, it is not
+    benched, it answered its last visit (``unanswered_at``: a box that went dark is off the market until it answers,
+    even when the round did not count it unreachable because no box did), and it has the standing (``min_level`` or
+    better; probation, i.e. any admitted box, by default: with no inference leases a box could never reach standard
+    before its first rental, and the 48 h pay holdback is what it has at stake). Where the cards are (idle, leased) is
+    placement's question, not this one."""
     if not box.rent_ports or box.status == BENCHED or getattr(box, 'unanswered_at', None) is not None:
         return False
     return rank(standing(box.standing_events, now)) >= rank(min_level)

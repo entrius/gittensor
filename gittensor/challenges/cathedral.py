@@ -21,10 +21,12 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 
-from gittensor.challenges.attestation import CATHEDRAL, Attestation, digest, ed25519_ok, trusted_pubkey
+from gittensor.challenges.attestation import CATHEDRAL, POLARIS, Attestation, digest, ed25519_ok, trusted_pubkey
 from gittensor.challenges.head_to_head import canonical
 
 SCHEMA = 'cathedral_challenge_receipt_v1'
+TRUST_LEVELS = ('platform', 'hardware')
+PLATFORM_SIGNER = 'cathedral_platform'  # what a receipt calls its own signer, as against ``signer.kind`` outside it
 CLAIMS_DOMAIN = b'cathedral-challenge-receipt-v1/claims\0'
 IMAGE_DOMAIN = b'cathedral-tdx-image-v1\0'
 TOP_KEYS = {'schema', 'receipt_id', 'issued_at', 'claims', 'tee', 'trust', 'signer', 'ext', 'signature'}
@@ -83,11 +85,16 @@ def image_measurement(fields: dict[str, bytes]) -> str:
 
 
 def receipt_error(att: Attestation, config, author: Author | None = None) -> str | None:
-    """Why the attestation's Cathedral receipt is not acceptable for ``config``, or ``None``. A signer that is not
-    ``cathedral`` has no receipt: ``None``. ``author`` adds the check that the receipt names the PR's author."""
-    if att.signer.get('kind') != CATHEDRAL:
+    """Why the attestation's Cathedral receipt is not acceptable for ``config``, or ``None``. When challenge.json says
+    ``attestation.kind`` is ``cathedral`` (or ``polaris``, the platform's planned name, whose signer is Cathedral) any
+    other signer is refused, a dev key included, so relabeling a Cathedral
+    attestation as a dev one never skips the receipt. Otherwise a signer that is not ``cathedral`` has no receipt:
+    ``None``. ``author`` adds the check that the receipt names the PR's author."""
+    policy, kind = config.attestation, att.signer.get('kind')
+    if policy.get('kind') in (CATHEDRAL, POLARIS) and kind != CATHEDRAL:
+        return f'challenge.json accepts only a Cathedral attestation, not a {kind!r} signer'
+    if kind != CATHEDRAL:
         return None
-    policy = config.attestation
     try:
         return _receipt_error(att, config, policy, author)
     except (KeyError, TypeError, ValueError, AttributeError, binascii.Error) as e:
@@ -116,7 +123,19 @@ def _receipt_error(att: Attestation, config, policy: dict, author: Author | None
     attested = digest(att.result, att.seed_block, att.image).hex()
     result_sha = hashlib.sha256(canonical(result).encode()).hexdigest()
     run, sub, out = claims['run'], claims['submission'], claims['outputs']
+    # Cathedral counts runs per (GitHub id, challenge, round): a round is one KING, so editing the solver does not
+    # reset the count. The cap is the maintainer's: absent, attempts are only recorded.
+    attempt, cap = run['attempt'], policy.get('max_attempts')
+    if type(attempt) is not int or attempt < 1:
+        return f'the receipt attempt {attempt!r} is not a run count from 1'
+    if cap is not None and (type(cap) is not int or attempt > cap):
+        return f'attempt {attempt} is over max_attempts {cap!r}: challenge.json allows {cap!r} runs per miner and round'
+    if (level := receipt['trust']['claimed_level']) not in TRUST_LEVELS:
+        return f'the receipt claims trust level {level!r}, not one of {", ".join(TRUST_LEVELS)}'
     expected = {
+        'receipt signer key': (receipt['signer']['key_id'], att.signer['key_id']),
+        'receipt signer kind': (receipt['signer']['kind'], PLATFORM_SIGNER),
+        'receipt signer algorithm': (receipt['signer']['algorithm'], 'ed25519'),
         'attestation digest': (claims['attestation_digest'], attested),
         'result hash': (out['result_sha256'], result_sha),
         'challenge id': (claims['challenge']['challenge_id'], config.challenge_id),
@@ -132,6 +151,8 @@ def _receipt_error(att: Attestation, config, policy: dict, author: Author | None
         'king sha': (sub['king_tree_sha'], result['king']['sha']),
         'crown': (out['crown'], result['crown']),
     }
+    if 'repo' in policy:  # which challenge repo's runs these are; absent, the challenge id above is all there is
+        expected['repo'] = (claims['challenge']['repo'], policy['repo'])
     if wrong := [f'{name} ({got!r} is not {want!r})' for name, (got, want) in expected.items() if got != want]:
         return f'the receipt does not match the attestation or challenge.json: {", ".join(wrong)}'
     if error := quote_error(receipt, claims, policy):

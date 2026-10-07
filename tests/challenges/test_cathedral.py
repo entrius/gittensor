@@ -15,9 +15,16 @@ from pathlib import Path
 import pytest
 from Crypto.Signature import eddsa
 
-from gittensor.challenges.attestation import Attestation, digest, verify
-from gittensor.challenges.cathedral import Author, receipt_bytes, receipt_error
-from gittensor.challenges.checkout import SourceFile
+from gittensor.challenges.attestation import Attestation, digest, public_hex, verify
+from gittensor.challenges.cathedral import (
+    CLAIMS_DOMAIN,
+    QUOTE_BODY,
+    QUOTE_HEADER,
+    Author,
+    receipt_bytes,
+    receipt_error,
+)
+from gittensor.challenges.checkout import SourceFile, submission_error
 from gittensor.challenges.head_to_head import canonical
 from gittensor.challenges.verify import CLA_TEXT, Chain, Config, PullRequest, Repo, decide
 
@@ -72,6 +79,20 @@ def resigned(doc: dict) -> Attestation:
     return Attestation.from_json(canonical(doc))
 
 
+def rebound(doc: dict) -> Attestation:
+    """The sample after an edit to its claims, with the quote's report data and the signature made again, so the edit
+    is the only thing a check can object to (what a holder of the Cathedral key could issue)."""
+    receipt = doc['signer']['receipt']
+    tee, claims = receipt['tee'], receipt['claims']
+    commitment = hashlib.sha256(CLAIMS_DOMAIN + receipt_bytes(claims)).digest()
+    quote = base64.b64decode(tee['quote_b64'])
+    start = QUOTE_HEADER + sum(size for name, size in QUOTE_BODY if name != 'report_data')
+    assert tee['binding'] == 'rd-claims-v1'  # the sample's: the commitment itself, then zeros
+    quote = quote[:start] + commitment + quote[start + 32 :]
+    tee['quote_b64'], tee['quote_sha256'] = base64.b64encode(quote).decode(), hashlib.sha256(quote).hexdigest()
+    return resigned(doc)
+
+
 def refusal(att: Attestation, config: Config = CONFIG, author: Author | None = AUTHOR) -> str:
     return receipt_error(att, config, author) or 'accepted'
 
@@ -95,7 +116,8 @@ def test_a_cathedral_signer_needs_a_pinned_key_and_a_dev_signer_has_no_receipt(t
     assert not verify(replace(att, signer={**att.signer, 'key_id': 'unknown'}), None, trusted)
     assert not verify(replace(att, signer={**att.signer, 'pubkey': '00' * 32}), None, trusted)
     dev = replace(att, signer={'kind': 'dev', 'pubkey': 'ab' * 32})
-    assert receipt_error(dev, CONFIG, AUTHOR) is None
+    assert receipt_error(dev, replace(CONFIG, attestation={}), AUTHOR) is None  # no Cathedral policy: no receipt
+    assert 'accepts only a Cathedral attestation' in refusal(dev)  # a policy for Cathedral: no dev signer at all
 
 
 @pytest.mark.parametrize(
@@ -150,6 +172,46 @@ def test_a_receipt_edited_and_signed_again_is_refused_by_the_field_it_changed(ed
     assert any(word in refusal(resigned(doc)) for word in reason.split('|'))
 
 
+@pytest.mark.parametrize(
+    'attempt, cap, accepted',
+    [(1, None, True), (999, None, True), (3, 3, True), (4, 3, False), (0, None, False), (True, None, False)],
+)
+def test_attempts_above_max_attempts_are_refused_and_the_count_must_be_a_real_count(attempt, cap, accepted):
+    doc = sample()
+    doc['signer']['receipt']['claims']['run']['attempt'] = attempt
+    config = replace(CONFIG, attestation={**POLICY, **({} if cap is None else {'max_attempts': cap})})
+
+    reason = refusal(rebound(doc), config)
+    assert (reason == 'accepted') == accepted
+    if cap is not None and attempt == 4:
+        assert 'attempt 4 is over max_attempts 3' in reason
+
+
+def test_a_max_attempts_that_is_not_a_whole_number_refuses_everything():
+    att = Attestation.from_json(json.dumps(SAMPLE))
+
+    assert 'max_attempts' in refusal(att, replace(CONFIG, attestation={**POLICY, 'max_attempts': '3'}))
+
+
+@pytest.mark.parametrize(
+    'edit, reason',
+    [
+        (lambda r: r['trust'].update(claimed_level='quantum'), 'trust level'),
+        (lambda r: r['signer'].update(key_id='another-key'), 'receipt signer key'),
+        (lambda r: r['signer'].update(kind='dev'), 'receipt signer kind'),
+        (lambda r: r['signer'].update(algorithm='rsa'), 'receipt signer algorithm'),
+        (lambda r: r['claims']['challenge'].update(repo='someone/else'), 'repo'),
+    ],
+)
+def test_the_receipt_fields_that_were_only_required_are_checked(edit, reason):
+    doc = sample()
+    edit(doc['signer']['receipt'])
+    config = replace(CONFIG, attestation={**POLICY, 'repo': 'entrius/gt-challenge-intents'})
+
+    assert reason in refusal(resigned(doc), config)
+    assert refusal(Attestation.from_json(json.dumps(SAMPLE)), config) == 'accepted'
+
+
 def test_who_the_receipt_was_issued_to_must_be_the_pr_author_and_the_hotkey():
     att = Attestation.from_json(json.dumps(SAMPLE))
 
@@ -181,7 +243,43 @@ def test_the_digest_the_legacy_signature_covers_is_gittensors_own():
     assert digest(att.result, att.seed_block, att.image).hex() == att.signer['receipt']['claims']['attestation_digest']
 
 
-def judge(**pr_changes):
+DEV_SEED = hashlib.sha256(b'a dev key that challenge.json also lists').digest()
+
+
+def relabeled_as_dev() -> tuple[Attestation, str]:
+    """Alice's Cathedral attestation with ``signer`` rewritten to a dev key and the legacy signature made with it. The
+    receipt is dropped, as a copycat would. Returns the attestation and the dev public key."""
+    key = eddsa.import_private_key(DEV_SEED)
+    pub = public_hex(key)
+    att = Attestation.from_json(json.dumps(SAMPLE))
+    signed = eddsa.new(key, 'rfc8032').sign(digest(att.result, att.seed_block, att.image)).hex()
+    return replace(att, signer={'kind': 'dev', 'pubkey': pub}, signature=signed), pub
+
+
+def test_a_cathedral_attestation_relabeled_as_dev_is_refused_even_when_the_dev_key_is_accepted():
+    dev, pub = relabeled_as_dev()
+    config = replace(CONFIG, dev_attestation_pubkey=pub)
+
+    assert verify(dev, pub)  # the dev signature itself is genuine: only the policy can refuse it
+    assert 'accepts only a Cathedral attestation' in refusal(dev, config)
+    assert 'not acceptable' in (submission_error(dev, config, 'a' * 40, 'b' * 40, 1, 'c' * 64, AUTHOR) or '')
+
+    assert [(c.name, c.ok) for c in judge(attestation=dev.to_json(), config=config).checks][-2:] == [
+        ('image', True),
+        ('receipt', False),
+    ]
+    assert judge(attestation=dev.to_json(), config=config).decision == 'close'
+
+
+def test_a_polaris_policy_is_held_to_the_cathedral_signer_too():
+    dev, pub = relabeled_as_dev()
+    config = replace(CONFIG, dev_attestation_pubkey=pub, attestation={**POLICY, 'kind': 'polaris'})
+
+    assert 'accepts only a Cathedral attestation' in refusal(dev, config)
+    assert refusal(Attestation.from_json(json.dumps(SAMPLE)), config) == 'accepted'
+
+
+def judge(config: Config = CONFIG, **pr_changes):
     """The maintainer's verdict on a PR carrying the sample, from plain facts."""
     files = [SourceFile('solve', '100755', 20, lambda: b'#!/bin/sh\nexec ./fast')]
     pr = PullRequest(
@@ -206,7 +304,7 @@ def judge(**pr_changes):
     )
     repo = Repo('baselines/cow', SAMPLE['result']['king']['sha'], '| round |\n|---|\n| 0 |\n', [], [], [])
     chain = Chain(SAMPLE['seed_block'] + 50, SAMPLE['result']['seed_block_hash'])
-    return decide(replace(pr, **pr_changes), repo, lambda _: chain, CONFIG)
+    return decide(replace(pr, **pr_changes), repo, lambda _: chain, config)
 
 
 def test_the_maintainer_crowns_the_sample_pr_and_closes_one_opened_by_someone_else():

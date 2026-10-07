@@ -6,9 +6,11 @@
 
 * ``dev``: a local ed25519 key (a 32-byte seed file, created 0600 on first use). Proves only which key signed, so a
   maintainer accepts it only from the challenge's ``dev_attestation_pubkey``; it exists for dry runs.
-* ``polaris``: the evaluator's key released by a Polaris appraisal of the blessed image. Not wired yet.
-* ``cathedral``: Cathedral (cathedral.computer) ran the official run itself and signed with a platform key the
-  challenge pins in ``challenge.json`` (``attestation.trusted_keys``). The signature here is the same ed25519 over the
+* ``polaris``: the evaluator's key released by a Polaris appraisal of the blessed image. Not wired yet; the Polaris
+  platform's concrete signer is ``cathedral``, and a ``challenge.json`` whose ``attestation.kind`` is ``polaris`` is
+  held to it (``challenges/cathedral.py``).
+* ``cathedral``: Cathedral (cathedral.computer, the Polaris platform) ran the official run itself and signed with a
+  platform key the challenge pins in ``challenge.json`` (``attestation.trusted_keys``). The signature here is the same ed25519 over the
   same digest as ``dev``; the Cathedral receipt in ``signer.receipt`` is checked by ``challenges/cathedral.py``.
 """
 

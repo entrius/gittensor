@@ -307,7 +307,7 @@ def test_an_order_nothing_fits_waits_the_grace_then_fails(tmp_path, boxes):
 def test_only_a_rentable_wholly_idle_box_of_the_type_and_size_is_picked(tmp_path, boxes):
     runner, clock = pod_runner(), Clock()
     store, rec = reconciler(tmp_path, boxes, runner, clock)
-    probation = rentable_box(standing_s=0)  # no clean lease-hours yet: probation, rentable (#1818: the holdback is the stake)
+    probation = rentable_box(standing_s=0)  # no clean lease-hours yet: probation, rentable (#1818: the holdback)
     boxes.put(probation)
     assert rec._pick(order(store), set(), NOW) is not None
     rec.min_standing = STANDARD  # the gate raised by --rental-min-standing: probation is then not enough

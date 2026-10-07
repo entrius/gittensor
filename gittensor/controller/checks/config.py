@@ -204,7 +204,10 @@ SETTLEMENT_WINDOW_S = 3_600.0
 PAY_LAG_S = 48 * 3_600.0
 # Idle pay needs a passing proof no older than this: one missed 20-min round is tolerated, a second stops idle pay.
 IDLE_PROOF_MAX_AGE_S = 1.5 * FULL_CHECK_INTERVAL_S
-# A hard failure forfeits the box's leased accrual over [its UTC day - 1 day, its UTC day + 1 day) (23 §5).
+# A hard failure forfeits the box's leased accrual over [its UTC day - 1 day, its UTC day + 1 day) (23 §5). The window
+# is re-applied when a window is settled, so with PAY_LAG_S it reaches leased pay already accrued and not yet paid:
+# yesterday's and the failure day's. Before the holdback it could only bite on the current hour (yesterday's weights
+# were long published). Sized before the holdback existed: ±1 day stays in phase 1 of #1818, phase 2 revisits it.
 WITHHELD_DAYS_BEFORE = 1
 WITHHELD_DAYS_AFTER = 1
 # The alpha the compute pool pays with: the miners' part of the subnet's per-block alpha emission (41% of 1 alpha per

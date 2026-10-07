@@ -2699,9 +2699,11 @@ def _pay_line(view: dict, now: float) -> str:
         for g, v in implied.items()
     )
     oracle = doc.get('oracle') or {}
+    ended = (doc.get('window') or {}).get('end')  # the holdback (#1818): the hour paid ended well before issue
     return (
         f'pay: scorecard {(view.get("sha256") or "?")[:12]} {mark}, issued {_age(doc.get("issued_at"), now)} ago'
-        f' · {rates or "no accruing cards"} · recycle {float(doc.get("recycle_share", 1.0)) * 100:.1f}%'
+        + (f', window ended {max(0.0, now - float(ended)) / 3600:.1f} h ago' if ended is not None else '')
+        + f' · {rates or "no accruing cards"} · recycle {float(doc.get("recycle_share", 1.0)) * 100:.1f}%'
         f' · TAO ${float(oracle.get("tao_usd", 0)):.2f}, alpha {float(oracle.get("alpha_tao", 0)):.6f} TAO'
         + (' [yellow](price held)[/yellow]' if oracle.get('held') else '')
     )

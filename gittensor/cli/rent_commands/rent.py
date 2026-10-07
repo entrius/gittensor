@@ -3,7 +3,7 @@
 
 """``gitt rent``: a whole GPU box as a pod, from the terminal, the way ``lium`` does it (vault 29 §6).
 
-    gitt rent login <key>          save the API key (or set GT_API_KEY)
+    gitt rent login <key>          save the API key (or export GITTENSOR_API_KEY)
     gitt rent ls                   what is free right now, $/hr, and your balance
     gitt rent up RTX5090 [-n dev]  order, wait for active, print the ssh line
     gitt rent ssh [dev] [-- cmd]   ssh in (one open rental needs no name)
@@ -71,7 +71,9 @@ def _fail(e: ApiError, json_mode: bool) -> None:
 
 def _api(cfg: RentConfig) -> RentApi:
     if not cfg.key:
-        raise ApiError('not logged in: `gitt rent login <api key>` or set GT_API_KEY (keys: the app, /keys)', 'usage')
+        raise ApiError(
+            'not logged in: `gitt rent login <api key>` or export GITTENSOR_API_KEY (keys: the app, /keys)', 'usage'
+        )
     return RentApi(cfg.url, cfg.key)
 
 

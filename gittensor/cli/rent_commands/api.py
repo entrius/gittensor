@@ -21,7 +21,8 @@ from gittensor.cli.helpers import GITTENSOR_DIR
 
 RENT_CONFIG = GITTENSOR_DIR / 'rent.json'
 DEFAULT_URL = 'https://gt-test.venturalabs.ai'  # the testnet product; `gitt rent login --url` for another
-ENV_KEY, ENV_URL = 'GT_API_KEY', 'GT_API_URL'
+ENV_KEYS = ('GITTENSOR_API_KEY', 'GT_API_KEY')  # the runbook's name first, the short one for typing
+ENV_URL = 'GT_API_URL'
 OPEN_STATES = ('requested', 'starting', 'active', 'ending')
 TIMEOUT_S = 20.0
 
@@ -53,9 +54,9 @@ class RentConfig:
             key=str(raw.get('key') or ''),
             names={str(k): str(v) for k, v in (raw.get('names') or {}).items()},
         )
-        # the environment wins over the file: an agent sets GT_API_KEY and never logs in
+        # the environment wins over the file: an agent exports GITTENSOR_API_KEY (as /llms.txt says) and never logs in
         cfg.url = os.environ.get(ENV_URL) or cfg.url
-        cfg.key = os.environ.get(ENV_KEY) or cfg.key
+        cfg.key = next((os.environ[k] for k in ENV_KEYS if os.environ.get(k)), cfg.key)
         return cfg
 
     def save(self, path: Path | None = None) -> None:

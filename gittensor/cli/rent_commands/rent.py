@@ -334,9 +334,20 @@ def ps_command(show_all, json_mode):
 def ssh_command(ref, command):
     """ssh into a rental: `gitt rent ssh dev`, or `gitt rent ssh dev -- nvidia-smi` for one command."""
     cfg = RentConfig.load()
+    command = list(command)
     try:
         api = _api(cfg)
-        r = resolve(cfg, api.rentals(), ref)
+        rentals = api.rentals()
+        try:
+            r = resolve(cfg, rentals, ref)
+        except ApiError as e:
+            if e.kind != 'no_rental' or not ref:
+                raise
+            # `gitt rent ssh -- nvidia-smi`: the first word is the command, not a name, and one rental is open
+            try:
+                command, r = [ref, *command], resolve(cfg, rentals, None)
+            except ApiError:
+                raise e from None
         if r.get('state') != 'active':
             raise ApiError(
                 f'{_label(cfg, r)} is {r.get("state")}, not active' + (f': {_reason(r)}' if r.get('reason') else ''),

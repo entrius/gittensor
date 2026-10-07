@@ -240,6 +240,8 @@ def test_ps_ssh_extend_and_rm_resolve_a_name_an_id_or_the_one_open_rental(produc
     assert invoke('ssh', 'dev', '--', 'nvidia-smi').exit_code == 0
     assert execs[0][-1] == 'root@203.0.113.7' and '-p' in execs[0] and '40047' in execs[0]
     assert execs[1][-2:] == ['root@203.0.113.7', 'nvidia-smi']
+    assert invoke('ssh', '--', 'nvidia-smi', '-L').exit_code == 0  # no name, one open rental: all of it is the command
+    assert execs[2][-3:] == ['root@203.0.113.7', 'nvidia-smi', '-L']
     r = invoke('extend', 'rnt_0', '2')
     assert r.exit_code == 0 and product.rentals['rnt_001']['ends_at'] == 5000 + 7200
     r = invoke('rm', 'dev')

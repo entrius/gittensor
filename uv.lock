@@ -632,12 +632,9 @@ dependencies = [
     { name = "bittensor-cli" },
     { name = "click" },
     { name = "jsonschema" },
-    { name = "psycopg", extra = ["binary"] },
     { name = "pyyaml" },
+    { name = "requests" },
     { name = "rich" },
-    { name = "tree-sitter" },
-    { name = "tree-sitter-language-pack" },
-    { name = "wandb" },
 ]
 
 [package.optional-dependencies]
@@ -647,10 +644,20 @@ debug = [
 dev = [
     { name = "httpx" },
     { name = "pre-commit" },
+    { name = "psycopg", extra = ["binary"] },
     { name = "pyright" },
     { name = "pytest" },
     { name = "ruff" },
+    { name = "tree-sitter" },
+    { name = "tree-sitter-language-pack" },
     { name = "vulture" },
+    { name = "wandb" },
+]
+validator = [
+    { name = "psycopg", extra = ["binary"] },
+    { name = "tree-sitter" },
+    { name = "tree-sitter-language-pack" },
+    { name = "wandb" },
 ]
 
 [package.metadata]
@@ -659,21 +666,23 @@ requires-dist = [
     { name = "bittensor-cli", specifier = "==9.21.1" },
     { name = "click", specifier = "==8.3.2" },
     { name = "debugpy", marker = "extra == 'debug'", specifier = "==1.8.20" },
+    { name = "gittensor", extras = ["validator"], marker = "extra == 'dev'" },
     { name = "httpx", marker = "extra == 'dev'", specifier = "==0.28.1" },
     { name = "jsonschema", specifier = "==4.25.1" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = "==4.6.0" },
-    { name = "psycopg", extras = ["binary"], specifier = "==3.3.4" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'validator'", specifier = "==3.3.4" },
     { name = "pyright", marker = "extra == 'dev'", specifier = "==1.1.408" },
     { name = "pytest", marker = "extra == 'dev'", specifier = "==9.0.3" },
     { name = "pyyaml", specifier = "==6.0.3" },
+    { name = "requests", specifier = ">=2.32,<3" },
     { name = "rich", specifier = "==14.3.3" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.15.12" },
-    { name = "tree-sitter", specifier = "==0.24.0" },
-    { name = "tree-sitter-language-pack", specifier = "==0.7.2" },
+    { name = "tree-sitter", marker = "extra == 'validator'", specifier = "==0.24.0" },
+    { name = "tree-sitter-language-pack", marker = "extra == 'validator'", specifier = "==0.7.2" },
     { name = "vulture", marker = "extra == 'dev'", specifier = "==2.16" },
-    { name = "wandb", specifier = "==0.26.1" },
+    { name = "wandb", marker = "extra == 'validator'", specifier = "==0.26.1" },
 ]
-provides-extras = ["dev", "debug"]
+provides-extras = ["validator", "dev", "debug"]
 
 [[package]]
 name = "h11"

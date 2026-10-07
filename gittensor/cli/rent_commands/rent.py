@@ -38,7 +38,8 @@ from gittensor.cli.rent_commands.api import (
     ssh_public_keys,
 )
 
-POLL_S = 2.0
+POLL_S = 2
+MIN_HOURS, MAX_HOURS = 0.25, 168  # the API's (shared/types RENTAL_MIN_MINUTES, RENTAL_MAX_HOURS).0
 WAIT_ACTIVE_S = 15 * 60  # a cold pull of a big image; ends_at only starts at active (29 §1 #11)
 WAIT_ENDED_S = 5 * 60
 SSH_OPTS = ('-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null', '-o', 'LogLevel=ERROR')
@@ -66,7 +67,7 @@ def _fail(e: ApiError, json_mode: bool) -> None:
         emit_error_json(e.message, e.kind, status=e.status)
     else:
         err_console.print(f'[red]Error:[/red] {e.message}')
-    sys.exit(2 if e.kind in ('no_rental', 'ambiguous', 'usage') else 1)
+    sys.exit(2 if e.kind in ('no_rental', 'ambiguous', 'usage', 'invalid_request') else 1)
 
 
 def _api(cfg: RentConfig) -> RentApi:
@@ -207,6 +208,7 @@ def up_command(gpu_type, count, hours, image, ports, envs, key_paths, name, box_
     cfg = RentConfig.load()
     try:
         api = _api(cfg)
+        _check_hours(hours)
         keys = ssh_public_keys(list(key_paths))
         if not keys:
             raise ApiError('no SSH public key: none under ~/.ssh/id_*.pub; give one with --key', 'usage')
@@ -216,6 +218,14 @@ def up_command(gpu_type, count, hours, image, ports, envs, key_paths, name, box_
             if not sep or not k:
                 raise ApiError(f'--env {kv!r}: KEY=VALUE', 'usage')
             env[k] = v
+        if name and name in cfg.names:
+            held = next(
+                (x for x in api.rentals() if x.get('id') == cfg.names[name] and x.get('state') in OPEN_STATES), None
+            )
+            if held:
+                raise ApiError(
+                    f'{name!r} is {held["state"]} ({held["id"]}): pick another name or `gitt rent rm {name}`', 'usage'
+                )
         offers = api.offers()
         found = find_offer(offers, gpu_type, count)
         if found is None:
@@ -263,12 +273,18 @@ def up_command(gpu_type, count, hours, image, ports, envs, key_paths, name, box_
         sys.exit(1)
 
 
+def _check_hours(hours: float) -> None:
+    # the API's limits (vault 29 §2), checked before anything else so a typo is not answered with "nothing is free"
+    if not MIN_HOURS <= hours <= MAX_HOURS:
+        raise ApiError(f'hours must be a number from {MIN_HOURS} to {MAX_HOURS} (-H 0.5 is 30 minutes)', 'usage')
+
+
 def _order_and_wait(api: RentApi, cfg: RentConfig, body: dict, name: str | None, no_wait: bool, quiet: bool) -> dict:
     retried = False
     while True:
         r = api.order(body)
         if name:
-            cfg.names[name] = r['id']
+            cfg.names[name] = r['id']  # a name from an earlier, finished rental is simply taken over
             cfg.save()
         if no_wait:
             return r
@@ -312,44 +328,62 @@ def ps_command(show_all, json_mode):
     if not rows:
         console.print('No open rentals.' + ('' if show_all else ' `gitt rent ps --all` for past ones.'))
         return
+    # ids and ssh lines fold rather than truncate (a cut id cannot be pasted back); past rentals say when and why
     table = Table(show_lines=False)
-    for col in ('Name', 'Id', 'State', 'Box', 'SSH', 'Ends', 'Billed'):
-        table.add_column(col)
+    for col, kw in (
+        ('Name', {}),
+        ('Id', {'overflow': 'fold'}),
+        ('State', {'min_width': 9}),
+        ('Box', {}),
+        ('SSH', {'overflow': 'fold'}),
+        ('Created', {}),
+        ('Ends' if not show_all else 'Ends / ended', {}),
+        ('Billed', {'justify': 'right'}),
+        *((('Why', {}),) if show_all else ()),
+    ):
+        table.add_column(col, **kw)
     for r in rows:
         state = r.get('state', '')
         colour = {'active': 'green', 'failed': 'red', 'ended': 'dim'}.get(state, 'yellow')
+        when = r.get('ends_at') if state in OPEN_STATES else r.get('ended_at')
         table.add_row(
             cfg.name_of(r['id']) or '—',
             r['id'],
-            f'[{colour}]{state}[/{colour}]' + (f' ({_reason(r)})' if state in ('failed',) else ''),
+            f'[{colour}]{state}[/{colour}]',
             f'{r.get("gpu_type")} ×{r.get("gpu_count")}',
-            _ssh_line(r) or '—',
-            _when(r.get('ends_at')) if state in OPEN_STATES else '—',
+            _ssh_line(r) if state == 'active' else '—',
+            _when(r.get('created_at')),
+            _when(when) if when else '—',
             _usd(r.get('billed_cents')),
+            *(((_reason(r) if state in ('ended', 'failed') else ''),) if show_all else ()),
         )
     console.print(table)
 
 
-@rent_group.command('ssh', context_settings={'ignore_unknown_options': True})
-@click.argument('ref', required=False)
-@click.argument('command', nargs=-1, type=click.UNPROCESSED)
-def ssh_command(ref, command):
-    """ssh into a rental: `gitt rent ssh dev`, or `gitt rent ssh dev -- nvidia-smi` for one command."""
+@rent_group.command('ssh', context_settings={'ignore_unknown_options': True, 'allow_interspersed_args': False})
+@click.argument('args', nargs=-1, type=click.UNPROCESSED)
+def ssh_command(args):
+    """ssh into a rental: `gitt rent ssh dev`, or `gitt rent ssh dev -- nvidia-smi -L` for one command.
+
+    With one open rental the name may be left out: `gitt rent ssh`, `gitt rent ssh -- nvidia-smi -L`.
+    """
+    # click drops a leading `--` but keeps a later one, so: `name -- cmd` arrives with the separator (the name must
+    # then resolve: a typo never runs as a command on the box), `-- cmd` and `name` arrive without it.
+    args = list(args)
+    if '--' in args:
+        names, command = args[: args.index('--')], args[args.index('--') + 1 :]
+        if len(names) != 1:
+            _fail(ApiError('usage: gitt rent ssh [NAME] [-- COMMAND...]', 'usage'), False)
+            return
+        ref = names[0]
+    elif len(args) <= 1:
+        ref, command = (args[0] if args else None), []
+    else:
+        ref, command = None, args
     cfg = RentConfig.load()
-    command = list(command)
     try:
         api = _api(cfg)
-        rentals = api.rentals()
-        try:
-            r = resolve(cfg, rentals, ref)
-        except ApiError as e:
-            if e.kind != 'no_rental' or not ref:
-                raise
-            # `gitt rent ssh -- nvidia-smi`: the first word is the command, not a name, and one rental is open
-            try:
-                command, r = [ref, *command], resolve(cfg, rentals, None)
-            except ApiError:
-                raise e from None
+        r = resolve(cfg, api.rentals(), ref)
         if r.get('state') != 'active':
             raise ApiError(
                 f'{_label(cfg, r)} is {r.get("state")}, not active' + (f': {_reason(r)}' if r.get('reason') else ''),
@@ -362,19 +396,21 @@ def ssh_command(ref, command):
         _fail(e, False)
         return
     argv = ['ssh', *SSH_OPTS, '-p', str(port), f'root@{r["host"]}', *command]
-    err_console.print(f'[dim]{shlex.join(argv)}[/dim]', highlight=False)
+    if not command:  # interactive: show the line to reuse by hand; a scripted command stays quiet
+        err_console.print(f'[dim]{shlex.join(argv)}[/dim]', highlight=False)
     sys.stdout.flush()
     os.execvp('ssh', argv)
 
 
-@rent_group.command('extend')
+@rent_group.command('extend', context_settings={'ignore_unknown_options': True})  # so `-0.25` is hours, not an option
 @click.argument('ref', required=False)
 @click.argument('hours', type=float)
 @_json_flag
 def extend_command(ref, hours, json_mode):
-    """Add hours to a rental (the end may be at most 7 days from now)."""
+    """Add hours to a rental (0.25 to 168; the end may be at most 7 days from now)."""
     cfg = RentConfig.load()
     try:
+        _check_hours(hours)
         api = _api(cfg)
         r = resolve(cfg, api.rentals(), ref)
         r = api.extend(r['id'], hours)

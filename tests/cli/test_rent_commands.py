@@ -153,7 +153,7 @@ def product(monkeypatch, tmp_path):
 
 
 def invoke(*args):
-    return CliRunner().invoke(cli, ['rent', *args], catch_exceptions=False)
+    return CliRunner(env={'COLUMNS': '200'}).invoke(cli, ['rent', *args], catch_exceptions=False)
 
 
 def test_ls_shows_only_free_sizes_with_runway_and_the_balance(product):
@@ -191,6 +191,15 @@ def test_up_refuses_up_front_when_nothing_of_that_size_is_free(product):
     assert r.exit_code == 0 and product.orders[0]['gpu_count'] == 2 and 'rnt_001' in r.output
     r = invoke('up', 'A100')
     assert r.exit_code == 2 and 'no such box size: A100' in r.stderr  # usage: exit 2
+    # a bad input is answered as such, before availability is even looked at (the agent got "nothing is free" for -H 0.1)
+    r = invoke('up', 'RTX5090', '-c', '2', '-H', '0.1')
+    assert r.exit_code == 2 and 'hours must be a number from 0.25 to 168' in r.stderr and 'free' not in r.stderr
+    r = invoke('extend', 'rnt_001', '-0.25')  # a negative number is hours, not an option
+    assert r.exit_code == 2 and 'hours must be a number' in r.stderr
+    # a name that still points at an open rental is not silently taken over
+    r = invoke('up', 'RTX5090', '-n', 'held', '--queue', '--no-wait')
+    r = invoke('up', 'RTX5090', '-n', 'held', '--queue', '--no-wait')
+    assert r.exit_code == 2 and "'held' is requested (rnt_002)" in r.stderr and len(product.orders) == 2
 
 
 def test_up_retries_once_on_a_failed_start_and_explains_other_failures(product):
@@ -246,6 +255,14 @@ def test_ps_ssh_extend_and_rm_resolve_a_name_an_id_or_the_one_open_rental(produc
     assert execs[1][-2:] == ['root@203.0.113.7', 'nvidia-smi']
     assert invoke('ssh', '--', 'nvidia-smi', '-L').exit_code == 0  # no name, one open rental: all of it is the command
     assert execs[2][-3:] == ['root@203.0.113.7', 'nvidia-smi', '-L']
+    # a typo before `--` is a typo, never a command run on the box (the agent's round-3 bug)
+    r = invoke('ssh', 'nosuch', '--', 'true')
+    assert r.exit_code == 2 and "no rental 'nosuch'" in r.stderr and len(execs) == 3
+    r = invoke('ssh', 'dev', 'extra', '--', 'true')
+    assert r.exit_code == 2 and 'usage: gitt rent ssh' in r.stderr
+    # a scripted command is quiet on stderr; the interactive form shows the ssh line to reuse
+    assert invoke('ssh', 'dev', '--', 'hostname').stderr == ''
+    assert 'ssh -o' in invoke('ssh', 'dev').stderr
     r = invoke('extend', 'rnt_0', '2')
     assert r.exit_code == 0 and product.rentals['rnt_001']['ends_at'] == 5000 + 7200
     r = invoke('rm', 'dev')

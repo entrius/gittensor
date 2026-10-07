@@ -24,6 +24,7 @@ from gittensor.controller.checks.runner import FakeRunner, regex
 from gittensor.controller.checks.state import ADMIT, BENCHED, IDLE, BoxState, StateStore, release_from_bench
 from gittensor.controller.proof.slot import ProbeResult, UnconfiguredProof
 from gittensor.controller.ssh import SshTransportError
+from gittensor.controller.standing import PROBATION, box_rentable
 from tests.controller.conftest import (
     AGENT_DIGEST,
     AGENT_IMAGE_ID,
@@ -553,6 +554,9 @@ def test_a_round_no_box_answers_counts_nobody_unreachable_and_one_dead_box_still
     payload = json.loads(result.stdout)
     assert payload['no_box_answered'] is True and all(b['transport_error'] for b in payload['boxes'])
     assert [store(state).get(hk).unreachable_count for hk in (HK_A, HK_B)] == [0, 0]
+    # not counted, but off the rental market until they answer: a dead box must not take an order
+    assert all(store(state).get(hk).unanswered_at is not None for hk in (HK_A, HK_B))
+    assert not any(box_rentable(store(state).get(hk), min_level=PROBATION) for hk in (HK_A, HK_B))
     with runners({HK_A: dead, HK_B: dead}):
         assert 'no box answered SSH' in invoke(*round_args(state)).output
 
@@ -560,6 +564,8 @@ def test_a_round_no_box_answers_counts_nobody_unreachable_and_one_dead_box_still
         result = invoke(*round_args(state, '--json'))
     assert result.exit_code == 2 and json.loads(result.stdout)['no_box_answered'] is False
     assert [store(state).get(hk).unreachable_count for hk in (HK_A, HK_B)] == [1, 0]
+    assert store(state).get(HK_A).unanswered_at is not None  # still dark
+    assert store(state).get(HK_B).unanswered_at is None  # answered: back on the market
     assert store(state).get(HK_B).status == IDLE
 
 

@@ -99,6 +99,7 @@ from gittensor.controller.checks.state import (
     StateStore,
     apply_unreachable,
     apply_verdict,
+    mark_unanswered,
     not_run_retry_at,
     provable_uuids,
     release_from_bench,
@@ -740,6 +741,8 @@ def run_round(
                 if r.scrape is None:
                     if r.transport_error and not (no_box_answered and r.runner is not None):
                         r.after = store.boxes[r.box.box_id] = apply_unreachable(current, now)
+                    elif r.transport_error:  # not counted, but not on the market either until it answers
+                        r.after = store.boxes[r.box.box_id] = mark_unanswered(current, now)
                     continue
                 if not identity_passed(r.checks):
                     r.checks.append(proof_skipped(r.checks))

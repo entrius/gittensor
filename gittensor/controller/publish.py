@@ -34,7 +34,7 @@ from gittensor.controller.manifest import gpu_type_of
 from gittensor.controller.pay.ledger import Ledger, is_withheld
 from gittensor.controller.pay.rates import RatesError, load_rates
 from gittensor.controller.pay.scorecard import LATEST, ScorecardError, read_scorecard
-from gittensor.controller.standing import HARD, RELEASED, SOFT, STANDARD, box_rentable, standing
+from gittensor.controller.standing import HARD, PROBATION, RELEASED, SOFT, box_rentable, standing
 
 SCHEMA = 1
 PUBLIC_DIR = 'public'
@@ -229,7 +229,7 @@ def build_fleet(
     netuid: int | None = None,
     publish_interval_s: float = cfg.PUBLISH_INTERVAL_S,
     rentals: Mapping[str, Any] | None = None,
-    rentable_min_standing: str = STANDARD,
+    rentable_min_standing: str = PROBATION,  # `run --rental-min-standing`; probation since #1818
 ) -> dict:
     """The public document. ``boxes`` / ``instances`` are the controller's records, ``status`` its
     ``controller.json``, ``image_of(entry_id)`` the registry's image reference (None: unknown), ``rentals`` the

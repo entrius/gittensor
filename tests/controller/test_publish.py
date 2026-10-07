@@ -40,7 +40,7 @@ from gittensor.controller.publish import (
 )
 from gittensor.controller.reconcile import InstanceRecord, InstanceStore
 from gittensor.controller.registry import Registry
-from gittensor.controller.standing import CHECK_FAILED, CLEAN_LEASE
+from gittensor.controller.standing import CHECK_FAILED, CLEAN_LEASE, STANDARD
 from tests.controller.test_cli import invoke
 
 UUID_A = 'GPU-4f2a6b8c-1d3e-4a5b-9c7d-0e1f2a3b4c5d'
@@ -182,8 +182,9 @@ def test_the_contract(tmp_path):
 
 
 def test_a_box_is_offered_when_it_is_rentable_and_wholly_idle(tmp_path):
-    """29 §1 #7 and §7: rentable = a rent range, not benched, standing >= standard; offered = rentable and every card
-    idle. The size offered is the whole box."""
+    """29 §1 #7 (as amended by #1818) and §7: rentable = a rent range, not benched, standing at or above the gate
+    (probation unless `run --rental-min-standing` raises it); offered = rentable and every card idle. The size offered
+    is the whole box."""
     boxes, instances = fleet()
     a = boxes[HK_A]
     a.rent_ports = [31000, 31099]
@@ -196,9 +197,12 @@ def test_a_box_is_offered_when_it_is_rentable_and_wholly_idle(tmp_path):
     assert doc['offers'] == {}  # one card leased, one draining: rentable, not on offer
     a.cards = {UUID_A: CardState(IDLE, '', NOW), UUID_B: CardState(IDLE, '', NOW)}
     assert build_fleet(tmp_path, boxes, {}, {}, True, NOW)['offers'] == {'RTX5090': {'2': 1}}
-    a.standing_events = []  # back on probation: idle, but no paying customer
+    a.standing_events = []  # back on probation: still on offer (#1818: the pay holdback is what it has at stake)
     doc = build_fleet(tmp_path, boxes, {}, {}, True, NOW)
-    assert not next(x for x in doc['boxes'] if x['hotkey'] == HK_A)['rentable'] and doc['offers'] == {}
+    row = next(x for x in doc['boxes'] if x['hotkey'] == HK_A)
+    assert row['standing'] == 'probation' and row['rentable'] is True and doc['offers'] == {'RTX5090': {'2': 1}}
+    gated = build_fleet(tmp_path, boxes, {}, {}, True, NOW, rentable_min_standing=STANDARD)  # the gate raised
+    assert not next(x for x in gated['boxes'] if x['hotkey'] == HK_A)['rentable'] and gated['offers'] == {}
     assert '31000' not in json.dumps(doc)  # the range is the miner's business and the pod's, never the page's
 
 

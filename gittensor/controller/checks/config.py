@@ -196,9 +196,18 @@ DECODE_TPS_WINDOW = 100  # the gateway's rolling window per instance
 # the scorecard pays the trailing SETTLEMENT_WINDOW_S (phase 0's settlement window was one hour too).
 SETTLEMENT_TICK_S = 12.0
 SETTLEMENT_WINDOW_S = 3_600.0
+# The holdback (issue #1818): the scorecard pays the window that ended PAY_LAG_S ago, not the one ending now, so a
+# hard failure forfeits what was accrued and not yet paid (Lium pays about two days behind for the same reason). While
+# the ledger is younger than that the lag is what history allows: the first hour on record is paid until the lag
+# reaches its full length, so a fresh deployment is not two days of zero pay. A box joining later waits the full lag
+# for its first pay, as it does at steady state.
+PAY_LAG_S = 48 * 3_600.0
 # Idle pay needs a passing proof no older than this: one missed 20-min round is tolerated, a second stops idle pay.
 IDLE_PROOF_MAX_AGE_S = 1.5 * FULL_CHECK_INTERVAL_S
-# A hard failure forfeits the box's leased accrual over [its UTC day - 1 day, its UTC day + 1 day) (23 §5).
+# A hard failure forfeits the box's leased accrual over [its UTC day - 1 day, its UTC day + 1 day) (23 §5). The window
+# is re-applied when a window is settled, so with PAY_LAG_S it reaches leased pay already accrued and not yet paid:
+# yesterday's and the failure day's. Before the holdback it could only bite on the current hour (yesterday's weights
+# were long published). Sized before the holdback existed: ±1 day stays in phase 1 of #1818, phase 2 revisits it.
 WITHHELD_DAYS_BEFORE = 1
 WITHHELD_DAYS_AFTER = 1
 # The alpha the compute pool pays with: the miners' part of the subnet's per-block alpha emission (41% of 1 alpha per

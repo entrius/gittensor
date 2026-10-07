@@ -7,15 +7,25 @@ own ledger with `gitt controller scorecard` and `status` reading it."""
 
 import hashlib
 import json
+import math
 from typing import Any, cast
 
 import pytest
 
 import gittensor.cli.main  # noqa: F401  (the CLI package must load before gittensor.controller.cli: circular import)
 from gittensor.controller import cli as ctl
-from gittensor.controller.checks.state import IDLE, LEASED, BoxState, CardState, StateStore
+from gittensor.controller.checks import config as cfg
+from gittensor.controller.checks.state import (
+    BENCHED,
+    IDLE,
+    LEASED,
+    BoxState,
+    CardState,
+    StateStore,
+    apply_heartbeat_failure,
+)
 from gittensor.controller.daemon import Controller, Intervals
-from gittensor.controller.pay.ledger import LedgerRow, settle_window
+from gittensor.controller.pay.ledger import DAY_S, LedgerRow, settle_window
 from gittensor.controller.pay.oracle import FailSafeOracle, Quote, StaticOracle
 from gittensor.controller.pay.rates import load_rates
 from gittensor.controller.pay.scorecard import (
@@ -38,6 +48,7 @@ HK_A = '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY'
 HK_B = '5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty'
 ISSUED = 1_789_000_000.0  # 2026-09-10
 HOUR = 3_600.0
+DAY = math.floor(ISSUED / DAY_S) * DAY_S  # that day's UTC midnight
 
 
 def example_scorecard(salt: str = 'c0ffee' * 5 + 'ab') -> dict:
@@ -146,6 +157,8 @@ def test_the_daemon_writes_a_scorecard_from_its_own_ledger_and_the_cli_reads_it(
     assert state['boxes'][0]['pay']['idle_s'] == pytest.approx(36, abs=0.01)
     text = invoke('status', '--state-dir', root).output
     assert 'pay: scorecard' in text and 'probation' in text
+    assert 'window ended 0.0 h ago' in text  # a ledger seconds old: no holdback yet (the lag ramps from here)
+    assert 'window ended 0.0 h ago' in invoke('scorecard', '--state-dir', root).output
 
     assert invoke('scorecard', '--state-dir', tmp_path / 'empty').exit_code == 2
 
@@ -200,3 +213,72 @@ def test_status_shows_the_pay_settled_since_the_last_scorecard_not_the_scorecard
     assert pay['weight'] is None and pay['scorecard_age_s'] is None and pay['live']['leased_s'] == 600
     assert pay['total']['leased_s'] == 600 and pay['total']['idle_s'] == pytest.approx(636, abs=0.01)
     assert 'Pay (ledger, last hour)' in invoke('status', '--state-dir', root).output
+
+
+# ---------------------------------------------------------------- the holdback (issue #1818) ---------------------------
+
+
+def _controller(root):
+    root.mkdir()
+    return Controller(
+        ctl.StateDir(root), Registry(root / 'registry', 'unused'), make_runner=cast(Any, None),
+        run_round=cast(Any, None), load_proof=cast(Any, None), intervals=Intervals(),
+        oracle=FailSafeOracle(StaticOracle(226.84, 0.003384)),
+    )  # fmt: skip
+
+
+def _tick_hourly(controller, first, hours, leased=False):
+    """One card on a fresh proof, settled every hour from ``first``: a row of 3 600 idle (or leased: the instance's
+    span confirmed through each tick) seconds per hour on record. The first tick only sets the clock."""
+    for i in range(hours + 1):
+        t = first + i * HOUR
+        card = CardState(LEASED, 'i1', first) if leased else CardState(IDLE, '', first)
+        controller.boxes.put(
+            BoxState(HK_A, status=IDLE, pinned_uuids=[UUID_A], card_name='NVIDIA GeForce RTX 5090',
+                     last_check_at=t - 60, cards={UUID_A: card}, host='10.0.0.1', port=2200)
+        )  # fmt: skip
+        if leased:
+            controller.instances.put(
+                InstanceRecord('i1', 'e@1', HK_A, UUID_A, healthy=True, leased_at=first, last_health_at=t,
+                               health_ok=True, pay_from=first, pay_through=t, pay_open=True)
+            )  # fmt: skip
+        controller.settle_once(t)
+
+
+def test_the_scorecard_pays_the_window_that_ended_48_h_ago_and_ramps_there_from_a_young_ledger(tmp_path):
+    controller = _controller(tmp_path / 'state')
+    _tick_hourly(controller, DAY, 72)  # three days of rows
+    now = DAY + 72 * HOUR
+    doc = controller.scorecard_once(now)
+    assert doc['window']['lag_s'] == pytest.approx(cfg.PAY_LAG_S) and cfg.PAY_LAG_S == 48 * HOUR
+    assert doc['window']['end'] == pytest.approx(now - cfg.PAY_LAG_S) and doc['window']['seconds'] == HOUR
+    (entry,) = doc['hotkeys']
+    assert entry['idle_s'] == 3_600 and entry['weight'] > 0  # the one hourly row inside (now - 49 h, now - 48 h]
+
+    # The ramp: a ledger two hours old pays its first hour (lag 1 h), not nothing for two days.
+    young = _controller(tmp_path / 'young')
+    _tick_hourly(young, DAY, 2)
+    doc = young.scorecard_once(DAY + 2 * HOUR)
+    assert doc['window']['lag_s'] == pytest.approx(HOUR) and doc['window']['end'] == DAY + HOUR
+    assert doc['hotkeys'][0]['idle_s'] == 3_600
+
+
+def test_a_hard_failure_today_forfeits_yesterdays_leased_pay_once_the_lagged_window_reaches_it(tmp_path):
+    controller = _controller(tmp_path / 'state')
+    failed_at = DAY + 10 * HOUR
+    _tick_hourly(controller, DAY - 3 * DAY_S, 82, leased=True)  # leased from three days before, through the failure
+    benched = apply_heartbeat_failure(controller.boxes.boxes[HK_A], ['our_container'], failed_at)
+    assert benched.status == BENCHED and benched.withheld_from == failed_at
+    controller.boxes.put(benched)
+
+    doc = controller.scorecard_once(failed_at)  # the hour paid now ended two days ago: before the withheld window
+    (entry,) = doc['hotkeys']
+    assert doc['window']['end'] == failed_at - cfg.PAY_LAG_S
+    assert (entry['leased_s'], entry['withheld_s']) == (3_600, 0) and entry['weight'] > 0
+    assert entry['withheld']  # flagged (the window is open), the forfeit is still ahead
+
+    doc = controller.scorecard_once(failed_at + DAY_S - 4 * HOUR)  # the window now ends at yesterday 06:00 UTC
+    (entry,) = doc['hotkeys']
+    assert doc['window']['end'] == DAY - DAY_S + 6 * HOUR
+    assert (entry['leased_s'], entry['withheld_s']) == (0, 3_600) and entry['weight'] == 0  # the forfeit
+    assert doc['recycle_share'] == pytest.approx(1.0)

@@ -2535,9 +2535,10 @@ class _DaemonPrinter:
 @click.option(
     '--rental-min-standing',
     type=click.Choice(['probation', 'standard', 'trusted']),
-    default='standard',
+    default='probation',
     show_default=True,
-    help='DEV: the standing a box needs to be rented; probation lets a fresh test box take an order.',
+    help='The standing a box needs to be rented. Probation (any admitted box) since issue #1818: the 48 h pay '
+    'holdback is what a new box has at stake; standing only sets lease caps and placement order.',
 )
 @click.option('--max-seconds', type=float, default=0, hidden=True)
 @_chain_options
@@ -2606,9 +2607,9 @@ def run_command(
         'firewall': not no_rental_firewall,
         'min_standing': rental_min_standing,
     }
-    if rental_runtime != 'sysbox-runc' or no_rental_firewall or rental_min_standing != 'standard':
+    if rental_runtime != 'sysbox-runc' or no_rental_firewall:
         err_console.print(
-            '[bold red]WARNING: rental dev overrides on (runtime / firewall / standing): for our own test boxes only, '
+            '[bold red]WARNING: rental dev overrides on (runtime / firewall): for our own test boxes only, '
             'never for a miner.[/bold red]'
         )
     try:
@@ -2698,9 +2699,11 @@ def _pay_line(view: dict, now: float) -> str:
         for g, v in implied.items()
     )
     oracle = doc.get('oracle') or {}
+    ended = (doc.get('window') or {}).get('end')  # the holdback (#1818): the hour paid ended well before issue
     return (
         f'pay: scorecard {(view.get("sha256") or "?")[:12]} {mark}, issued {_age(doc.get("issued_at"), now)} ago'
-        f' · {rates or "no accruing cards"} · recycle {float(doc.get("recycle_share", 1.0)) * 100:.1f}%'
+        + (f', window ended {max(0.0, now - float(ended)) / 3600:.1f} h ago' if ended is not None else '')
+        + f' · {rates or "no accruing cards"} · recycle {float(doc.get("recycle_share", 1.0)) * 100:.1f}%'
         f' · TAO ${float(oracle.get("tao_usd", 0)):.2f}, alpha {float(oracle.get("alpha_tao", 0)):.6f} TAO'
         + (' [yellow](price held)[/yellow]' if oracle.get('held') else '')
     )

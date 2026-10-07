@@ -24,7 +24,7 @@ from gittensor.controller.checks.state import (
 )
 from gittensor.controller.pay.ledger import Cursors, accrue
 from gittensor.controller.publish import build_fleet
-from gittensor.controller.standing import CLEAN_LEASE, standing
+from gittensor.controller.standing import CLEAN_LEASE, PROBATION, STANDARD, standing
 
 NOW = 1_760_000_000.0
 HK = '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY'  # a well-formed ss58: publish drops any other id
@@ -307,9 +307,12 @@ def test_an_order_nothing_fits_waits_the_grace_then_fails(tmp_path, boxes):
 def test_only_a_rentable_wholly_idle_box_of_the_type_and_size_is_picked(tmp_path, boxes):
     runner, clock = pod_runner(), Clock()
     store, rec = reconciler(tmp_path, boxes, runner, clock)
-    probation = rentable_box(standing_s=0)  # no clean lease-hours: probation, not rentable (29 §1 #7)
+    probation = rentable_box(standing_s=0)  # no clean lease-hours yet: probation, rentable (#1818: the holdback)
     boxes.put(probation)
+    assert rec._pick(order(store), set(), NOW) is not None
+    rec.min_standing = STANDARD  # the gate raised by --rental-min-standing: probation is then not enough
     assert rec._pick(order(store), set(), NOW) is None
+    rec.min_standing = PROBATION
     boxes.put(rentable_box(rent_ports=[]))  # not started with --rent
     assert rec._pick(order(store), set(), NOW) is None
     boxes.put(rentable_box(unanswered_at=NOW - 60))  # did not answer its last visit: off the market until it does

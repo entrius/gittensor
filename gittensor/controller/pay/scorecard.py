@@ -94,7 +94,12 @@ def build_scorecard(
         'issued_at': now,
         'valid_until': now + ttl_intervals * interval_s,
         'interval_s': interval_s,
-        'window': {'start': settlement.start, 'end': settlement.end, 'seconds': settlement.end - settlement.start},
+        'window': {
+            'start': settlement.start,
+            'end': settlement.end,
+            'seconds': settlement.end - settlement.start,
+            'lag_s': now - settlement.end,  # the holdback (PAY_LAG_S once the ledger is old enough)
+        },
         'rates': {
             g: {'idle_usd_per_hr': r.idle_usd_per_hr, 'leased_usd_per_hr': r.leased_usd_per_hr}
             for g, r in rates.items()

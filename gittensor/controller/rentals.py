@@ -74,7 +74,7 @@ from gittensor.controller.manifest import gpu_type_of
 from gittensor.controller.runspec import PlacementError, PullToken, image_present_command, pull_command
 from gittensor.controller.ssh import SshTransportError
 from gittensor.controller.ssh.certs import CertificateError
-from gittensor.controller.standing import STANDARD, box_rentable, rank, standing
+from gittensor.controller.standing import PROBATION, box_rentable, rank, standing
 
 # -- the states (the app's names, 29 §3) -----------------------------------------------------------------------------
 REQUESTED = 'requested'
@@ -393,10 +393,11 @@ class RentalReconciler:
         no_fit_grace_s: float = NO_FIT_GRACE_S,
         runtime: str = SYSBOX_RUNTIME,
         firewall: bool = True,
-        min_standing: str = STANDARD,
+        min_standing: str = PROBATION,
     ):
-        """``runtime`` / ``firewall`` / ``min_standing`` are the dev overrides (`gitt controller run --rental-runtime
-        runc --no-rental-firewall --rental-min-standing probation`): our own test boxes, never a miner's."""
+        """``runtime`` / ``firewall`` are the dev overrides (`gitt controller run --rental-runtime runc
+        --no-rental-firewall`): our own test boxes, never a miner's. ``min_standing`` is the rental gate: probation
+        (any admitted box) since issue #1818, the 48 h pay holdback being what a new box has at stake."""
         self.boxes, self.rentals = boxes, rentals
         self.make_runner = make_runner
         self.box_locks = box_locks or BoxLocks()

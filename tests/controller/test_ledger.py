@@ -13,6 +13,7 @@ import math
 
 import pytest
 
+from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.state import CHECKING, DRAINING, IDLE, LEASED, STARTING, BoxState, CardState
 from gittensor.controller.heartbeat import observe_pay
 from gittensor.controller.pay.ledger import (
@@ -21,6 +22,7 @@ from gittensor.controller.pay.ledger import (
     Ledger,
     LedgerRow,
     accrue,
+    pay_lag,
     settle_window,
     withheld_window,
 )
@@ -184,6 +186,29 @@ def test_rows_go_to_the_day_file_with_a_rollup_and_the_cursor_survives_a_restart
     rollup = json.loads((tmp_path / 'ledger' / '1970-01-01.rollup.json').read_text())
     assert rollup['hotkeys']['hk1'][A]['idle_s'] == 84.0 and rollup['hotkeys']['hk1'][B]['leased_s'] == 60.0
     assert [r.t1 for r in restarted.rows(1_000.0, 1_084.0)] == [1072.0, 1072.0, 1084.0, 1084.0]
+
+
+def test_the_pay_lag_ramps_with_the_ledgers_age_to_48_h_and_is_read_from_the_oldest_row_on_record(tmp_path):
+    hour, lag = 3_600.0, cfg.PAY_LAG_S
+    assert lag == 48 * hour
+    assert pay_lag(1e6, None) == 0.0  # nothing on record: the window ending now (and paying nothing)
+    assert pay_lag(1e6, 1e6 - 30 * 60) == 0.0  # younger than one window: still that window
+    assert pay_lag(1e6, 1e6 - hour) == 0.0
+    assert pay_lag(1e6, 1e6 - 2 * hour) == hour  # the window keeps the first hour on record
+    assert pay_lag(1e6, 1e6 - 10 * hour) == 9 * hour
+    assert pay_lag(1e6, 1e6 - 49 * hour) == lag  # from here on, the full holdback
+    assert pay_lag(1e6, 1e6 - 400 * hour) == lag
+
+    ledger = Ledger(tmp_path / 'ledger')
+    assert ledger.first_row_at() is None
+    (tmp_path / 'ledger').mkdir()
+    row = LedgerRow(0.0, 0.0, 'hk1', A, 'RTX5090', IDLE, '', 12.0, 0.0, False)
+    newer = [json.dumps({**row.__dict__, 't0': 2 * DAY_S + 12 * i, 't1': 2 * DAY_S + 12 * (i + 1)}) for i in range(3)]
+    (tmp_path / 'ledger' / '1970-01-03.jsonl').write_text('\n'.join(newer) + '\n')
+    older = json.dumps({**row.__dict__, 't0': DAY_S + 100.0, 't1': DAY_S + 112.0})
+    (tmp_path / 'ledger' / '1970-01-02.jsonl').write_text('{"t0": 86400.0, "t1": 86' + '\n' + older + '\n')
+    (tmp_path / 'ledger' / 'cursor.json').write_text('{}')  # not a day file: never read as rows
+    assert ledger.first_row_at() == DAY_S + 100.0  # the oldest day file, past its torn first line
 
 
 # ---------------------------------------------------------------- the window -----------------------------------------

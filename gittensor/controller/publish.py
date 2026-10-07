@@ -79,10 +79,11 @@ def scorecard_view(root: Path, now: float) -> dict:
 
 
 def live_pay(root: Path, boxes: Mapping[str, BoxState], view: dict, now: float) -> dict[str, dict]:
-    """Per hotkey, what the ledger has settled since the last scorecard (or over the trailing window when there is
-    none): idle / leased / withheld seconds and the USD they imply at the scorecard's implied per-card-hour rates
-    (the table's target rates for a GPU type the scorecard did not price). A card LEASED since the scorecard shows
-    its seconds here, not 0 (Kimbo 9/16)."""
+    """Per hotkey, what the ledger has settled since the last scorecard was issued (or over the trailing window when
+    there is none): idle / leased / withheld seconds and the USD they imply at the scorecard's implied per-card-hour
+    rates (the table's target rates for a GPU type the scorecard did not price). A card LEASED since the scorecard
+    shows its seconds here, not 0 (Kimbo 9/16). "Since" is about rows written, not paid: the scorecard's own hour
+    ended ``PAY_LAG_S`` before it was issued (#1818), and these rows are paid by the scorecards two days on."""
     doc = view.get('scorecard') or {}
     since = float(doc['issued_at']) if doc.get('issued_at') is not None else now - cfg.SETTLEMENT_WINDOW_S
     implied = (doc.get('pool') or {}).get('implied_usd_per_card_hour') or {}

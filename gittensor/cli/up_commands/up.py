@@ -24,7 +24,13 @@ from gittensor.agent.config import (
     parse_rent_ports,
     rent_ports_label,
 )
-from gittensor.agent.launch import agent_run_command, render, runner_run_command, workload_stop_commands
+from gittensor.agent.launch import (
+    agent_run_command,
+    drain_clear_command,
+    render,
+    runner_run_command,
+    workload_stop_commands,
+)
 from gittensor.cli.helpers import NETWORK_CHOICE, console, err_console
 from gittensor.cli.json_output import emit_json
 from gittensor.cli.miner_commands.helpers import NETUID_DEFAULT, _error, _load_config_value, _resolve_endpoint
@@ -84,6 +90,9 @@ def plan_commands(
     plan = workload_stop_commands(report.workloads) if reclaim else []
     if state is not None and state != 'running':
         plan.append(['docker', 'rm', '-f', target])
+    if rent_ports is not None:
+        # for rent again: a `gitt down` interrupted while it waited for a customer leaves its marker in the volume
+        plan.append(drain_clear_command(cmd[-1]))  # the image the start command runs: present, or pulled by it
     plan.append(cmd)
     return plan
 

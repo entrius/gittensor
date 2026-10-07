@@ -73,7 +73,10 @@ class FakeProbe:
         )
 
     def pods_output(self) -> str:
-        return ''.join(f'{p.container_id}\t{p.name}\t{p.state}\t\t\n' for p in self.pods)
+        return ''.join(
+            f'{p.container_id}\t{p.name}\t{p.state}\t\t\t{"" if p.ends_at is None else int(p.ends_at)}\n'
+            for p in self.pods
+        )
 
     def public_ip(self):
         return self.ip
@@ -468,7 +471,11 @@ class TestUpCommand:
         assert result.exit_code == 0, result.output
         doc = json.loads(result.output)
         assert doc['endpoint']['rent_ports'] == [31000, 31099]
-        assert 'GT_AGENT_RENT_PORTS=31000-31099' in docker_calls[0]
+        # for rent again: the drain marker a waiting `gitt down` may have left is cleared first, through the runner image
+        clear, start = docker_calls
+        assert clear[:3] == ['docker', 'run', '--rm'] and clear[-2:] == ['-f', '/var/lib/gt-agent/draining']
+        assert 'gt-agent-ssh:/var/lib/gt-agent' in clear and CHANNEL.runner in clear
+        assert 'GT_AGENT_RENT_PORTS=31000-31099' in start
         assert '--label io.gittensor.rent_ports=31000-31099' in doc['agent_command']
         bad = runner.invoke(cli, [*UP, '--rent', '--rent-ports', '31000-31010'])
         assert bad.exit_code == 2 and 'at least 100' in bad.output
@@ -563,7 +570,10 @@ class TestUpCommand:
 ORPHAN = Workload('a' * 64, 'gt-i-6f31220812a5', 'running', 20000, 240)  # the 27B the 9/16 `gitt down` left serving
 STOPPED = Workload('b' * 64, 'gt-i-0123456789ab', 'exited', 20001, 30)
 UNLABELLED = Workload('c' * 64, 'gt-i-before0label', 'running', 20002, None)  # started before the drain label existed
-POD = Workload('d' * 64, 'gt-rnt_0123456789abcdef', 'running', None, None)  # a customer's pod (io.gittensor.rental)
+POD = Workload(
+    'd' * 64, 'gt-rnt_0123456789abcdef', 'running', None, None, 1_800_000_000.0
+)  # a customer's pod (io.gittensor.rental)
+MARK = ['docker', 'exec', 'gt-agent', 'touch', '/var/lib/gt-agent/draining']  # `gitt down`: no new rental lands here
 
 
 class TestProofImagePrepull:
@@ -607,45 +617,85 @@ class TestDownCommand:
     def test_removes_both(self, runner, docker_calls):
         result = runner.invoke(cli, ['down'])
         assert result.exit_code == 0
-        assert docker_calls == [['docker', 'rm', '-f', 'gt-agent-runner'], ['docker', 'rm', '-f', 'gt-agent']]
+        assert docker_calls == [MARK, ['docker', 'rm', '-f', 'gt-agent-runner'], ['docker', 'rm', '-f', 'gt-agent']]
         assert result.output.count('Removed') == 2
 
     def test_the_agent_goes_first_then_our_workloads_are_drained_and_removed(self, runner, docker_calls, probe):
         """The agent is removed before any workload: the controller then only ever sees "unreachable" and "gone after
         unreachable" (lease ends at the last good heartbeat), never a workload vanishing under a live agent."""
         probe.workloads = [ORPHAN, STOPPED, UNLABELLED]
-        probe.pods = [POD]  # a customer's rental pod goes the same way, with the 30 s default (vault 29)
         result = runner.invoke(cli, ['down', '--json'])
         assert result.exit_code == 0, result.output
         assert docker_calls == [
+            MARK,
             ['docker', 'rm', '-f', 'gt-agent-runner'],
             ['docker', 'rm', '-f', 'gt-agent'],
             ['docker', 'stop', '--time', '240', ORPHAN.container_id],  # SIGTERM, the manifest's drain.max_s
             ['docker', 'stop', '--time', '30', UNLABELLED.container_id],  # no label: the 30 s default; STOPPED: no stop
-            ['docker', 'stop', '--time', '30', POD.container_id],
             ['docker', 'rm', '-f', ORPHAN.container_id],
             ['docker', 'rm', '-f', STOPPED.container_id],
             ['docker', 'rm', '-f', UNLABELLED.container_id],
-            ['docker', 'rm', '-f', POD.container_id],
         ]
         payload = json.loads(result.stdout)
-        assert payload['workloads'] == [ORPHAN.name, STOPPED.name, UNLABELLED.name, POD.name]
+        assert payload['workloads'] == [ORPHAN.name, STOPPED.name, UNLABELLED.name]
         assert payload['list_error'] == ''
         assert [(c['container'], c['action'], c['ok']) for c in payload['containers']][:4] == [
             ('gt-agent-runner', 'rm', True), ('gt-agent', 'rm', True), (ORPHAN.name, 'stop', True), (UNLABELLED.name, 'stop', True),
         ]  # fmt: skip
 
         docker_calls.clear()
-        result = runner.invoke(cli, ['down', '--now'])  # no wait: rm -f at once
-        assert result.exit_code == 0 and not any(c[1] == 'stop' for c in docker_calls)
-        assert [c[-1] for c in docker_calls] == ['gt-agent-runner', 'gt-agent', ORPHAN.container_id, STOPPED.container_id, UNLABELLED.container_id, POD.container_id]  # fmt: skip
-        assert 'Drained' not in result.output and result.output.count('Removed') == 6
+        result = runner.invoke(cli, ['down', '--now'])  # no wait, no marker: rm -f at once
+        assert result.exit_code == 0 and not any(c[1] == 'stop' for c in docker_calls) and MARK not in docker_calls
+        assert [c[-1] for c in docker_calls] == ['gt-agent-runner', 'gt-agent', ORPHAN.container_id, STOPPED.container_id, UNLABELLED.container_id]  # fmt: skip
+        assert 'Drained' not in result.output and result.output.count('Removed') == 5
 
         docker_calls.clear()
         result = runner.invoke(cli, ['down', '--dry-run'])
         assert docker_calls == [] and f'docker stop --time 240 {ORPHAN.container_id}' in result.output
+        assert result.output.index('docker exec gt-agent touch') < result.output.index('docker rm -f gt-agent-runner')
         assert result.output.index('docker rm -f gt-agent-runner') < result.output.index('docker rm -f gt-agent\n')
         assert result.output.index('docker rm -f gt-agent\n') < result.output.index('docker stop')
+
+    def test_a_customers_pod_is_waited_for_not_killed(self, runner, docker_calls, probe, monkeypatch):
+        """Pay is held back 48 h (#1818): leaving must never cost a miner, and the only thing that would is a customer's
+        pod dying under them. `gitt down` marks the box off the market, waits for the pod, then leaves."""
+        from gittensor.cli.up_commands import down as down_mod
+
+        probe.pods = [POD]
+        polls = []
+
+        def _sleep(s):  # each poll: the customer is still there, then gone
+            polls.append(s)
+            if len(polls) == 2:
+                probe.pods = []
+
+        monkeypatch.setattr(down_mod.time, 'sleep', _sleep)
+        result = runner.invoke(cli, ['down'])
+        assert result.exit_code == 0, result.output
+        assert 'a customer has this box until' in result.output and POD.name in result.output
+        assert polls == [down_mod.WAIT_POLL_S] * 2
+        assert docker_calls == [MARK, ['docker', 'rm', '-f', 'gt-agent-runner'], ['docker', 'rm', '-f', 'gt-agent']]
+        assert 'keep the hotkey registered' in result.output
+
+        # Ctrl-C during the wait: the box stays up and off the market, nothing removed
+        probe.pods = [POD]
+        docker_calls.clear()
+        monkeypatch.setattr(down_mod.time, 'sleep', lambda s: (_ for _ in ()).throw(KeyboardInterrupt()))
+        result = runner.invoke(cli, ['down'])
+        assert result.exit_code == 1 and 'left the box up and off the market' in result.output
+        assert docker_calls == [MARK]
+
+        # --now: the pod is ended like any workload (the 30 s default), no marker, no wait
+        docker_calls.clear()
+        result = runner.invoke(cli, ['down', '--now', '--json'])
+        assert result.exit_code == 0
+        assert docker_calls == [
+            ['docker', 'rm', '-f', 'gt-agent-runner'],
+            ['docker', 'rm', '-f', 'gt-agent'],
+            ['docker', 'rm', '-f', POD.container_id],
+        ]
+        dry = runner.invoke(cli, ['down', '--dry-run'])
+        assert f'(wait for {POD.name}, until' in dry.output
 
     def test_missing_containers_are_reported_quietly(self, runner, probe):
         missing = subprocess.CompletedProcess([], 1, '', 'Error response from daemon: No such container: gt-agent')
@@ -662,8 +712,11 @@ def test_workload_listing_round_trips_the_labels():
     cmd = workload_list_command()
     assert cmd[:3] == ['docker', 'ps', '-a'] and 'label=io.gittensor.instance' in cmd
     assert 'io.gittensor.drain_max_s' in cmd[-1] and 'io.gittensor.port' in cmd[-1]
+    assert 'io.gittensor.rental_ends_at' in cmd[-1]
     out = f'{ORPHAN.container_id}\t{ORPHAN.name}\trunning\t20000\t240\n{"c" * 64}\tgt-i-x\texited\t\t\nnot a row\n'
     assert parse_workloads(out) == [ORPHAN, Workload('c' * 64, 'gt-i-x', 'exited', None, None)]
+    pod = f'{POD.container_id}\t{POD.name}\trunning\t\t\t1800000000\n'
+    assert parse_workloads(pod) == [POD]
 
 
 def test_docker_assets_exist():

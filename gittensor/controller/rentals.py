@@ -49,7 +49,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from gittensor.agent.config import RENTAL_LABEL, SYSBOX_RUNTIME, UUID_LABEL
+from gittensor.agent.config import RENTAL_ENDS_AT_LABEL, RENTAL_LABEL, SYSBOX_RUNTIME, UUID_LABEL
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import HostRunner
 from gittensor.controller.checks.state import (
@@ -287,6 +287,7 @@ def pod_run_command(r: RentalRecord, network: str = RENTAL_NETWORK, runtime: str
         f'--name {shlex.quote(r.name)}',
         f'--runtime={runtime}',
         f'--label {shlex.quote(f"{RENTAL_LABEL}={r.id}")}',
+        f'--label {shlex.quote(f"{RENTAL_ENDS_AT_LABEL}={int(r.ends_at)}")}',  # `gitt down` tells the miner how long
         f'--label {shlex.quote(f"{UUID_LABEL}={devices}")}',
         f'--gpus {shlex.quote(f'"device={devices}"')}',  # docker reads the value as CSV: quoted, commas survive
         f'--shm-size {POD_SHM_SIZE}',

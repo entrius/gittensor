@@ -330,18 +330,16 @@ def ps_command(show_all, json_mode):
         return
     # ids and ssh lines fold rather than truncate (a cut id cannot be pasted back); past rentals say when and why
     table = Table(show_lines=False)
-    for col, kw in (
-        ('Name', {}),
-        ('Id', {'overflow': 'fold'}),
-        ('State', {'min_width': 9}),
-        ('Box', {}),
-        ('SSH', {'overflow': 'fold'}),
-        ('Created', {}),
-        ('Ends' if not show_all else 'Ends / ended', {}),
-        ('Billed', {'justify': 'right'}),
-        *((('Why', {}),) if show_all else ()),
-    ):
-        table.add_column(col, **kw)
+    table.add_column('Name')
+    table.add_column('Id', overflow='fold')
+    table.add_column('State', min_width=9)
+    table.add_column('Box')
+    table.add_column('SSH', overflow='fold')
+    table.add_column('Created')
+    table.add_column('Ends / ended' if show_all else 'Ends')
+    table.add_column('Billed', justify='right')
+    if show_all:
+        table.add_column('Why')
     for r in rows:
         state = r.get('state', '')
         colour = {'active': 'green', 'failed': 'red', 'ended': 'dim'}.get(state, 'yellow')

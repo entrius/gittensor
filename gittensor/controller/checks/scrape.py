@@ -65,8 +65,9 @@ def rent_ports_command(container: str = cfg.AGENT_CONTAINER_NAME) -> str:
 
 
 def parse_rent_ports_label(stdout: str) -> List[int]:
-    """``[low, high]`` for a well-formed label, else ``[]`` (no label, or a range the agent would not have accepted)."""
-    ports = parse_rent_ports(stdout)
+    """``[low, high]`` for a well-formed label, else ``[]`` (no label). The range's width is `gitt up`'s policy (100 for
+    a miner, 4 for a dev box): the controller records whatever range the agent carries."""
+    ports = parse_rent_ports(stdout, minimum=1)
     return list(ports) if ports else []
 
 

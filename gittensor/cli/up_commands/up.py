@@ -18,6 +18,7 @@ from gittensor.agent.config import (
     AGENT_SSH_PORT,
     RENT_PORTS_DEFAULT,
     RENT_PORTS_MIN,
+    RENT_PORTS_MIN_DEV,
     RUNNER_CONTAINER_NAME,
     WORKLOAD_PORT_RANGE,
     parse_rent_ports,
@@ -231,12 +232,10 @@ def up_command(
     endpoint = _resolve_endpoint(network, rpc_url)
     rent_ports = None
     if rent:
-        rent_ports = parse_rent_ports(rent_ports_text)
+        minimum = RENT_PORTS_MIN_DEV if allow_dev_keys else RENT_PORTS_MIN
+        rent_ports = parse_rent_ports(rent_ports_text, minimum)
         if rent_ports is None:
-            _error(
-                f'--rent-ports {rent_ports_text!r}: give LOW-HIGH, at least {RENT_PORTS_MIN} ports above 1023.',
-                json_mode,
-            )
+            _error(f'--rent-ports {rent_ports_text!r}: give LOW-HIGH, at least {minimum} ports above 1023.', json_mode)
             sys.exit(2)
     if publish_only and rent:
         _error(
@@ -288,6 +287,7 @@ def up_command(
         skip_reachability=skip_reachability,
         reclaim=reclaim,
         rent_ports=rent_ports,
+        dev_box=allow_dev_keys,
     )
 
     channel = None

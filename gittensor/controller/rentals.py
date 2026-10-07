@@ -73,7 +73,7 @@ from gittensor.controller.manifest import gpu_type_of
 from gittensor.controller.runspec import PlacementError, PullToken, image_present_command, pull_command
 from gittensor.controller.ssh import SshTransportError
 from gittensor.controller.ssh.certs import CertificateError
-from gittensor.controller.standing import box_rentable, rank, standing
+from gittensor.controller.standing import STANDARD, box_rentable, rank, standing
 
 # -- the states (the app's names, 29 §3) -----------------------------------------------------------------------------
 REQUESTED = 'requested'
@@ -104,6 +104,9 @@ LOST_AFTER_MISSES = 3
 # Images the rent page promises run sshd on :22 (gittensor-app rental-images.ts: keep the lists equal). Pre-pulled on
 # idle rentable boxes.
 QUICK_PICK_IMAGES = ('daturaai/pytorch:2.12.0-py3.12-cuda12.8-devel-ubuntu24.04-dind',)
+# What a runc dev box can run: the same image family without docker-in-docker (its entrypoint starts dockerd first and
+# exits without privileges). The production quick-pick stays the dind image, under Sysbox.
+QUICK_PICK_NO_DIND = 'daturaai/pytorch:2.6.0-py3.12-cuda12.6.3-devel-ubuntu24.04'
 # What a pod must not reach from a miner's box: the miner's LAN and the host itself (29 §4). Link-local covers the
 # cloud metadata address; 100.64/10 is carrier NAT.
 PRIVATE_NETS = ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '169.254.0.0/16', '100.64.0.0/10')
@@ -144,7 +147,10 @@ class RentalRecord:
     uuids: list[str] = field(default_factory=list)
     container_id: str = ''
     host: str = ''
-    port_map: dict[str, int] = field(default_factory=dict)  # str(pod port) -> the box's public port
+    port_map: dict[str, int] = field(default_factory=dict)  # str(pod port) -> the host port docker publishes it on
+    # str(pod port) -> the port the world reaches it on: the same, except on a host that remaps published ports (a
+    # Lium pod, BoxState.port_map). What the customer is told; what the probe dials.
+    public_map: dict[str, int] = field(default_factory=dict)
     started_at: float | None = None  # active: the SSH banner answered
     ended_at: float | None = None
     reason: str = ''
@@ -156,6 +162,8 @@ class RentalRecord:
     pay_through: float | None = None
     pay_open: bool = False
     stopped_at: float | None = None
+    # what the app has been told (``rental_seam.RentalPoller``): a report goes out whenever this differs from ``state``
+    reported_state: str = ''
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> RentalRecord:
@@ -267,15 +275,16 @@ def assign_ports(ports: Iterable[int], rent_range: list[int], taken: Iterable[in
     return out
 
 
-def pod_run_command(r: RentalRecord, network: str = RENTAL_NETWORK) -> str:
+def pod_run_command(r: RentalRecord, network: str = RENTAL_NETWORK, runtime: str = SYSBOX_RUNTIME) -> str:
     """The pod: Sysbox (root, docker and systemd inside, no host root), every card of the box, the ports published on
     every address of the box (the miner's firewall opened the range), caps, labels, never a restart by itself, no
-    host mounts, no extra capabilities."""
+    host mounts, no extra capabilities. ``runtime`` is ``runc`` only on a dev box that cannot run Sysbox (a Lium pod
+    is one: it is a Sysbox container itself)."""
     devices = ','.join(r.uuids)
     parts = [
         'docker run -d',
         f'--name {shlex.quote(r.name)}',
-        f'--runtime={SYSBOX_RUNTIME}',
+        f'--runtime={runtime}',
         f'--label {shlex.quote(f"{RENTAL_LABEL}={r.id}")}',
         f'--label {shlex.quote(f"{UUID_LABEL}={devices}")}',
         f'--gpus {shlex.quote(f'"device={devices}"')}',  # docker reads the value as CSV: quoted, commas survive
@@ -286,7 +295,12 @@ def pod_run_command(r: RentalRecord, network: str = RENTAL_NETWORK) -> str:
     ]
     for inside, public in sorted(r.port_map.items(), key=lambda kv: int(kv[0])):
         parts.append(f'-p {shlex.quote(f"{public}:{inside}")}')
-    parts += [f'-e {shlex.quote(f"{k}={v}")}' for k, v in sorted(r.env.items())]
+    # The convention Lium's and RunPod's images start sshd by: their start.sh runs sshd only when PUBLIC_KEY is set
+    # and appends it to authorized_keys. Set it (every key, newline-separated) so a quick-pick image comes up with
+    # sshd; the docker exec after start writes the same keys for an image that runs sshd regardless.
+    if r.ssh_pubkeys:
+        parts.append(f'-e {shlex.quote("PUBLIC_KEY=" + chr(10).join(k.strip() for k in r.ssh_pubkeys if k.strip()))}')
+    parts += [f'-e {shlex.quote(f"{k}={v}")}' for k, v in sorted(r.env.items()) if k != 'PUBLIC_KEY']
     parts.append(shlex.quote(r.image))
     return ' '.join(parts)
 
@@ -376,7 +390,12 @@ class RentalReconciler:
         background: bool = True,
         prepull: tuple[str, ...] = QUICK_PICK_IMAGES,
         no_fit_grace_s: float = NO_FIT_GRACE_S,
+        runtime: str = SYSBOX_RUNTIME,
+        firewall: bool = True,
+        min_standing: str = STANDARD,
     ):
+        """``runtime`` / ``firewall`` / ``min_standing`` are the dev overrides (`gitt controller run --rental-runtime
+        runc --no-rental-firewall --rental-min-standing probation`): our own test boxes, never a miner's."""
         self.boxes, self.rentals = boxes, rentals
         self.make_runner = make_runner
         self.box_locks = box_locks or BoxLocks()
@@ -384,8 +403,12 @@ class RentalReconciler:
         self.wall, self.sleep, self.probe = wall, sleep, probe
         self.pull_token = pull_token
         self.background = background
-        self.prepull_images = prepull
         self.no_fit_grace_s = no_fit_grace_s
+        self.runtime, self.firewall, self.min_standing = runtime, firewall, min_standing
+        # under runc the dind quick-pick cannot start (no privileges for its dockerd); pre-pull what can
+        self.prepull_images = (
+            (QUICK_PICK_NO_DIND,) if runtime != SYSBOX_RUNTIME and prepull == QUICK_PICK_IMAGES else prepull
+        )
         self._threads: dict[str, threading.Thread] = {}  # rental id -> its start / stop thread
         self._prepulling: dict[str, threading.Thread] = {}  # box id -> its pull thread
 
@@ -567,6 +590,7 @@ class RentalReconciler:
                 self._finish(r, FAILED, START_FAILED)
                 report.actions.append(RentalAction('failed', r.id, box.box_id, str(e)))
                 continue
+            r.public_map = {inside: box.public_port(host_port) for inside, host_port in r.port_map.items()}
             r.box, r.box_uid, r.state = box.box_id, box.uid, STARTING_R
             r.uuids = sorted(box.cards)
             r.uuid = r.uuids[0]
@@ -585,7 +609,9 @@ class RentalReconciler:
         """The best rentable box of the type and size, wholly idle, not already carrying an open rental."""
         fits: list[BoxState] = []
         for box in self.boxes.boxes.values():
-            if box.box_id in taken or box.status != IDLE or not box_rentable(box, now) or not box.cards:
+            if box.box_id in taken or box.status != IDLE or not box.cards:
+                continue
+            if not box_rentable(box, now, min_level=self.min_standing):
                 continue
             if r.want_box_uid is not None and box.uid != r.want_box_uid:
                 continue
@@ -604,7 +630,7 @@ class RentalReconciler:
             return
         now = self.wall()
         for box in list(self.boxes.boxes.values()):
-            if box.status != IDLE or not box_rentable(box, now) or not box.cards:
+            if box.status != IDLE or not box_rentable(box, now, min_level=self.min_standing) or not box.cards:
                 continue
             if any(c.state != IDLE for c in box.cards.values()) or self.rentals.on_box(box.box_id):
                 continue
@@ -660,7 +686,8 @@ class RentalReconciler:
             runner = self.make_runner(box)
             t = cfg.SSH_COMMAND_TIMEOUT_S
             self._check(runner.run(ensure_rental_network_command(), timeout=t), 'network')
-            self._check(runner.run(firewall_commands(), timeout=t), 'firewall')
+            if self.firewall:
+                self._check(runner.run(firewall_commands(), timeout=t), 'firewall')
             if not runner.run(image_present_command(r.image), timeout=t).ok:
                 pull = runner.run(
                     pull_command(r.image, self.pull_token.username if self.pull_token else None),
@@ -669,7 +696,7 @@ class RentalReconciler:
                 )
                 if not pull.ok:
                     raise RentalError(f'{PULL_FAILED}: {(pull.stderr or pull.stdout).strip()[-200:]}')
-            run = runner.run(pod_run_command(r), timeout=t)
+            run = runner.run(pod_run_command(r, runtime=self.runtime), timeout=t)
             cid = self._check(run, 'docker run').strip().splitlines()[-1].strip() if run.ok else ''
             if len(cid) != 64:
                 raise RentalError(f'{START_FAILED}: docker run gave no container id')
@@ -679,7 +706,7 @@ class RentalReconciler:
                 runner.run(authorized_keys_command(cid, r.ssh_pubkeys), timeout=t, stdin=keys_stdin(r.ssh_pubkeys)),
                 'authorized_keys',
             )
-            public = box.public_port(r.port_map[str(RENTAL_SSH_PORT)])
+            public = r.public_map.get(str(RENTAL_SSH_PORT)) or box.public_port(r.port_map[str(RENTAL_SSH_PORT)])
             deadline = self.wall() + SSHD_PROBE_TIMEOUT_S
             while not self.probe(r.host, public):
                 if self.wall() >= deadline:

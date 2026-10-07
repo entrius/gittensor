@@ -75,6 +75,7 @@ WORKLOAD_PORT_RANGE = (20000, 20015)  # inclusive
 RENT_PORTS_LABEL = 'io.gittensor.rent_ports'  # on the agent container: "LOW-HIGH", inclusive; absent = not rentable
 RENT_PORTS_DEFAULT = (31000, 31099)  # inclusive, what `--rent` opens when `--rent-ports` is not given
 RENT_PORTS_MIN = 100
+RENT_PORTS_MIN_DEV = 4  # a dev box (`--allow-dev-keys`): a Lium pod maps a handful of ports, enough for one pod
 RENTAL_LABEL = 'io.gittensor.rental'  # on a customer's pod: the rental id (29 §4); `gitt down` stops these too
 SYSBOX_RUNTIME = 'sysbox-runc'  # the runtime every pod runs under (Lium's executors: nvidia_docker_sysbox_setup.sh)
 SYSBOX_VERSION = '0.7.1'
@@ -127,12 +128,12 @@ def rent_ports_label(ports: tuple[int, int] | None) -> str:
     return f'{ports[0]}-{ports[1]}' if ports else ''
 
 
-def parse_rent_ports(text: str) -> tuple[int, int] | None:
-    """``LOW-HIGH`` (inclusive) -> the pair, or None for '' / anything that is not a range of RENT_PORTS_MIN+ ports."""
+def parse_rent_ports(text: str, minimum: int = RENT_PORTS_MIN) -> tuple[int, int] | None:
+    """``LOW-HIGH`` (inclusive) -> the pair, or None for '' / anything that is not a range of ``minimum``+ ports."""
     low, sep, high = text.strip().partition('-')
     if not sep or not low.isdigit() or not high.isdigit():
         return None
     lo, hi = int(low), int(high)
-    if not 1024 <= lo <= hi <= 65535 or hi - lo + 1 < RENT_PORTS_MIN:
+    if not 1024 <= lo <= hi <= 65535 or hi - lo + 1 < minimum:
         return None
     return lo, hi

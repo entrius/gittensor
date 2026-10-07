@@ -2141,7 +2141,8 @@ def rentals_list_command(state_dir, json_mode):
     for column in ('Rental', 'State', 'Type', 'Box', 'Cards', 'SSH', 'Started', 'Ends', 'Reason'):
         table.add_column(column, no_wrap=True)
     for r in rows:
-        ssh = f'{r.host}:{r.port_map.get("22", "")}' if r.host and r.port_map else ''
+        public = r.public_map or r.port_map
+        ssh = f'{r.host}:{public.get("22", "")}' if r.host and public else ''
         table.add_row(
             escape(r.id),
             r.state,
@@ -2502,6 +2503,39 @@ class _DaemonPrinter:
     show_default=True,
     help='Seconds between metagraph reads (with --discover).',
 )
+@click.option(
+    '--rental-seam-url',
+    default=None,
+    envvar='GT_RENTAL_SEAM_URL',
+    help="gittensor-app's base URL: orders are pulled from /internal/rentals and status reported there (vault 29 §3).",
+)
+@click.option(
+    '--rental-seam-token-file',
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    envvar='GT_RENTAL_SEAM_TOKEN_FILE',
+    help='File holding the seam bearer token (RENTAL_SEAM_TOKEN on the app side).',
+)
+@click.option(
+    '--rental-runtime',
+    type=click.Choice(['sysbox-runc', 'runc']),
+    default='sysbox-runc',
+    show_default=True,
+    help='DEV: run pods under plain runc on a box that cannot run Sysbox (a Lium pod). Never for a miner.',
+)
+@click.option(
+    '--no-rental-firewall',
+    is_flag=True,
+    default=False,
+    help='DEV: skip the box firewall rules for pods (a box whose host namespaces we cannot reach). Never for a miner.',
+)
+@click.option(
+    '--rental-min-standing',
+    type=click.Choice(['probation', 'standard', 'trusted']),
+    default='standard',
+    show_default=True,
+    help='DEV: the standing a box needs to be rented; probation lets a fresh test box take an order.',
+)
 @click.option('--max-seconds', type=float, default=0, hidden=True)
 @_chain_options
 @_registry_options
@@ -2522,6 +2556,11 @@ def run_command(
     gateway_url,
     discover,
     discover_interval,
+    rental_seam_url,
+    rental_seam_token_file,
+    rental_runtime,
+    no_rental_firewall,
+    rental_min_standing,
     max_seconds,
     netuid,
     network,
@@ -2552,6 +2591,23 @@ def run_command(
     _require_ca_key(setup.ca_key, json_mode)
     registry = _open_registry(setup.state, release_pubkey, allow_dev_keys, json_mode)
     token = _read_pull_token(pull_token_file, json_mode)
+    seam = None
+    if rental_seam_url:
+        if rental_seam_token_file is None:
+            _fail('--rental-seam-url needs --rental-seam-token-file', json_mode, 2)
+        from gittensor.controller.rental_seam import SeamClient
+
+        seam = SeamClient(rental_seam_url, rental_seam_token_file.expanduser().read_text().strip())
+    rental_options = {
+        'runtime': rental_runtime,
+        'firewall': not no_rental_firewall,
+        'min_standing': rental_min_standing,
+    }
+    if rental_runtime != 'sysbox-runc' or no_rental_firewall or rental_min_standing != 'standard':
+        err_console.print(
+            '[bold red]WARNING: rental dev overrides on (runtime / firewall / standing): for our own test boxes only, '
+            'never for a miner.[/bold red]'
+        )
     try:
         setup.proof()  # a provider that cannot load fails now, not 20 minutes in; every round re-loads it
     except ProofLoadError as e:
@@ -2598,6 +2654,8 @@ def run_command(
                 rates=rates,
                 read_chain=reader.read if reader is not None else None,
                 scan_host_key=_scan_host_key,
+                rental_seam=seam,
+                rental_options=rental_options,
                 network=network,
                 netuid=netuid,
             )

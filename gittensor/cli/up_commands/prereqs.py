@@ -30,6 +30,7 @@ from gittensor.agent.config import (
     COMPUTE_AXON_PROTOCOL,
     COMPUTE_AXON_SCHEMA,
     RENT_PORTS_MIN,
+    RENT_PORTS_MIN_DEV,
     RENTAL_LABEL,
     RUNNER_CONTAINER_NAME,
     SYSBOX_RUNTIME,
@@ -370,6 +371,7 @@ def check_rent_ports(
     ssh_port: int,
     report: PrereqReport,
     workload_ports: range = WORKLOAD_PORTS,
+    minimum: int = RENT_PORTS_MIN,
 ) -> CheckResult:
     """``--rent``: the range a customer's pod publishes its ports on (29 §5). Wide enough, apart from the sshd and
     workload ports, and free on this box except for our own pods (a rental still running from a previous `gitt up`
@@ -377,10 +379,8 @@ def check_rent_ports(
     low, high = ports
     span = f'{low}-{high}'
     width = high - low + 1
-    if width < RENT_PORTS_MIN:
-        return CheckResult(
-            RENT_PORTS_CHECK, False, f'{span} is {width} ports; --rent-ports needs at least {RENT_PORTS_MIN}'
-        )
+    if width < minimum:
+        return CheckResult(RENT_PORTS_CHECK, False, f'{span} is {width} ports; --rent-ports needs at least {minimum}')
     if low <= ssh_port <= high or low <= workload_ports[-1] and workload_ports[0] <= high:
         return CheckResult(
             RENT_PORTS_CHECK,
@@ -516,13 +516,16 @@ def run_prereqs(
     reclaim: bool = False,
     agent_only: bool = False,
     rent_ports: tuple[int, int] | None = None,
+    dev_box: bool = False,
 ) -> PrereqReport:
     """``no_chain`` is for our own dev boxes only: no registration lookup, nothing published (so no public IP or
     reachability rows), and no hotkey needed on disk. ``public_ip`` overrides detection. ``reclaim``: a workload
     container of ours left behind will be removed, so a port it holds passes. ``agent_only`` is the box half of
     ``--publish-only``: the wallet lives on another machine, so no hotkey is needed here and nothing is looked up or
     published, but the public IP and reachability rows still run (they are what the wallet machine publishes).
-    ``rent_ports`` (``--rent``) adds the Sysbox and rent-range rows; without it the box is admitted idle-only."""
+    ``rent_ports`` (``--rent``) adds the Sysbox and rent-range rows; without it the box is admitted idle-only.
+    ``dev_box`` (``--allow-dev-keys``, our own local builds): the Sysbox row is skipped (a Lium pod cannot run it; the
+    controller then runs pods under runc with its own dev flag) and the range may be as narrow as a pod needs."""
     report = PrereqReport()
     report.results.extend(check_driver(probe))
     docker = check_docker(probe)
@@ -535,8 +538,12 @@ def run_prereqs(
     report.results.append(check_ports(probe, [ssh_port], report))
     report.results.append(check_workload_ports(probe, workload_ports, report, reclaim))
     if rent_ports is not None:
-        report.results.append(check_sysbox(probe))
-        report.results.append(check_rent_ports(probe, rent_ports, ssh_port, report, workload_ports))
+        if dev_box:
+            report.results.append(CheckResult(SYSBOX_CHECK, None, 'skipped (dev box: pods run under runc)'))
+        else:
+            report.results.append(check_sysbox(probe))
+        minimum = RENT_PORTS_MIN_DEV if dev_box else RENT_PORTS_MIN
+        report.results.append(check_rent_ports(probe, rent_ports, ssh_port, report, workload_ports, minimum))
     if no_chain:
         report.results.append(CheckResult('Public IP', None, 'skipped (--no-chain: nothing published)'))
     else:

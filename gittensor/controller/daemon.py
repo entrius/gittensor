@@ -66,6 +66,7 @@ from gittensor.controller.pay.scorecard import build_scorecard, write_scorecard
 from gittensor.controller.publish import Publisher, build_fleet
 from gittensor.controller.reconcile import InstanceStore, Reconciler, ReconcileReport
 from gittensor.controller.registry import DeploymentStore, Registry
+from gittensor.controller.rental_seam import RentalPoller, SeamClient
 from gittensor.controller.rentals import RentalReconciler, RentalReport, RentalStore
 from gittensor.controller.runspec import BIND_PRIVATE, BoxHttp, HttpClient, PullToken
 from gittensor.controller.ssh import write_host_key
@@ -154,7 +155,11 @@ class Controller:
         wall: Callable[[], float] = time.time,
         network: str | None = None,
         netuid: int | None = None,
+        rental_seam: SeamClient | None = None,
+        rental_options: dict[str, Any] | None = None,
     ):
+        """``rental_seam``: the app's order seam (None: orders by CLI only). ``rental_options``: ``RentalReconciler``'s
+        dev overrides (``runtime``, ``firewall``, ``min_standing``)."""
         self.state = state
         self.registry = registry
         self.network, self.netuid = network, netuid
@@ -222,7 +227,9 @@ class Controller:
             sleep=sleep,
             pull_token=pull_token,
             background=True,
+            **(rental_options or {}),
         )
+        self.poller = RentalPoller(self.rentals, rental_seam, wall) if rental_seam is not None else None
         self.watch = Watch(
             self.boxes,
             self.instances,
@@ -373,19 +380,25 @@ class Controller:
     def rentals_once(self) -> RentalReport:
         """The rental reconciler's pass (orders placed by the poller or the CLI beside us are read from disk first)."""
         with self.write_lock:
-            self.rentals.reload()  # orders the poller or the CLI wrote beside us
+            self.rentals.reload()  # orders the CLI wrote beside us
+            orders = asdict(self.poller.take_orders()) if self.poller else None  # and the app's, through the seam
         report = self.rental_reconciler.run_pass()
+        with self.write_lock:
+            sent = asdict(self.poller.send_reports()) if self.poller else None
         self._set_status(
             'rentals',
             {
                 'at': time.time(),
-                'ok': report.ok,
+                'ok': report.ok and not (orders or {}).get('errors') and not (sent or {}).get('errors'),
                 'open': report.open,
                 'actions': [asdict(a) for a in report.actions],
                 'errors': report.errors,
                 'launched': report.launched,
+                'seam': {'orders': orders, 'reports': sent} if self.poller else None,
             },
         )
+        for error in [*(orders or {}).get('errors', []), *(sent or {}).get('errors', [])]:
+            self.reporter.note('rentals', f'seam: {error}')
         for action in report.actions:
             if action.kind != 'prepull':
                 self.reporter.note(
@@ -482,6 +495,7 @@ class Controller:
                 self.network,
                 self.netuid,
                 rentals=rentals,
+                rentable_min_standing=self.rental_reconciler.min_standing,
             )
             self.publisher.write(doc)
         except Exception as e:

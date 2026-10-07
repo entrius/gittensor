@@ -213,6 +213,11 @@ from gittensor.cli.miner_commands import register_miner_commands  # noqa: E402
 
 register_miner_commands(cli)
 
+# Register rent commands (the customer's side of the rental product)
+from gittensor.cli.rent_commands import register_rent_commands  # noqa: E402
+
+register_rent_commands(cli)
+
 # Register compute agent commands (gitt up / gitt down)
 from gittensor.cli.up_commands import register_up_commands  # noqa: E402
 

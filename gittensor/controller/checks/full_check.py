@@ -15,6 +15,7 @@ from typing import Collection, Iterable, List, Mapping, Optional, Sequence, Tupl
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.checks import GPU_PROOF, check_gpu_proof, identity_checks
 from gittensor.controller.checks.nvml_allowlist import NvmlAllowlist
+from gittensor.controller.checks.rent_probe import RentProbe
 from gittensor.controller.checks.runner import HostRunner
 from gittensor.controller.checks.scrape import HostScrape, scrape_host
 from gittensor.controller.checks.verdict import CheckResult, CheckVerdict
@@ -114,6 +115,19 @@ def proof_skipped(checks: Sequence[CheckResult]) -> CheckResult:
     return CheckResult(GPU_PROOF, False, {'reason': f'skipped: {", ".join(failed)} failed'}, True)
 
 
-def finish_verdict(checks: List[CheckResult], scrape: HostScrape, now: Optional[float] = None) -> CheckVerdict:
+def finish_verdict(
+    checks: List[CheckResult], scrape: HostScrape, now: Optional[float] = None, rent_probe: Optional[RentProbe] = None
+) -> CheckVerdict:
+    """``rent_probe`` is the rent-range probe's outcome for a box whose agent offered a range (``cli.probe_rent_range``:
+    it needs the box's public address, so ``run_full_check`` does not run it): a range it could not reach is dropped
+    from the verdict and the box is admitted idle-only."""
     card_name = scrape.gpus[0].name if scrape.gpus else ''
-    return CheckVerdict.from_checks(checks, scrape.uuids, card_name, scrape.driver, now, rent_ports=scrape.rent_ports)
+    return CheckVerdict.from_checks(
+        checks,
+        scrape.uuids,
+        card_name,
+        scrape.driver,
+        now,
+        rent_ports=scrape.rent_ports,
+        rent_probe=rent_probe.as_dict() if rent_probe is not None else None,
+    )

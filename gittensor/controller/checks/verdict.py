@@ -5,7 +5,7 @@
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 ADMIT = 'ADMIT'
 BENCH = 'BENCH'
@@ -42,7 +42,11 @@ class CheckVerdict:
     card_name: str = ''
     driver: str = ''
     checked_at: float = field(default_factory=time.time)
-    rent_ports: List[int] = field(default_factory=list)  # the agent's rent range (vault 29 §5); [] = not for rent
+    # The agent's rent range (vault 29 §5) when the controller could reach it; [] = not for rent, which is also what a
+    # range the probe could not reach becomes. ``rent_probe``: the probe's outcome (``rent_probe.RentProbe.as_dict``),
+    # None when the agent offered no range to probe or the caller could not probe (``run_full_check`` has no address).
+    rent_ports: List[int] = field(default_factory=list)
+    rent_probe: Optional[dict] = None
 
     @property
     def admitted(self) -> bool:
@@ -74,6 +78,7 @@ class CheckVerdict:
             'driver': self.driver,
             'checked_at': self.checked_at,
             'rent_ports': self.rent_ports,
+            'rent_probe': self.rent_probe,
             'checks': [c.as_dict() for c in self.checks],
         }
 
@@ -86,8 +91,10 @@ class CheckVerdict:
         driver: str = '',
         now=None,
         rent_ports: Sequence[int] = (),
+        rent_probe: Optional[Mapping[str, Any]] = None,
     ) -> 'CheckVerdict':
         clean = all(c.passed and not c.skipped for c in checks)
+        reachable = rent_probe is None or bool(rent_probe.get('ok'))  # a range the probe could not reach is no range
         # A named failure is a BENCH whatever else could not run; NOT_RUN is only "nothing failed, something never ran".
         only_not_run = any(c.not_run for c in checks) and all(c.passed or c.not_run for c in checks)
         return cls(
@@ -97,5 +104,6 @@ class CheckVerdict:
             card_name,
             driver,
             now if now is not None else time.time(),
-            list(rent_ports),
+            list(rent_ports) if reachable else [],
+            dict(rent_probe) if rent_probe is not None else None,
         )

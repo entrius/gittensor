@@ -20,6 +20,8 @@ from click.testing import CliRunner
 from gittensor.cli.main import cli
 from gittensor.controller import cli as ctl
 from gittensor.controller.checks import checks as ck
+from gittensor.controller.checks import why
+from gittensor.controller.checks.rent_probe import listener_run_command
 from gittensor.controller.checks.runner import FakeRunner, regex
 from gittensor.controller.checks.state import ADMIT, BENCHED, IDLE, BoxState, StateStore, release_from_bench
 from gittensor.controller.proof.slot import ProbeResult, UnconfiguredProof
@@ -656,3 +658,62 @@ def test_fleet_uuid_unique_judge():
     assert ok.passed and ok.evidence['boxes_compared'] == 1
     dup = ck.check_fleet_uuid_unique('a', ['GPU-1', 'GPU-3'], {'b': ['GPU-3'], 'c': []})
     assert not dup.passed and dup.evidence['clashes'] == {'b': ['GPU-3']}
+
+
+def rent_box_runner(**kw):
+    """A --rent box: the agent's rent label, and the throwaway listener the probe starts and removes (29 §5)."""
+    return (
+        box_runner(**kw)
+        .on(regex(r'docker run --rm -d --name gt-rent-probe-'), 'c' * 64 + '\n')
+        .on(regex(r"^docker inspect --format '\{\{.State.Running\}\}' gt-rent-probe-"), 'true\n')
+        .on(regex(r'^docker rm -f gt-rent-probe-\d+$'), '')
+    )
+
+
+def test_a_rent_box_whose_range_the_controller_cannot_reach_is_admitted_idle_only(state, monkeypatch):
+    """29 §5: the round starts a listener on the top port of a --rent box's range and dials it at the box's public
+    address (the mapped port on a dev box). A range it cannot reach is dropped: the box is admitted idle-only with
+    the reason on it, no failed check, no strike, no standing event. A reachable range is kept."""
+    monkeypatch.setattr('gittensor.controller.checks.config.RENT_PROBE_TIMEOUT_S', 0.0)  # one dial, no wait
+    admit(state, HK_A, '10.0.0.1')
+    admit(state, HK_B, '10.0.0.2', key=KEY_2, extra=('--port-map', '31003=45003'))
+    smi_b = fixture('nvidia_smi_5090.csv').replace(UUID_5090, UUID_5090_B)
+    by_box = {
+        HK_A: rent_box_runner(rent_ports='31000-31099\n'),
+        HK_B: rent_box_runner(rent_ports='31000-31003\n', nvidia_smi=smi_b),
+    }
+    dialled = {}
+
+    def dial(host, port):
+        dialled[host] = port
+        return host == '10.0.0.2'
+
+    with runners(by_box), patch('gittensor.controller.checks.rent_probe.ssh_banner', dial):
+        result = invoke(*round_args(state))
+    assert result.exit_code == 0, result.output
+    assert dialled == {'10.0.0.1': 31099, '10.0.0.2': 45003}  # the top of each range, B's as its host remaps it
+    a, b = store(state).boxes[HK_A], store(state).boxes[HK_B]
+    assert a.status == IDLE and a.rent_ports == [] and not box_rentable(a, min_level=PROBATION)
+    assert a.rent_probe['code'] == why.RENT_PORT_UNREACHABLE and str(a.rent_probe['reason']).startswith('10.0.0.1:31099 unreachable')  # fmt: skip
+    assert a.last_failed == [] and a.not_run_count == 0  # the miner's configuration, not fraud: no strike, no bench
+    assert [e['kind'] for e in a.standing_events] == [e['kind'] for e in b.standing_events]  # and no event
+    assert b.status == IDLE and b.rent_ports == [31000, 31003] and b.rent_probe['ok']
+    assert box_rentable(b, min_level=PROBATION)
+    run = next(c for c in by_box[HK_A].calls if 'docker run --rm -d' in c)
+    assert run == listener_run_command(AGENT_IMAGE_ID, 31099) and 'docker rm -f gt-rent-probe-31099' in by_box[HK_A].calls  # fmt: skip
+    assert 'idle-only: rent ports closed' in result.output and '10.0.0.1:31099' in result.output
+
+    shown = json.loads(invoke('status', '--state-dir', state, '--json').stdout)
+    rows = {r['hotkey']: r for r in shown['boxes']}
+    assert rows[HK_A]['rent_ports'] == [] and rows[HK_A]['rent_probe']['code'] == why.RENT_PORT_UNREACHABLE
+    assert rows[HK_A]['rentable'] is False and rows[HK_B]['rent_ports'] == [31000, 31003]
+    assert rows[HK_B]['rentable'] is box_rentable(b)  # at the daemon's default gate, whatever it is
+    text = invoke('status', '--state-dir', state).output
+    assert 'idle-only: rent ports closed' in text and '10.0.0.1:31099' in text
+
+    # the miner opens the firewall: the next check (here the one-shot) puts the range back
+    with runners(by_box), patch('gittensor.controller.checks.rent_probe.ssh_banner', lambda h, p: True):
+        assert check(state, '--proof', FAKE_PROOF, '--agent-image-digest', AGENT_DIGEST).exit_code == 0
+    a = store(state).boxes[HK_A]
+    assert a.rent_ports == [31000, 31099] and a.rent_probe['ok'] and box_rentable(a, min_level=PROBATION)
+    assert 'rent ports closed' not in invoke('status', '--state-dir', state).output

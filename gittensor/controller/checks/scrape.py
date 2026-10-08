@@ -15,8 +15,10 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from gittensor.agent.config import DRAIN_MARKER, RENT_PORTS_LABEL, parse_rent_ports
 from gittensor.controller.checks import config as cfg
+from gittensor.controller.checks.amd_scrape import AMD_SYSFS_COMMAND, AmdCard, AmdStack, parse_amd_sysfs
+from gittensor.controller.checks.catalog import spec_for_pci_id
 from gittensor.controller.checks.runner import HostRunner
-from gittensor.controller.checks.vendor import NVIDIA, VENDOR_DETECT_COMMAND, parse_vendor, vendor_or_default
+from gittensor.controller.checks.vendor import AMD, NVIDIA, VENDOR_DETECT_COMMAND, parse_vendor, vendor_or_default
 
 NVIDIA_SMI_FIELDS = (
     'uuid',
@@ -95,9 +97,25 @@ DEVICE_HOLDERS_COMMAND = (
     r"""printf '== %s %s\n' "$p" "$(cat "$H/$p/comm" 2>/dev/null)"; cat "$H/$p/cgroup" 2>/dev/null || echo MISSING; """
     r'done; exit 0'
 )
+# The same scan on an AMD box: the compute interface and the render nodes (30 §1 #5). A process holding only a
+# `card*` primary node (a display server's modesetting handle) is not a GPU holder here; the compute path is KFD.
+AMD_DEVICE_HOLDERS_COMMAND = DEVICE_HOLDERS_COMMAND.replace(
+    "-lname '/dev/nvidia*'", "\\( -lname /dev/kfd -o -lname '/dev/dri/renderD*' \\)"
+)
 CONTAINER_ID = re.compile(r'[0-9a-f]{64}')
 _HOLDER_FD = re.compile(r'/proc/(\d+)/fd (/dev/\S+)$')
 _GPU_DEVICE = re.compile(r'^/dev/nvidia(\d+|ctl|-uvm)$')  # the nodes a CUDA or `--gpus` process holds
+AMD_GPU_DEVICE = re.compile(r'^/dev/(kfd|dri/renderD\d+)$')  # the nodes a HIP process or an AMD pod holds
+
+
+def device_holders_command(vendor: str = NVIDIA) -> str:
+    return AMD_DEVICE_HOLDERS_COMMAND if vendor == AMD else DEVICE_HOLDERS_COMMAND
+
+
+def gpu_device_pattern(vendor: str = NVIDIA) -> 're.Pattern[str]':
+    return AMD_GPU_DEVICE if vendor == AMD else _GPU_DEVICE
+
+
 PERSISTENCED_COMM = 'nvidia-persiste'  # /proc/<pid>/comm stops at 15 bytes: nvidia-persistenced
 
 
@@ -225,8 +243,9 @@ class DeviceHolder:
     containers: set[str] | None = field(default_factory=set)  # IDs in its cgroup paths; None: exited mid-scan
 
 
-def parse_device_holders(stdout: str) -> dict[int, DeviceHolder]:
-    """``DEVICE_HOLDERS_COMMAND``'s output: the fd lines (only the GPU nodes we judge), then a block per holder."""
+def parse_device_holders(stdout: str, device: 're.Pattern[str]' = _GPU_DEVICE) -> dict[int, DeviceHolder]:
+    """``DEVICE_HOLDERS_COMMAND``'s output: the fd lines (only the GPU nodes we judge, ``device``: NVIDIA's by
+    default, ``AMD_GPU_DEVICE`` on an AMD box), then a block per holder."""
     holders: dict[int, DeviceHolder] = {}
     current: DeviceHolder | None = None
     in_blocks = False
@@ -240,7 +259,7 @@ def parse_device_holders(stdout: str) -> dict[int, DeviceHolder]:
                 current.comm, current.read, current.containers = comm.strip(), True, set()
         elif not in_blocks:
             m = _HOLDER_FD.search(line)
-            if m and _GPU_DEVICE.match(m.group(2)):
+            if m and device.match(m.group(2)):
                 holder = holders.setdefault(int(m.group(1)), DeviceHolder(int(m.group(1))))
                 if m.group(2) not in holder.devices:
                     holder.devices.append(m.group(2))
@@ -267,6 +286,9 @@ class HostScrape:
     network: Dict[str, Tuple[int, float]] = field(default_factory=dict)
     device_holders: str = ''  # DEVICE_HOLDERS_COMMAND's raw stdout; ``checks.check_card_free`` parses and judges it
     errors: Dict[str, str] = field(default_factory=dict)  # scrape step -> what went wrong (fails that check)
+    # The AMD avenue (30 §3): the cards as sysfs shows them (``gpus`` is built from these) and the stack record.
+    amd_cards: List[AmdCard] = field(default_factory=list)
+    amd_stack: Optional[AmdStack] = None
 
     @property
     def vendor(self) -> str:
@@ -295,20 +317,8 @@ def _run(runner: HostRunner, scrape: HostScrape, step: str, command: str, timeou
     return result.stdout
 
 
-def scrape_host(
-    runner: HostRunner,
-    agent_container: str = cfg.AGENT_CONTAINER_NAME,
-    disk_path: str = cfg.DISK_PATH,
-    network_targets: Sequence[str] = cfg.NETWORK_TARGETS,
-    timeout: float = cfg.SSH_COMMAND_TIMEOUT_S,
-) -> HostScrape:
-    """Every identity and resource fact the sub-checks judge, in one pass. A step that fails records its error and
-    leaves its field empty; the judge for that field then fails closed."""
-    scrape = HostScrape()
-    out = _run(runner, scrape, 'vendor', VENDOR_DETECT_COMMAND, timeout)
-    if out is not None:
-        scrape.vendor_detected = parse_vendor(out)
-    # The NVIDIA scrape, unchanged: the AMD avenue (30 §3, ``amd_scrape``) branches here once it exists.
+def _scrape_nvidia(runner: HostRunner, scrape: HostScrape, timeout: float) -> None:
+    """The NVIDIA identity steps, as they have always run."""
     out = _run(runner, scrape, 'nvidia_smi', nvidia_smi_command(), cfg.NVIDIA_SMI_TIMEOUT_S)
     if out is not None:
         try:
@@ -322,6 +332,59 @@ def scrape_host(
     out = _run(runner, scrape, 'kernel_driver', KERNEL_DRIVER_COMMAND, timeout)
     if out is not None:
         scrape.kernel_driver = parse_kernel_driver(out)
+
+
+def _scrape_amd(runner: HostRunner, scrape: HostScrape, timeout: float) -> None:
+    """The AMD sibling (30 §3): one sysfs pass gives the cards, their render nodes and the stack; nothing on this
+    path opens ``/dev/kfd``. Each card becomes a ``GpuInfo`` the vendor-neutral checks (uuid pin, fleet uniqueness,
+    power) read as they read an NVIDIA card's; ``check_amd_spec`` judges the AMD-only fields."""
+    out = _run(runner, scrape, 'amd_sysfs', AMD_SYSFS_COMMAND, timeout)
+    if out is None:
+        return
+    scrape.amd_cards, scrape.amd_stack = parse_amd_sysfs(out)
+    scrape.gpus = [amd_gpu_info(c, scrape.amd_stack) for c in scrape.amd_cards]
+
+
+def amd_gpu_info(card: AmdCard, stack: AmdStack) -> GpuInfo:
+    """An AMD card in the shape every vendor-neutral check reads. The name is the catalog's display name for the
+    card's PCI id (an AMD card is matched on ids, never on a marketing string; sysfs's ``product_name`` is recorded
+    only), the driver is the kernel release (the in-tree driver has no version of its own), the compute capability
+    is the gfx target, the power fields are hwmon's cap in watts."""
+    spec = spec_for_pci_id(card.device_id)
+    name = spec.name if spec is not None else (card.product_name or f'AMD {card.device_id or "?"}')
+    return GpuInfo(
+        uuid=card.uuid,
+        name=name,
+        driver=stack.kernel,
+        memory_total_mib=card.memory_total_mib,
+        power_limit_w=card.power_cap_w,
+        power_default_limit_w=card.power_cap_default_w,
+        power_max_limit_w=card.power_cap_max_w,
+        pci_bus_id=card.pci,
+        compute_cap=card.gfx_target,
+        vendor=AMD,
+        render_node=card.render_node,
+    )
+
+
+def scrape_host(
+    runner: HostRunner,
+    agent_container: str = cfg.AGENT_CONTAINER_NAME,
+    disk_path: str = cfg.DISK_PATH,
+    network_targets: Sequence[str] = cfg.NETWORK_TARGETS,
+    timeout: float = cfg.SSH_COMMAND_TIMEOUT_S,
+) -> HostScrape:
+    """Every identity and resource fact the sub-checks judge, in one pass. A step that fails records its error and
+    leaves its field empty; the judge for that field then fails closed."""
+    scrape = HostScrape()
+    out = _run(runner, scrape, 'vendor', VENDOR_DETECT_COMMAND, timeout)
+    if out is not None:
+        scrape.vendor_detected = parse_vendor(out)
+    # The vendor switch (30 §3): the NVIDIA steps unchanged, the AMD sibling beside them.
+    if scrape.vendor == AMD:
+        _scrape_amd(runner, scrape, timeout)
+    else:
+        _scrape_nvidia(runner, scrape, timeout)
     out = _run(runner, scrape, 'agent_image', agent_image_command(agent_container), timeout)
     if out is not None:
         scrape.agent_image_digests = parse_repo_digests(out)
@@ -334,7 +397,7 @@ def scrape_host(
     out = _run(runner, scrape, 'disk_free', disk_free_command(disk_path), timeout)
     if out is not None:
         scrape.disk_free_gb = parse_df_available_gb(out)
-    out = _run(runner, scrape, 'device_holders', DEVICE_HOLDERS_COMMAND, timeout)
+    out = _run(runner, scrape, 'device_holders', device_holders_command(scrape.vendor), timeout)
     if out is not None:
         scrape.device_holders = out
     for url in network_targets:

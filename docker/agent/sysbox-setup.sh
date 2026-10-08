@@ -21,6 +21,11 @@ SYSBOX_SHA256="9d6d5484f980d0a17f86c492c1262015c2afb66280bdb97215b79fde6a0261c5"
 KERNEL_MIN_MAJOR=5
 KERNEL_MIN_MINOR=19
 VERIFY_IMAGE="${GT_SYSBOX_VERIFY_IMAGE:-nvidia/cuda:12.8.0-base-ubuntu24.04}"
+# An AMD box (vault 30 §1 #5): no container toolkit, the cards are device nodes. The verify pod gets /dev/kfd and the
+# render nodes, as a customer pod does. Pin the tag once the MI300X run (31 step 1) has used it.
+VERIFY_IMAGE_AMD="${GT_SYSBOX_VERIFY_IMAGE_AMD:-rocm/rocm-terminal:6.4}"
+VENDOR=nvidia
+[ -d /sys/module/amdgpu ] && [ ! -d /sys/module/nvidia ] && VENDOR=amd
 CHECK_ONLY=false
 [ "${1:-}" = "--check" ] && CHECK_ONLY=true
 
@@ -46,12 +51,17 @@ ok "kernel $kernel"
 docker ps >/dev/null 2>&1 || die "Docker is not running (systemctl enable --now docker)."
 server="$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
 ok "Docker ${server:-?}"
-if ! docker info --format '{{json .Runtimes}}' | grep -q '"nvidia"' && ! command -v nvidia-container-runtime >/dev/null; then
-    die "the NVIDIA container toolkit is not installed (nvidia-container-runtime missing): install it first, then re-run."
+if [ "$VENDOR" = amd ]; then
+    [ -e /dev/kfd ] || die "/dev/kfd is missing: the amdgpu driver is loaded but KFD is not up (reboot, or check dmesg for amdgpu)."
+    ok "AMD driver loaded (amdgpu; cards attach as device nodes, no container toolkit needed)"
+else
+    if ! docker info --format '{{json .Runtimes}}' | grep -q '"nvidia"' && ! command -v nvidia-container-runtime >/dev/null; then
+        die "the NVIDIA container toolkit is not installed (nvidia-container-runtime missing): install it first, then re-run."
+    fi
+    ok "NVIDIA container toolkit"
+    nvidia-smi -L >/dev/null 2>&1 || die "nvidia-smi does not answer: the NVIDIA driver is not loaded."
+    ok "NVIDIA driver loaded"
 fi
-ok "NVIDIA container toolkit"
-nvidia-smi -L >/dev/null 2>&1 || die "nvidia-smi does not answer: the NVIDIA driver is not loaded."
-ok "NVIDIA driver loaded"
 
 if docker info --format '{{json .Runtimes}}' | grep -q '"sysbox-runc"'; then
     ok "sysbox-runc is already registered with Docker"
@@ -114,10 +124,18 @@ docker ps >/dev/null 2>&1 || die "Docker did not come back after the restart: jo
 ok "Docker restarted"
 
 # ── verify: a GPU pod under sysbox-runc ─────────────────────────────────────────────────────────────────────────────
-if docker run --rm --runtime=sysbox-runc --gpus all "$VERIFY_IMAGE" nvidia-smi -L >/dev/null 2>&1; then
+if [ "$VENDOR" = amd ]; then
+    nodes=""
+    for n in /dev/dri/renderD*; do [ -e "$n" ] && nodes="$nodes --device $n"; done
+    # shellcheck disable=SC2086  # $nodes is a list of --device flags built from the box's own /dev/dri
+    verify="docker run --rm --runtime=sysbox-runc --device /dev/kfd $nodes --group-add video --group-add render $VERIFY_IMAGE_AMD rocminfo"
+else
+    verify="docker run --rm --runtime=sysbox-runc --gpus all $VERIFY_IMAGE nvidia-smi -L"
+fi
+if $verify >/dev/null 2>&1; then
     ok "a GPU pod starts under sysbox-runc"
     echo
     echo "Done. Start the box with:  gitt up --rent   (open the rent ports on your firewall; default 31000-31099)"
 else
-    die "a pod did not start under sysbox-runc with the GPUs. Check: docker run --rm --runtime=sysbox-runc --gpus all $VERIFY_IMAGE nvidia-smi"
+    die "a pod did not start under sysbox-runc with the GPUs. Check: $verify"
 fi

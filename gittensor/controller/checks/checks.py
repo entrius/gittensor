@@ -20,16 +20,18 @@ from typing import Callable, Collection, Dict, Iterable, List, Mapping, Optional
 
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks import why as w
-from gittensor.controller.checks.catalog import spec_for_name
+from gittensor.controller.checks.amd_scrape import AmdCard, AmdStack, version_tuple
+from gittensor.controller.checks.catalog import spec_for_name, spec_for_pci_id
 from gittensor.controller.checks.runner import HostRunner
 from gittensor.controller.checks.scrape import (
     PERSISTENCED_COMM,
     DeviceHolder,
     GpuInfo,
     HostScrape,
+    gpu_device_pattern,
     parse_device_holders,
 )
-from gittensor.controller.checks.vendor import BOTH, vendor_or_default
+from gittensor.controller.checks.vendor import AMD, BOTH, NVIDIA, vendor_or_default
 from gittensor.controller.checks.verdict import CheckResult
 from gittensor.controller.proof.slot import GpuProof, ProbeResult, clip, probe_box
 
@@ -38,6 +40,7 @@ GPU_SPEC = 'gpu_spec'
 GPU_UUID_PIN = 'gpu_uuid_pin'
 FLEET_UUID_UNIQUE = 'fleet_uuid_unique'
 NVML_DIGEST = 'nvml_digest'
+AMD_STACK = 'amd_stack'
 POWER_LIMIT = 'power_limit'
 AGENT_IMAGE = 'agent_image'
 DISK_FREE = 'disk_free'
@@ -46,6 +49,7 @@ CARD_FREE = 'card_free'
 GPU_PROOF = 'gpu_proof'
 
 _UUID = re.compile(r'^GPU-[0-9a-fA-F-]{20,}$')
+_SPEC_CODES = (w.SPEC_MODEL, w.SPEC_COMPUTE_CAP, w.SPEC_VRAM, w.SPEC_BAD_UUID, w.SPEC_ID_MISSING, w.SPEC_PARTITIONED)
 
 
 def check_vendor(detected: str) -> CheckResult:
@@ -128,6 +132,135 @@ def check_gpu_spec(gpus: Sequence[GpuInfo], spec: Optional[cfg.CardSpec] = None,
     return CheckResult(
         GPU_SPEC, True, {'count': len(gpus), 'model': gpus[0].name.strip(), 'gpu_type': spec.gpu_type, 'gpus': cards}
     )
+
+
+def check_amd_spec(scrape: HostScrape, spec: Optional[cfg.CardSpec] = None) -> CheckResult:
+    """The AMD sibling of ``check_gpu_spec`` (30 §3, §4): the type is the catalog row whose PCI ids list the first
+    card's device id (never a marketing name), and every card is then held to our numbers for it: the same device id,
+    the gfx target KFD reports, VRAM in the window, a usable serial (``AMD-<16 hex>``, non-zero, the one KFD agrees
+    with) and a whole card (SPX / NPS1 on an MI300-class part; a card with no partition modes is whole). The display
+    name is recorded, not matched. A listed-not-qualified type is refused, as on NVIDIA."""
+    gpus = scrape.gpus
+    cards = [g.as_dict() for g in gpus]
+    error = scrape.errors.get('amd_sysfs', '')
+    if error:
+        return CheckResult(
+            GPU_SPEC,
+            False,
+            {'reason': f'amd sysfs: {error}', 'gpus': cards, w.PUBLIC: {'code': w.SPEC_SYSFS_UNREADABLE}},
+        )
+    amd = scrape.amd_cards
+    if spec is None and amd:
+        spec = spec_for_pci_id(amd[0].device_id)
+        if spec is None or not spec.qualified:
+            why = 'is not in the GPU catalog' if spec is None else f'({spec.gpu_type}) is listed but not qualified yet'
+            claimed = f'{amd[0].device_id} ({amd[0].product_name or "?"})'
+            return CheckResult(
+                GPU_SPEC,
+                False,
+                {'reason': f'model {claimed} {why}', 'gpus': cards, w.PUBLIC: {'code': w.SPEC_MODEL, 'n': len(amd)}},
+            )
+    if spec is None or spec.vendor != AMD:
+        counts = cfg.RTX_5090.counts if spec is None else spec.counts
+        if amd and len(amd) in counts and spec is not None:
+            reason = f'{spec.gpu_type} is not an AMD type'
+        else:
+            reason = (
+                f'{len(amd)} AMD cards: a box is {", ".join(map(str, counts))} cards' if amd else 'no AMD card in sysfs'
+            )
+        return CheckResult(
+            GPU_SPEC, False, {'reason': reason, 'gpus': cards, w.PUBLIC: {'code': w.SPEC_CARD_COUNT, 'n': len(amd)}}
+        )
+    if len(amd) not in spec.counts:
+        sizes = ', '.join(map(str, spec.counts))
+        return CheckResult(
+            GPU_SPEC,
+            False,
+            {
+                'reason': f'{len(amd)} GPUs: a {spec.gpu_type} box is {sizes} cards',
+                'gpus': cards,
+                w.PUBLIC: {'code': w.SPEC_CARD_COUNT, 'n': len(amd)},
+            },
+        )
+    offending: List[str] = []
+    wrong: Dict[str, int] = {}
+
+    def flag(code: str, text: str) -> None:
+        offending.append(text)
+        wrong[code] = wrong.get(code, 0) + 1
+
+    for c in amd:
+        if c.device_id not in spec.pci_ids:
+            flag(w.SPEC_MODEL, f'{c.uuid}: device {c.device_id!r} is not a {spec.gpu_type} ({", ".join(spec.pci_ids)})')
+        if c.gfx_target != spec.gfx_target:
+            flag(w.SPEC_COMPUTE_CAP, f'{c.uuid}: gfx target {c.gfx_target!r} != {spec.gfx_target!r}')
+        mib = c.memory_total_mib
+        if mib is None or not spec.vram_total_mib_min <= mib <= spec.vram_total_mib_max:
+            flag(w.SPEC_VRAM, f'{c.uuid}: VRAM {mib} MiB outside {spec.vram_total_mib_min}-{spec.vram_total_mib_max}')
+        if not c.id_ok:
+            kfd = f', KFD says {c.kfd_unique_id!r}' if c.kfd_unique_id and c.kfd_unique_id != c.unique_id else ''
+            flag(w.SPEC_ID_MISSING, f'{c.render_node}: no usable serial ({c.unique_id!r}{kfd})')
+        if not c.whole:
+            flag(w.SPEC_PARTITIONED, f'{c.uuid}: partitioned {c.partition}, the pool admits SPX/NPS1 only')
+    if offending:
+        code = next(code for code in _SPEC_CODES if code in wrong)
+        return CheckResult(
+            GPU_SPEC,
+            False,
+            {'reason': '; '.join(offending)[:500], 'gpus': cards, w.PUBLIC: {'code': code, 'n': wrong[code]}},
+        )
+    return CheckResult(
+        GPU_SPEC,
+        True,
+        {
+            'count': len(amd),
+            'model': spec.name,
+            'gpu_type': spec.gpu_type,
+            'gfx_target': spec.gfx_target,
+            'gpus': cards,
+            'partition': {c.uuid: c.partition for c in amd},
+            'product_names': sorted({c.product_name for c in amd if c.product_name}),
+        },
+    )
+
+
+def check_amd_stack(
+    stack: Optional[AmdStack],
+    cards: Sequence[AmdCard],
+    scrape_error: str = '',
+    kernel_min: Tuple[int, int] = cfg.AMD_KERNEL_MIN,
+    dkms_min: Tuple[int, int] = cfg.AMD_DKMS_MIN,
+) -> CheckResult:
+    """The AMD sibling of the NVML allowlist (30 §14 #2): the stack is recorded (kernel release, the DKMS amdgpu
+    version when there is one, the VBIOS per card) for the support and offer pages, and the only failure is the
+    version floor. There is no allowlist: the driver is the kernel's, and an allowlist of kernel releases would fail
+    closed on every distro update for nothing the proof does not already cover."""
+    record = {**(stack.as_dict() if stack else {}), 'vbios': {c.uuid: c.vbios for c in cards}}
+    evidence: Dict[str, object] = {'record': record, 'kernel_min': list(kernel_min), 'dkms_min': list(dkms_min)}
+    if scrape_error or stack is None or not stack.kernel:
+        return CheckResult(
+            AMD_STACK,
+            False,
+            {
+                **evidence,
+                'reason': scrape_error or 'no kernel release in the scrape',
+                w.PUBLIC: {'code': w.STACK_UNREADABLE},
+            },  # fmt: skip
+        )
+    kernel_ok = version_tuple(stack.kernel) >= kernel_min
+    dkms_ok = bool(stack.amdgpu) and version_tuple(stack.amdgpu) >= dkms_min
+    if not kernel_ok and not dkms_ok:
+        return CheckResult(
+            AMD_STACK,
+            False,
+            {
+                **evidence,
+                # the versions are the box's and stay in the log; the floor is ours
+                'reason': f'kernel {stack.kernel} below {kernel_min[0]}.{kernel_min[1]} and no DKMS amdgpu at or above {dkms_min[0]}.{dkms_min[1]}',  # noqa: E501
+                w.PUBLIC: {'code': w.STACK_BELOW_FLOOR},
+            },
+        )
+    return CheckResult(AMD_STACK, True, {**evidence, 'passed_on': 'kernel' if kernel_ok else 'dkms'})
 
 
 def check_uuid_pin(gpus: Sequence[GpuInfo], pinned_uuids: Optional[Sequence[str]]) -> CheckResult:
@@ -359,7 +492,7 @@ def foreign_holders(
     return foreign, exited, buckets
 
 
-def check_card_free(holders: str, ours: Collection[str], scrape_error: str = '') -> CheckResult:
+def check_card_free(holders: str, ours: Collection[str], scrape_error: str = '', vendor: str = NVIDIA) -> CheckResult:
     """Exclusivity, judged in the round instead of only while a workload is leased: nothing outside our own instances
     may hold an NVIDIA device node. ``holders`` is ``scrape.device_holders`` (``DEVICE_HOLDERS_COMMAND``'s raw
     stdout), ``ours`` the container IDs of our instances on the box (empty on a fully idle box).
@@ -369,7 +502,7 @@ def check_card_free(holders: str, ours: Collection[str], scrape_error: str = '')
     pay, and was caught only when a rotation happened to place work on it — and rotation prefers higher standing, so
     spare capacity tested a known-bad card *less* often. A foreign holder benches the box on the ladder like any
     other failed check; a scan that could not run is no answer to judge, so it is a strike, never a bench (9/19)."""
-    parsed = parse_device_holders(holders)
+    parsed = parse_device_holders(holders, gpu_device_pattern(vendor))
     foreign, exited, buckets = foreign_holders(parsed, ours)
     evidence: Dict[str, object] = {
         'ours': sorted(c[:12] for c in ours),
@@ -421,6 +554,9 @@ def check_gpu_proof(
 # of our own phrases (``why.PROOF_RUNTIME_NVIDIA``); no part of the error text is published. This is the failure that
 # cost a miner a 16 h bench and us a log dive on 9/18 — the toolkit on their box, nothing they could see from the page.
 _NVIDIA_RUNTIME_ERRORS = ('nvidia-container-cli', 'prestart hook', 'nvidia-container-runtime')
+# The AMD sibling: no container runtime is involved (30 §1 #5), so what refuses is the device itself: the node is
+# missing or busy after a reset (30 §14 #5), or HSA could not open it.
+_AMD_RUNTIME_ERRORS = ('/dev/kfd', '/dev/dri/renderD', 'hsa_init', 'HSA_STATUS_ERROR')
 
 
 def _proof_public(cards: list) -> dict:
@@ -432,7 +568,12 @@ def _proof_public(cards: list) -> dict:
     never_started = [c for c in failed if c.get('not_run')]
     if never_started:
         text = ' '.join(str(c.get('reason', '')) for c in never_started)
-        code = w.PROOF_RUNTIME_NVIDIA if any(e in text for e in _NVIDIA_RUNTIME_ERRORS) else w.PROOF_CONTAINER
+        if any(e in text for e in _NVIDIA_RUNTIME_ERRORS):
+            code = w.PROOF_RUNTIME_NVIDIA
+        elif any(e in text for e in _AMD_RUNTIME_ERRORS):
+            code = w.PROOF_RUNTIME_AMD
+        else:
+            code = w.PROOF_CONTAINER
         return {'code': code, 'n': len(never_started)}
     wrong = [c for c in failed if c.get('answered_uuid') and c.get('answered_uuid') != c.get('uuid')]
     if wrong:
@@ -480,16 +621,21 @@ def identity_checks(
     """Everything except the GPU proof, from one scrape. ``fleet_uuids`` (``{box_id: uuids}`` of every other box)
     adds the fleet-wide uniqueness check; without it the box is judged alone. ``ours`` (our instances' container IDs
     on this box) is what ``check_card_free`` judges the box's device holders against."""
+    amd = scrape.vendor == AMD  # the vendor switch (30 §3): the spec and the stack have an AMD sibling each
     checks = [
         check_vendor(scrape.vendor_detected),
-        check_gpu_spec(scrape.gpus, spec, scrape.errors.get('nvidia_smi', '')),
+        check_amd_spec(scrape, spec) if amd else check_gpu_spec(scrape.gpus, spec, scrape.errors.get('nvidia_smi', '')),
         check_uuid_pin(scrape.gpus, pinned_uuids),
     ]
     if fleet_uuids is not None:
         checks.append(check_fleet_uuid_unique(box_id, scrape.uuids, fleet_uuids))
+    if amd:
+        stack = check_amd_stack(scrape.amd_stack, scrape.amd_cards, scrape.errors.get('amd_sysfs', ''))
+    else:
+        stack = allowlist.judge(scrape.driver, scrape.nvml_md5, scrape.kernel_driver)
     return [
         *checks,
-        allowlist.judge(scrape.driver, scrape.nvml_md5, scrape.kernel_driver),
+        stack,
         check_power_limit(scrape.gpus, power_min_ratio),
         check_agent_image(
             scrape.agent_image_digests,
@@ -499,6 +645,6 @@ def identity_checks(
             agent_image_ids,
         ),
         check_disk_free(scrape.disk_free_gb, disk_min_free_gb, disk_path),
-        check_card_free(scrape.device_holders, ours, scrape.errors.get('device_holders', '')),
+        check_card_free(scrape.device_holders, ours, scrape.errors.get('device_holders', ''), scrape.vendor),
         check_network(scrape.network, network_targets),
     ]

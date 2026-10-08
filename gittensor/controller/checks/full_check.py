@@ -18,6 +18,7 @@ from gittensor.controller.checks.nvml_allowlist import NvmlAllowlist
 from gittensor.controller.checks.rent_probe import RentProbe
 from gittensor.controller.checks.runner import HostRunner
 from gittensor.controller.checks.scrape import HostScrape, scrape_host
+from gittensor.controller.checks.vendor import AMD
 from gittensor.controller.checks.verdict import CheckResult, CheckVerdict
 from gittensor.controller.proof.slot import GpuProof, UnconfiguredProof, image_ref
 
@@ -35,8 +36,12 @@ class FullCheckConfig:
     disk_path: str = cfg.DISK_PATH
     network_targets: Tuple[str, ...] = tuple(cfg.NETWORK_TARGETS)
     proof_image: str = field(default_factory=image_ref)
+    proof_image_amd: str = field(default_factory=lambda: image_ref(AMD))  # the HIP image (30 §7)
     proof_timeout_s: float = cfg.PROOF_JOB_TIMEOUT_S
     ssh_timeout_s: float = cfg.SSH_COMMAND_TIMEOUT_S
+
+    def proof_image_for(self, vendor: str) -> str:
+        return self.proof_image_amd if vendor == AMD else self.proof_image
 
 
 def run_full_check(
@@ -56,7 +61,8 @@ def run_full_check(
     scrape = scrape_box(runner, config)
     checks = judge_identity(scrape, allowlist, pinned_uuids, config, box_id, fleet_uuids, ours)
     if identity_passed(checks):
-        checks.append(check_gpu_proof(runner, scrape.gpus, proof, config.proof_image, config.proof_timeout_s))
+        image = config.proof_image_for(scrape.vendor)
+        checks.append(check_gpu_proof(runner, scrape.gpus, proof, image, config.proof_timeout_s))
     else:
         checks.append(proof_skipped(checks))
     return finish_verdict(checks, scrape, now)

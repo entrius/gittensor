@@ -1,7 +1,9 @@
 {
-  "_comment": "The GPU types the pool knows. vendor: nvidia (default) or amd; an amd row also carries pci_ids and gfx_target and is judged by those (vault 30). names: every string nvidia-smi prints for the type. vram_mib: the nominal size; a card is accepted inside nominal x [0.90, 1.05] unless vram_mib_min / vram_mib_max give a measured window. counts: the box sizes admitted for the type (a rental takes the whole box); default [1, 2, 4, 8]. status: qualified = admitted; listed = known but not admitted. Only the RTX5090 has been run on a real card. The other six are admitted on Lium's names and sizes (gpu_spec_table.py, 10/5) and on the proof built for their architectures, not yet on a run of our own: confirm each on a real card before the compute share pays. RTXPRO6000 carries a floor of 95000 MiB (both editions report 97887): at the default 0.90 floor the proof's fill floor for it would sit inside an H100's window. RTX3090 and RTX4090 (10/8) are the entry cards an individual owns; listed until one of each is run. They share one 24 GB window (a 3090 reports 24576, a 4090 24564), so the fill cannot tell them apart: the kernel does, the proof's sm_89 code does not load on a 3090 (sm_86), and a 4090 answering a 3090's challenge is a dearer card claiming a cheaper one.",
+  "_comment": "The GPU types the pool knows. vendor: nvidia (default) or amd; an amd row also carries pci_ids and gfx_target and is judged by those (vault 30). names: every string nvidia-smi prints for the type. vram_mib: the nominal size; a card is accepted inside nominal x [0.90, 1.05] unless vram_mib_min / vram_mib_max give a measured window. counts: the box sizes admitted for the type (a rental takes the whole box); default [1, 2, 4, 8]. status: qualified = admitted; listed = known but not admitted. Only the RTX5090 has been run on a real card. The other six are admitted on Lium's names and sizes (gpu_spec_table.py, 10/5) and on the proof built for their architectures, not yet on a run of our own: confirm each on a real card before the compute share pays. RTXPRO6000 carries a floor of 95000 MiB (both editions report 97887): at the default 0.90 floor the proof's fill floor for it would sit inside an H100's window. RTX3090 and RTX4090 (10/8) are the entry cards an individual owns; listed until one of each is run. They share one 24 GB window (a 3090 reports 24576, a 4090 24564), so the fill cannot tell them apart: the kernel does, the proof's sm_89 code does not load on a 3090 (sm_86), and a 4090 answering a 3090's challenge is a dearer card claiming a cheaper one. AMD rows (10/8, vault 30 \u00a74, \u00a78; 31 step 4): matched on vendor + pci_ids (sysfs device id), never on a name; names is the display name; gfx_target is what the KFD topology reports and what the proof binary is built for; compute_cap on an AMD row is the same string. All listed until the first MI300X run (31 step 1) sets the proof's reference; MI350 is one row for the MI350X and the MI355X (same memory, same gfx950). The MI300X and MI325X boxes the market sells are 8x; a 1x is the measurement VM. PCI ids: MI300X 0x74a1, MI325X 0x74a5, MI300A 0x74a0, MI350X/MI355X 0x75a0/0x75a3, R9700 0x7590, from the amdgpu id table (verify each on a real card before it leaves listed). MI350P and MI455X wait for ids.",
   "RTX5090": {
-    "names": ["NVIDIA GeForce RTX 5090"],
+    "names": [
+      "NVIDIA GeForce RTX 5090"
+    ],
     "compute_cap": "12.0",
     "vram_mib": 32768,
     "vram_mib_min": 32000,
@@ -9,52 +11,150 @@
     "status": "qualified"
   },
   "RTXPRO6000": {
-    "names": ["NVIDIA RTX PRO 6000 Blackwell Server Edition", "NVIDIA RTX PRO 6000 Blackwell Workstation Edition"],
+    "names": [
+      "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+      "NVIDIA RTX PRO 6000 Blackwell Workstation Edition"
+    ],
     "compute_cap": "12.0",
     "vram_mib": 98304,
     "vram_mib_min": 95000,
     "status": "qualified"
   },
   "L40S": {
-    "names": ["NVIDIA L40S"],
+    "names": [
+      "NVIDIA L40S"
+    ],
     "compute_cap": "8.9",
     "vram_mib": 49152,
     "status": "qualified"
   },
   "H100": {
-    "names": ["NVIDIA H100 80GB HBM3", "NVIDIA H100 PCIe"],
+    "names": [
+      "NVIDIA H100 80GB HBM3",
+      "NVIDIA H100 PCIe"
+    ],
     "compute_cap": "9.0",
     "vram_mib": 81920,
     "status": "qualified"
   },
   "H200": {
-    "names": ["NVIDIA H200", "NVIDIA H200 NVL"],
+    "names": [
+      "NVIDIA H200",
+      "NVIDIA H200 NVL"
+    ],
     "compute_cap": "9.0",
     "vram_mib": 144384,
     "status": "qualified"
   },
   "B200": {
-    "names": ["NVIDIA B200"],
+    "names": [
+      "NVIDIA B200"
+    ],
     "compute_cap": "10.0",
     "vram_mib": 196608,
     "status": "qualified"
   },
   "B300": {
-    "names": ["NVIDIA B300 SXM6 AC", "NVIDIA B300 SXM6 PC"],
+    "names": [
+      "NVIDIA B300 SXM6 AC",
+      "NVIDIA B300 SXM6 PC"
+    ],
     "compute_cap": "10.3",
     "vram_mib": 294912,
     "status": "qualified"
   },
   "RTX3090": {
-    "names": ["NVIDIA GeForce RTX 3090"],
+    "names": [
+      "NVIDIA GeForce RTX 3090"
+    ],
     "compute_cap": "8.6",
     "vram_mib": 24576,
     "status": "listed"
   },
   "RTX4090": {
-    "names": ["NVIDIA GeForce RTX 4090"],
+    "names": [
+      "NVIDIA GeForce RTX 4090"
+    ],
     "compute_cap": "8.9",
     "vram_mib": 24576,
+    "status": "listed"
+  },
+  "MI300X": {
+    "names": [
+      "AMD Instinct MI300X"
+    ],
+    "vendor": "amd",
+    "pci_ids": [
+      "0x74a1"
+    ],
+    "gfx_target": "gfx942",
+    "vram_mib": 196608,
+    "counts": [
+      1,
+      8
+    ],
+    "status": "listed"
+  },
+  "MI325X": {
+    "names": [
+      "AMD Instinct MI325X"
+    ],
+    "vendor": "amd",
+    "pci_ids": [
+      "0x74a5"
+    ],
+    "gfx_target": "gfx942",
+    "vram_mib": 262144,
+    "counts": [
+      1,
+      8
+    ],
+    "status": "listed"
+  },
+  "MI350": {
+    "names": [
+      "AMD Instinct MI350X",
+      "AMD Instinct MI355X"
+    ],
+    "vendor": "amd",
+    "pci_ids": [
+      "0x75a0",
+      "0x75a3"
+    ],
+    "gfx_target": "gfx950",
+    "vram_mib": 294912,
+    "counts": [
+      1,
+      8
+    ],
+    "status": "listed"
+  },
+  "MI300A": {
+    "names": [
+      "AMD Instinct MI300A"
+    ],
+    "vendor": "amd",
+    "pci_ids": [
+      "0x74a0"
+    ],
+    "gfx_target": "gfx942",
+    "vram_mib": 131072,
+    "counts": [
+      1,
+      4
+    ],
+    "status": "listed"
+  },
+  "R9700": {
+    "names": [
+      "AMD Radeon AI PRO R9700"
+    ],
+    "vendor": "amd",
+    "pci_ids": [
+      "0x7590"
+    ],
+    "gfx_target": "gfx1201",
+    "vram_mib": 32768,
     "status": "listed"
   }
 }

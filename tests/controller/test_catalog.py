@@ -38,9 +38,12 @@ def card(line: str, **changes: str):
 
 def test_the_catalog_lists_and_admits_every_phase_1_type():
     catalog = load_catalog()
-    assert set(catalog) == {'RTX5090', 'RTXPRO6000', 'L40S', 'H100', 'H200', 'B200', 'B300', 'RTX3090', 'RTX4090'}
-    # The entry cards (10/8) wait for a run on a real card; everything else is admitted.
-    assert {t for t, s in catalog.items() if not s.qualified} == {'RTX3090', 'RTX4090'}
+    nvidia = {t for t, s in catalog.items() if s.vendor == 'nvidia'}
+    assert nvidia == {'RTX5090', 'RTXPRO6000', 'L40S', 'H100', 'H200', 'B200', 'B300', 'RTX3090', 'RTX4090'}
+    # The entry cards (10/8) wait for a run on a real card; everything else NVIDIA is admitted. Every AMD row waits
+    # for the MI300X run (vault 31 step 1; tests/controller/test_amd.py).
+    assert {t for t in nvidia if not catalog[t].qualified} == {'RTX3090', 'RTX4090'}
+    assert all(not s.qualified for s in catalog.values() if s.vendor == 'amd')
     assert all(s.status in (QUALIFIED, LISTED) for s in catalog.values())
     assert catalog['RTX5090'] is RTX_5090 and (RTX_5090.vram_total_mib_min, RTX_5090.vram_total_mib_max) == (
         32_000,
@@ -55,7 +58,9 @@ def test_the_catalog_lists_and_admits_every_phase_1_type():
     + [('B300', 275040)],
 )
 def test_an_observed_card_is_inside_its_types_window_and_no_other(gpu_type, observed_mib):
-    inside = [t for t, s in load_catalog().items() if s.vram_total_mib_min <= observed_mib <= s.vram_total_mib_max]
+    # one window per type within a vendor: an AMD card the same size as a B200 is another vendor's row (30 §4), and the
+    # vendor is pinned before the size is judged
+    inside = [t for t, s in load_catalog().items() if s.vendor == 'nvidia' and s.vram_total_mib_min <= observed_mib <= s.vram_total_mib_max]  # fmt: skip
     assert inside == [gpu_type]
 
 
@@ -129,7 +134,11 @@ def test_every_card_on_a_box_is_one_type():
 
 def test_a_box_is_one_of_the_sizes_the_type_admits():
     """29 §1 #3: a rental takes the whole box, so the pool admits the box sizes the market has and no other."""
-    assert COUNTS_DEFAULT == (1, 2, 4, 8) and all(s.counts == COUNTS_DEFAULT for s in load_catalog().values())
+    assert COUNTS_DEFAULT == (1, 2, 4, 8)
+    assert all(s.counts == COUNTS_DEFAULT for s in load_catalog().values() if s.vendor == 'nvidia')
+    assert all(
+        s.counts in ((1, 8), (1, 4), COUNTS_DEFAULT) for s in load_catalog().values() if s.vendor == 'amd'
+    )  # 30 §8
     one = card(H100)
     for n in (1, 2, 4, 8):
         assert ck.check_gpu_spec(one * n).passed

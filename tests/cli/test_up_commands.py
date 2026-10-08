@@ -17,7 +17,12 @@ from gittensor.agent.launch import Workload, parse_workloads, workload_list_comm
 from gittensor.cli.main import cli
 from gittensor.cli.up_commands import prereqs
 from gittensor.cli.up_commands.prereqs import HostProbe, PrereqReport, check_ports, check_toolkit, run_prereqs
-from gittensor.controller.checks.vendor import AMD_RENDER_NODES_COMMAND, VENDOR_DETECT_COMMAND
+from gittensor.controller.checks.amd_scrape import AMD_SYSFS_COMMAND
+from gittensor.controller.checks.vendor import VENDOR_DETECT_COMMAND
+
+AMD_SYSFS_1 = (
+    Path(__file__).resolve().parents[1] / 'controller' / 'fixtures' / 'amd' / 'sysfs_mi300x_1.txt'
+).read_text()
 
 SMI_OK = 'NVIDIA GeForce RTX 5090, 580.65.06, GPU-1111\n'
 AGENT_REF = 'entrius/gt-agent@sha256:' + 'a' * 64
@@ -57,7 +62,7 @@ class FakeProbe:
         self.uname = '6.8.0-45-generic'
         self.pod_ports: str = ''  # `docker ps --format {{.Ports}}` for our rental pods
         self.modules = 'nvidia\n'  # the GPU kernel modules loaded (the controller's vendor detect command)
-        self.dri = ''  # `ls /dev/dri`'s render nodes on an AMD box
+        self.amd_sysfs_out = ''  # the controller's sysfs pass on an AMD box (fixtures/amd)
 
     def nvml_allowlist(self, url=''):
         return self.allowlist
@@ -110,15 +115,15 @@ class FakeProbe:
             return subprocess.CompletedProcess(cmd, 0, self.pod_ports, '')
         if cmd[:2] == ['sh', '-c'] and cmd[2] == VENDOR_DETECT_COMMAND:
             return subprocess.CompletedProcess(cmd, 0, self.modules, '')
-        if cmd[:2] == ['sh', '-c'] and cmd[2] == AMD_RENDER_NODES_COMMAND:
-            return subprocess.CompletedProcess(cmd, 0, self.dri, '')
+        if cmd[:2] == ['sh', '-c'] and cmd[2] == AMD_SYSFS_COMMAND:
+            return subprocess.CompletedProcess(cmd, 0, self.amd_sysfs_out, '')
         raise AssertionError(f'unexpected command {cmd}')
 
     def vendor_detected(self):
         return HostProbe.vendor_detected(self)  # type: ignore[arg-type]
 
-    def render_nodes(self):
-        return HostProbe.render_nodes(self)  # type: ignore[arg-type]
+    def amd_sysfs(self):
+        return HostProbe.amd_sysfs(self)  # type: ignore[arg-type]
 
     def kernel_release(self):
         return HostProbe.kernel_release(self)  # type: ignore[arg-type]
@@ -204,22 +209,34 @@ class TestPrereqs:
         assert not report.ok
         assert report.results[1].name == 'NVIDIA driver' and report.results[1].status == 'fail'
 
-    def test_an_amd_box_has_its_own_driver_row_and_no_toolkit_row(self, probe):
-        """Vault 31 §2 #5: an AMD host has no nvidia-smi and no NVIDIA container toolkit; neither may block it. The
-        driver row is the in-tree amdgpu module and one render node per card (the model and stack floor come with
-        the AMD scrape, step 3)."""
-        probe.modules, probe.dri = 'amdgpu\n', 'renderD128\nrenderD129\n'
+    def test_an_amd_box_has_its_own_driver_rows_and_no_toolkit_row(self, probe):
+        """Vault 31 §2 #5, step 4: an AMD host has no nvidia-smi and no NVIDIA container toolkit; neither may block
+        it. The driver rows say the controller's own rules first: every card with a serial and whole, its type by
+        PCI id, and the kernel or DKMS driver at the floor."""
+        probe.modules, probe.amd_sysfs_out = 'amdgpu\n', AMD_SYSFS_1
         probe.smi = subprocess.CompletedProcess([], 127, '', 'nvidia-smi: command not found')
         probe.binaries = {}
         report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
         assert report.ok and report.vendor == 'amd'
         rows = {r.name: r for r in report.results}
         assert rows['GPU vendor'].status == 'pass' and 'amdgpu' in rows['GPU vendor'].detail
-        assert rows['AMD driver'].status == 'pass' and rows['AMD driver'].detail.endswith('2 render node(s): renderD128, renderD129')  # fmt: skip
+        assert rows['AMD driver'].status == 'pass' and rows['AMD driver'].detail == 'amdgpu; 1 card(s): MI300X; renderD128'  # fmt: skip
+        assert (
+            rows['AMD driver floor'].status == 'pass' and rows['AMD driver floor'].detail == 'kernel 6.8.0-45-generic'
+        )
         assert rows['NVIDIA container toolkit'].status == 'skip' and 'NVIDIA driver' not in rows
-        probe.dri = ''
-        report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
-        assert not report.ok and 'no render node' in {r.name: r for r in report.results}['AMD driver'].detail
+
+        def rows_for(sysfs: str) -> dict:
+            probe.amd_sysfs_out = sysfs
+            return {r.name: r for r in run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200).results}  # fmt: skip
+
+        assert 'no AMD card' in rows_for('')['AMD driver'].detail
+        assert 'partitioned (CPX/NPS4)' in rows_for(AMD_SYSFS_1.replace('=SPX', '=CPX').replace('=NPS1', '=NPS4'))['AMD driver'].detail  # fmt: skip
+        assert 'no usable serial' in rows_for(AMD_SYSFS_1.replace('unique_id=2d6e1a4f8c3b7e90', 'unique_id=0000000000000000'))['AMD driver'].detail  # fmt: skip
+        old = rows_for(AMD_SYSFS_1.replace('kernel=6.8.0-45-generic', 'kernel=5.15.0-122-generic'))
+        assert old['AMD driver'].status == 'pass' and old['AMD driver floor'].status == 'fail' and 'below 6.8' in old['AMD driver floor'].detail  # fmt: skip
+        dkms = rows_for(AMD_SYSFS_1.replace('kernel=6.8.0-45-generic', 'kernel=5.15.0-122-generic').replace('amdgpu=\n', 'amdgpu=6.10.5\n'))  # fmt: skip
+        assert dkms['AMD driver floor'].status == 'pass' and 'DKMS 6.10.5' in dkms['AMD driver floor'].detail
 
     def test_a_box_with_both_vendors_is_refused_by_name(self, probe):
         probe.modules = 'nvidia\namdgpu\n'
@@ -439,7 +456,7 @@ class TestUpCommand:
         assert docker_calls == [] and probe.chain_calls == 0
 
     def test_an_amd_host_starts_the_runner_without_gpus_all(self, runner, docker_calls, probe):
-        probe.modules, probe.dri = 'amdgpu\n', 'renderD128\n'
+        probe.modules, probe.amd_sysfs_out = 'amdgpu\n', AMD_SYSFS_1
         probe.smi = subprocess.CompletedProcess([], 127, '', 'nvidia-smi: command not found')
         probe.binaries = {}
         result = runner.invoke(cli, [*UP, '--dry-run'])

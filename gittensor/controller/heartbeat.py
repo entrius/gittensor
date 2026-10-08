@@ -68,12 +68,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from gittensor.controller.checks import config as cfg
+from gittensor.controller.checks.amd_scrape import AMD_SYSFS_COMMAND, parse_amd_sysfs
 from gittensor.controller.checks.checks import foreign_holders
 from gittensor.controller.checks.runner import HostRunner
 from gittensor.controller.checks.scrape import (
     CONTAINER_ID,
-    DEVICE_HOLDERS_COMMAND,
     NVML_MD5_COMMAND,
+    device_holders_command,
+    gpu_device_pattern,
     nvidia_smi_command,
     parse_device_holders,
     parse_md5,
@@ -100,6 +102,7 @@ from gittensor.controller.checks.state import (
     mark_reachable,
     transition_card,
 )
+from gittensor.controller.checks.vendor import AMD, NVIDIA
 from gittensor.controller.locks import BoxLocks
 from gittensor.controller.manifest import Drain, Manifest
 from gittensor.controller.reconcile import InstanceRecord, InstanceStore
@@ -266,6 +269,8 @@ class HeartbeatResult:
 
 
 def _same_card(runner: HostRunner, box: BoxState) -> Answer:
+    if box.vendor == AMD:
+        return _same_card_amd(runner, box)
     smi = runner.run(nvidia_smi_command(), timeout=cfg.NVIDIA_SMI_TIMEOUT_S)
     if not smi.ok:
         return Answer(False, f'nvidia-smi exit {smi.exit_code}: {(smi.stderr or smi.stdout).strip()[:200]}')
@@ -299,6 +304,53 @@ def _same_card(runner: HostRunner, box: BoxState) -> Answer:
     if problems:
         return Answer(False, '; '.join(problems), evidence)
     return Answer(True, f'{len(box.pinned_uuids)} pinned present, power + NVML unchanged', evidence)
+
+
+def _same_card_amd(runner: HostRunner, box: BoxState) -> Answer:
+    """The AMD sibling (30 §3): the sysfs pass again. The pinned serials present, each on the render node pinned at
+    the last full check, the power cap and the kernel as recorded there, and the card still whole: root can flip an
+    idle MI300X to CPX / NPS4 between rounds, which turns one card into eight new ids, so the partition is re-read on
+    every beat (30 §14 #3)."""
+    out = runner.run(AMD_SYSFS_COMMAND, timeout=cfg.SSH_COMMAND_TIMEOUT_S)
+    if not out.ok:
+        return Answer(False, f'amd sysfs exit {out.exit_code}: {(out.stderr or out.stdout).strip()[:200]}')
+    cards, stack = parse_amd_sysfs(out.stdout)
+    by_uuid = {c.uuid: c for c in cards}
+    missing = [u for u in box.pinned_uuids if u not in by_uuid]
+    if missing:
+        return Answer(False, 'pinned card(s) missing: ' + ', '.join(missing), {'observed': sorted(by_uuid)})
+    problems, notes = [], []
+    recorded_power = box.identity.get('power_limits')
+    baseline_power: dict[str, Any] = dict(recorded_power) if isinstance(recorded_power, dict) else {}
+    nodes = box.render_nodes
+    power = {u: by_uuid[u].power_cap_w for u in box.pinned_uuids}
+    partition = {u: by_uuid[u].partition for u in box.pinned_uuids}
+    for uuid in box.pinned_uuids:
+        card, limit, was = by_uuid[uuid], power[uuid], baseline_power.get(uuid)
+        if was is None:
+            notes.append(f'{uuid[:12]}… power cap: no baseline')
+        elif limit is None or abs(limit - float(was)) > cfg.POWER_LIMIT_TOLERANCE_W:
+            problems.append(f'{uuid[:12]}… power cap {limit} W, was {was} W at the last full check')
+        if not card.whole:
+            problems.append(f'{uuid[:12]}… partitioned {card.partition}, was whole at the last full check')
+        if nodes.get(uuid) and nodes[uuid] != card.render_node:
+            problems.append(f'{uuid[:12]}… on {card.render_node}, was {nodes[uuid]} at the last full check')
+    recorded_stack = box.identity.get('amd_stack')
+    baseline_kernel = str(recorded_stack.get('kernel') or '') if isinstance(recorded_stack, dict) else ''
+    if not baseline_kernel:
+        notes.append('kernel: no baseline')
+    elif stack.kernel != baseline_kernel:
+        problems.append(f'kernel {stack.kernel}, was {baseline_kernel} at the last full check')
+    evidence = {
+        'power_limits': power,
+        'partition': partition,
+        'render_nodes': {u: by_uuid[u].render_node for u in box.pinned_uuids},
+        'amd_stack': stack.as_dict(),
+        'notes': notes,
+    }
+    if problems:
+        return Answer(False, '; '.join(problems), evidence)
+    return Answer(True, f'{len(box.pinned_uuids)} pinned present, power + partition + kernel unchanged', evidence)
 
 
 def _our_container(runner: HostRunner, record: InstanceRecord, manifest: Manifest | None) -> tuple[Answer, tuple]:
@@ -341,7 +393,9 @@ def _our_container(runner: HostRunner, record: InstanceRecord, manifest: Manifes
     return Answer(True, f'{info.status}, started {info.started_at}', evidence), recorded
 
 
-def _alone(runner: HostRunner, records: list[InstanceRecord]) -> dict[str, Answer]:
+def _alone(runner: HostRunner, records: list[InstanceRecord], vendor: str = NVIDIA) -> dict[str, Answer]:
+    if vendor == AMD:
+        return _alone_amd(runner, records)
     apps_result = runner.run(COMPUTE_APPS_COMMAND, timeout=cfg.NVIDIA_SMI_TIMEOUT_S)
     if not apps_result.ok:
         failure = Answer(False, f'cannot list GPU processes: nvidia-smi exit {apps_result.exit_code}')
@@ -371,14 +425,24 @@ def _alone(runner: HostRunner, records: list[InstanceRecord]) -> dict[str, Answe
     return out
 
 
-def _device_holders(runner: HostRunner, ours: set[str]) -> Answer:
-    """Every open NVIDIA device handle on the host must sit in one of ``ours`` (our instances' container IDs on this
-    box), or be the host's own persistence daemon."""
-    result = runner.run(DEVICE_HOLDERS_COMMAND, timeout=cfg.SSH_COMMAND_TIMEOUT_S)
+def _alone_amd(runner: HostRunner, records: list[InstanceRecord]) -> dict[str, Answer]:
+    """The AMD sibling of the NVML process list: there is no ``nvidia-smi --query-compute-apps`` without the ROCm
+    userland on the host, so the question is asked of the device nodes (``/dev/kfd`` and the render nodes), box-wide:
+    a rental takes the whole box and a workload instance holds one card of it, so any holder outside our own
+    containers is foreign to every card. Per-card attribution through the KFD proc tree is a step 1 follow-up."""
+    ours = {r.container_id for r in records}
+    answer = _device_holders(runner, ours, AMD)
+    return {r.uuid: answer for r in records}
+
+
+def _device_holders(runner: HostRunner, ours: set[str], vendor: str = NVIDIA) -> Answer:
+    """Every open GPU device handle on the host (NVIDIA's nodes, or ``/dev/kfd`` and the render nodes on an AMD box)
+    must sit in one of ``ours`` (our instances' container IDs on this box), or be the host's own persistence daemon."""
+    result = runner.run(device_holders_command(vendor), timeout=cfg.SSH_COMMAND_TIMEOUT_S)
     if not result.ok:
         why = (result.stderr or result.stdout).strip()[:200]
         return Answer(False, f'cannot scan device handles: exit {result.exit_code}: {why}')
-    holders = parse_device_holders(result.stdout)
+    holders = parse_device_holders(result.stdout, gpu_device_pattern(vendor))
     # The buckets are the round's public phrase; a heartbeat bench has its own.
     foreign, exited, _ = foreign_holders(holders, ours)
     evidence = {'holders': sorted(holders), 'exited_mid_scan': exited}
@@ -404,8 +468,8 @@ def run_heartbeat(
         containers[record.id] = answer
         if filled:
             recorded[record.id] = filled
-    alone = _alone(runner, records)
-    devices = _device_holders(runner, ours) if ours is not None else None
+    alone = _alone(runner, records, box.vendor)
+    devices = _device_holders(runner, ours, box.vendor) if ours is not None else None
     return HeartbeatResult(now, same_card, containers, alone, recorded, devices)
 
 

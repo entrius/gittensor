@@ -1,0 +1,133 @@
+== renderD128 0000:03:00.0
+unique_id=2d6e1a4f8c3b7e90
+vendor=0x1002
+device=0x74a1
+product_name=AMD Instinct MI300X OAM
+mem_info_vram_total=206158430208
+current_compute_partition=SPX
+current_memory_partition=NPS1
+vbios_version=113-M3000100-102
+power1_cap=750000000
+power1_cap_default=750000000
+power1_cap_max=750000000
+== renderD129 0000:04:00.0
+unique_id=2d6e1a4f8c3b7e91
+vendor=0x1002
+device=0x74a1
+product_name=AMD Instinct MI300X OAM
+mem_info_vram_total=206158430208
+current_compute_partition=SPX
+current_memory_partition=NPS1
+vbios_version=113-M3000100-102
+power1_cap=750000000
+power1_cap_default=750000000
+power1_cap_max=750000000
+== renderD130 0000:05:00.0
+unique_id=2d6e1a4f8c3b7e92
+vendor=0x1002
+device=0x74a1
+product_name=AMD Instinct MI300X OAM
+mem_info_vram_total=206158430208
+current_compute_partition=SPX
+current_memory_partition=NPS1
+vbios_version=113-M3000100-102
+power1_cap=750000000
+power1_cap_default=750000000
+power1_cap_max=750000000
+== renderD131 0000:06:00.0
+unique_id=2d6e1a4f8c3b7e93
+vendor=0x1002
+device=0x74a1
+product_name=AMD Instinct MI300X OAM
+mem_info_vram_total=206158430208
+current_compute_partition=SPX
+current_memory_partition=NPS1
+vbios_version=113-M3000100-102
+power1_cap=750000000
+power1_cap_default=750000000
+power1_cap_max=750000000
+== renderD132 0000:07:00.0
+unique_id=2d6e1a4f8c3b7e94
+vendor=0x1002
+device=0x74a1
+product_name=AMD Instinct MI300X OAM
+mem_info_vram_total=206158430208
+current_compute_partition=SPX
+current_memory_partition=NPS1
+vbios_version=113-M3000100-102
+power1_cap=750000000
+power1_cap_default=750000000
+power1_cap_max=750000000
+== renderD133 0000:08:00.0
+unique_id=2d6e1a4f8c3b7e95
+vendor=0x1002
+device=0x74a1
+product_name=AMD Instinct MI300X OAM
+mem_info_vram_total=206158430208
+current_compute_partition=SPX
+current_memory_partition=NPS1
+vbios_version=113-M3000100-102
+power1_cap=750000000
+power1_cap_default=750000000
+power1_cap_max=750000000
+== renderD134 0000:09:00.0
+unique_id=2d6e1a4f8c3b7e96
+vendor=0x1002
+device=0x74a1
+product_name=AMD Instinct MI300X OAM
+mem_info_vram_total=206158430208
+current_compute_partition=SPX
+current_memory_partition=NPS1
+vbios_version=113-M3000100-102
+power1_cap=750000000
+power1_cap_default=750000000
+power1_cap_max=750000000
+== renderD135 0000:0a:00.0
+unique_id=2d6e1a4f8c3b7e97
+vendor=0x1002
+device=0x74a1
+product_name=AMD Instinct MI300X OAM
+mem_info_vram_total=206158430208
+current_compute_partition=SPX
+current_memory_partition=NPS1
+vbios_version=113-M3000100-102
+power1_cap=750000000
+power1_cap_default=750000000
+power1_cap_max=750000000
+-- 0
+drm_render_minor 0
+gfx_target_version 0
+-- 1
+unique_id 3273582908102377104
+drm_render_minor 128
+gfx_target_version 90402
+-- 2
+unique_id 3273582908102377105
+drm_render_minor 129
+gfx_target_version 90402
+-- 3
+unique_id 3273582908102377106
+drm_render_minor 130
+gfx_target_version 90402
+-- 4
+unique_id 3273582908102377107
+drm_render_minor 131
+gfx_target_version 90402
+-- 5
+unique_id 3273582908102377108
+drm_render_minor 132
+gfx_target_version 90402
+-- 6
+unique_id 3273582908102377109
+drm_render_minor 133
+gfx_target_version 90402
+-- 7
+unique_id 3273582908102377110
+drm_render_minor 134
+gfx_target_version 90402
+-- 8
+unique_id 3273582908102377111
+drm_render_minor 135
+gfx_target_version 90402
+kernel=6.8.0-45-generic
+amdgpu=

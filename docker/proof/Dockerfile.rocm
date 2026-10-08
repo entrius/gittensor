@@ -1,0 +1,39 @@
+# syntax=docker/dockerfile:1.7
+# entrius/gt-proof-rocm: the AMD sibling of entrius/gt-proof (vault 30 §7, 31 step 2). The same small signed base the
+# GPU proof runs in, with the HIP runtime in place of CUDA's: NO proof binary and NO secret inside. The controller
+# `docker create`s one per card with the card's device nodes (--device /dev/kfd --device /dev/dri/renderD<N>, never a
+# container runtime), copies the sealed HIP binary in over SSH (`docker cp -`) and starts every card's container at
+# once; proof_job.py is the one from docker/proof, unchanged.
+#
+#   docker build -f docker/proof/Dockerfile.rocm -t entrius/gt-proof-rocm:dev .
+#
+# Not yet built or published (10/8): no docker on the dev VM. The first MI300X run (31 step 1) builds it, runs the
+# proof twice and pins the pushed digest in gittensor/controller/checks/config.py PROOF_IMAGE_DIGEST_AMD. The ROCm
+# version is one pin, bumped deliberately with the binary's build image (gt-proof ci/build.sh --vendor amd).
+
+ARG UBUNTU_VERSION=24.04
+ARG ROCM_VERSION=6.4.1
+
+FROM ubuntu:${UBUNTU_VERSION}
+ARG ROCM_VERSION
+ENV DEBIAN_FRONTEND=noninteractive
+# Only the runtime the binary needs: the HIP runtime, the ROCr loader and the code object manager (~600 MB), from
+# AMD's apt repository for this Ubuntu release. No compiler, no rocm-smi, no PyTorch.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg python3 \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor -o /etc/apt/keyrings/rocm.gpg \
+    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_VERSION} noble main" \
+       > /etc/apt/sources.list.d/rocm.list \
+    && printf 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600\n' > /etc/apt/preferences.d/rocm-pin-600 \
+    && apt-get update && apt-get install -y --no-install-recommends hip-runtime-amd hsa-rocr comgr \
+    && apt-get purge -y curl gnupg && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+ENV LD_LIBRARY_PATH=/opt/rocm/lib
+WORKDIR /opt/gt-proof
+RUN mkdir -p bin work && chmod 0755 bin work
+COPY docker/proof/proof_job.py bin/proof_job.py
+ARG GT_PROOF_VERSION=dev
+ENV GT_PROOF_BIN=/opt/gt-proof/bin/gt_proof \
+    GT_PROOF_VERSION=${GT_PROOF_VERSION}
+LABEL io.gittensor.compute.proof="gt-proof-rocm" \
+      io.gittensor.compute.proof_version="${GT_PROOF_VERSION}"
+ENTRYPOINT ["python3", "bin/proof_job.py"]

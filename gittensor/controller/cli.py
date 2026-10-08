@@ -109,6 +109,7 @@ from gittensor.controller.checks.state import (
     request_release,
     request_remove,
 )
+from gittensor.controller.checks.vendor import AMD
 from gittensor.controller.checks.verdict import BENCH, NOT_RUN, CheckResult, CheckVerdict
 from gittensor.controller.daemon import STATUS_FILE, Controller, Intervals
 from gittensor.controller.discovery import ChainReader, DiscoverReport, Discovery
@@ -512,10 +513,11 @@ def check_box(
             return CheckOutcome(
                 None, busy='every card busy: ' + ', '.join(f'{u[:12]}… {s}' for u, s in skipped.items())
             )
-        if not proof_image_ready(runner, config.proof_image):
+        image = config.proof_image_for(scrape.vendor)
+        if not proof_image_ready(runner, image):
             return CheckOutcome(None, busy=PROOF_IMAGE_PULLING)
         proved = [g.uuid for g in gpus]
-        checks.append(ck.check_gpu_proof(runner, gpus, proof, config.proof_image, config.proof_timeout_s))
+        checks.append(ck.check_gpu_proof(runner, gpus, proof, image, config.proof_timeout_s))
         rent_probe = probe_rent_range(runner, box, scrape, config)
     else:
         checks.append(proof_skipped(checks))
@@ -671,8 +673,9 @@ def run_round(
         if retry_at is not None and time.time() < retry_at:
             r.busy = _strike_wait(r.box, retry_at)
             return
+        image = config.proof_image_for(r.scrape.vendor)
         try:
-            ready = proof_image_ready(r.runner, config.proof_image)
+            ready = proof_image_ready(r.runner, image)
         except Exception as e:  # transport died asking
             r.stage_error = clip(f'staging failed: {type(e).__name__}: {e}')
             return
@@ -680,7 +683,7 @@ def run_round(
             r.busy = PROOF_IMAGE_PULLING  # setup, not proof: no verdict this round
             return
         try:
-            r.staged = stage_box(r.runner, r.proved, proof, config.proof_image, config.proof_timeout_s)
+            r.staged = stage_box(r.runner, r.proved, proof, image, config.proof_timeout_s)
         except ProofUnavailable as e:
             r.stage_error = clip(str(e))
         except Exception as e:  # transport died mid-stage
@@ -983,6 +986,12 @@ def _check_options(f: Callable) -> Callable:
         ),
         click.option('--proof-image', default=image_ref(), show_default=True, help='Image the proof job runs in.'),
         click.option(
+            '--proof-image-amd',
+            default=image_ref(AMD),
+            show_default=True,
+            help='Image the proof job runs in on an AMD box (the HIP runtime, vault 30 §7).',
+        ),
+        click.option(
             '--allowlist',
             'allowlist_location',
             default=None,
@@ -1033,12 +1042,14 @@ def _setup(
     allowlist_location: str | None,
     network_targets: Sequence[str],
     disk_min_gb: float,
+    proof_image_amd: str = image_ref(AMD),
 ) -> CheckSetup:
     state = StateDir(Path(state_dir).expanduser())
     config = FullCheckConfig(
         agent_image_digests=tuple(digests),
         agent_image_ids=tuple(image_ids),
         proof_image=proof_image,
+        proof_image_amd=proof_image_amd,
         network_targets=tuple(network_targets) or tuple(cfg.NETWORK_TARGETS),
         disk_min_free_gb=disk_min_gb,
     )

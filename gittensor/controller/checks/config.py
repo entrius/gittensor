@@ -45,6 +45,13 @@ PROOF_IMAGE_DIGEST = 'sha256:e6be400329973f954459e2f0e760a66b27a423777c5de0bf1f6
 PROOF_IMAGE_REPO_AMD = 'entrius/gt-proof-rocm'
 PROOF_IMAGE_DIGEST_AMD = ''
 
+# The AMD stack floor (30 §14 #2, 31 §7 #3): no allowlist, one floor. The in-tree amdgpu driver is the kernel's, so
+# the floor is a kernel release; a DKMS amdgpu (``/sys/module/amdgpu/version``) at or above its own floor passes on an
+# older kernel. 6.8 is the first kernel with MI300X partition-mode sysfs and KFD on every card the catalog lists;
+# the DKMS floor is the ROCm 6.2 driver. Both are Alex's call to move (31 §7 #3).
+AMD_KERNEL_MIN = (6, 8)
+AMD_DKMS_MIN = (6, 2)
+
 # Identity and resources.
 AGENT_CONTAINER_NAME = 'gt-agent'  # the container `gitt up` starts (gittensor/agent/config.py AGENT_CONTAINER_NAME)
 DISK_MIN_FREE_GB = 100.0  # weights + images; Lium's VerifyX floor is the same 100 GB

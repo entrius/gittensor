@@ -111,7 +111,7 @@ def test_every_check_name_has_something_to_say():
     """A new check must not be able to reach the page with no words for the miner. Every name a check can be benched
     under is in ``why.BY_NAME``, so the worst case is a general phrase, never a bare check name."""
     names = {
-        ck.VENDOR, ck.GPU_SPEC, ck.GPU_UUID_PIN, ck.FLEET_UUID_UNIQUE, ck.NVML_DIGEST, ck.POWER_LIMIT,
+        ck.VENDOR, ck.GPU_SPEC, ck.GPU_UUID_PIN, ck.FLEET_UUID_UNIQUE, ck.AMD_STACK, ck.NVML_DIGEST, ck.POWER_LIMIT,
         ck.AGENT_IMAGE, ck.DISK_FREE, ck.NETWORK, ck.CARD_FREE, ck.GPU_PROOF,
     }  # fmt: skip
     assert names <= set(w.BY_NAME)

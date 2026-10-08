@@ -75,7 +75,8 @@ def parse_catalog(doc: dict, source: str = '') -> Dict[str, CardSpec]:
             spec = CardSpec(
                 gpu_type=gpu_type,
                 names=names,
-                compute_cap=str(row['compute_cap']),
+                # an AMD row's compute capability is its gfx target (what the KFD topology reports for the card)
+                compute_cap=str(row.get('compute_cap') or row.get('gfx_target') or ''),
                 vram_total_mib_min=int(row.get('vram_mib_min', nominal * VRAM_FLOOR_RATIO)),
                 vram_total_mib_max=int(row.get('vram_mib_max', nominal * VRAM_CEIL_RATIO)),
                 counts=tuple(sorted({int(c) for c in row.get('counts', COUNTS_DEFAULT)})),
@@ -118,3 +119,10 @@ def spec_for_name(card_name: str) -> Optional[CardSpec]:
 
 def spec_for_type(gpu_type: str) -> Optional[CardSpec]:
     return load_catalog().get(gpu_type)
+
+
+def spec_for_pci_id(device_id: str) -> Optional[CardSpec]:
+    """The AMD catalog entry for a PCI device id as sysfs prints it (``0x74a1``), qualified or not; None for an id
+    no row lists. An AMD card is matched on its ids, never on a marketing name (30 §4)."""
+    wanted = device_id.strip().lower()
+    return next((spec for spec in load_catalog().values() if wanted and wanted in spec.pci_ids), None)

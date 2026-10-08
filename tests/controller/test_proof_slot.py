@@ -34,7 +34,8 @@ def test_docker_lines_pin_the_card_and_quote_arguments():
     )
     assert slot.start_command('abc') == 'docker start -a abc'
     assert slot.remove_command(['a', 'b c']) == "docker rm -f a 'b c'"
-    assert slot.image_ref('r', 'dev', '') == 'r:dev' and slot.image_ref('r', 'dev', 'sha256:1') == 'r@sha256:1'
+    assert slot.image_ref() == f'{cfg.PROOF_IMAGE_REPO}@{cfg.PROOF_IMAGE_DIGEST}'  # digest pinned: repo@sha256
+    assert slot.image_ref('amd') == f'{cfg.PROOF_IMAGE_REPO_AMD}:{cfg.PROOF_IMAGE_TAG}'  # no digest yet: repo:tag (dev)
 
 
 def test_stage_then_fire_is_two_phases_across_cards():

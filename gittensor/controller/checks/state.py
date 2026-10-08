@@ -519,6 +519,9 @@ def identity_baseline(verdict: CheckVerdict) -> dict:
         out['nvml_md5'] = nvml.evidence['md5']
     if verdict.render_nodes:
         out['render_nodes'] = dict(verdict.render_nodes)
+    stack = verdict.check('amd_stack')
+    if stack is not None and stack.passed and isinstance(stack.evidence.get('record'), dict):
+        out['amd_stack'] = dict(stack.evidence['record'])  # the heartbeat holds the kernel to this (30 §3)
     return out
 
 

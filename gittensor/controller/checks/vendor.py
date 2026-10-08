@@ -10,7 +10,6 @@ once at the start of every scrape and pinned on the box at admit (``BoxState.ven
 the pinned value. One vendor per box. Intel later adds a third word to the same switches.
 """
 
-import re
 import shlex
 from typing import List, Sequence
 
@@ -32,12 +31,6 @@ _MODULE_VENDOR = {'nvidia': NVIDIA, 'amdgpu': AMD}
 AMD_KFD = '/dev/kfd'
 AMD_DRI = '/dev/dri'
 AMD_GROUPS = ('video', 'render')
-
-# The render nodes a box has, one per card, as ``ls`` lists them: what the scrape pins per card (``BoxState.identity``
-# ``render_nodes``) and what ``gitt up`` counts before the agent starts. Minors are stable within a boot; a reboot may
-# renumber them, which is why every passing full check re-pins the map rather than the admit alone.
-AMD_RENDER_NODES_COMMAND = 'ls /dev/dri 2>/dev/null | grep "^renderD" || true'
-_RENDER_NODE = re.compile(r'^renderD\d+$')
 
 
 def parse_vendor(stdout: str) -> str:
@@ -62,12 +55,6 @@ def render_node_path(render_node: str) -> str:
     if node.isdigit():
         node = f'renderD{node}'
     return f'{AMD_DRI}/{node}'
-
-
-def parse_render_nodes(stdout: str) -> List[str]:
-    """``['renderD128', 'renderD129']`` from ``AMD_RENDER_NODES_COMMAND``'s output, sorted by minor."""
-    nodes = {line.strip() for line in stdout.splitlines() if _RENDER_NODE.match(line.strip())}
-    return sorted(nodes, key=lambda n: int(n[len('renderD') :]))
 
 
 def amd_attach_args(render_nodes: Sequence[str]) -> List[str]:

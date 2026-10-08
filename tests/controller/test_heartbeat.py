@@ -13,6 +13,7 @@ import time
 import pytest
 
 from gittensor.controller.checks.runner import regex
+from gittensor.controller.checks.scrape import DEVICE_HOLDERS_COMMAND
 from gittensor.controller.checks.state import (
     BENCHED,
     CHECKING,
@@ -27,7 +28,6 @@ from gittensor.controller.checks.state import (
     transition_card,
 )
 from gittensor.controller.heartbeat import (
-    DEVICE_HOLDERS_COMMAND,
     Watch,
     parse_cgroups,
     parse_compute_apps,

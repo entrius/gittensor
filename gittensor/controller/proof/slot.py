@@ -43,6 +43,11 @@ class BoxIdentity:
     uuids: Tuple[str, ...]
     card_name: str
     driver: str = ''
+    # The vendor switch (vault 30 §1): which binary and image the provider stages, and how a card is attached. On an
+    # AMD box ``render_nodes`` runs parallel to ``uuids`` ('renderD<N>' per card, what the scrape pinned); empty on
+    # NVIDIA.
+    vendor: str = NVIDIA
+    render_nodes: Tuple[str, ...] = ()
 
 
 @dataclass
@@ -121,11 +126,15 @@ class UnconfiguredProof:
 # ---------------------------------------------------------------- docker lines --------------------------------------
 
 
-def image_ref(
-    repo: str = cfg.PROOF_IMAGE_REPO, tag: str = cfg.PROOF_IMAGE_TAG, digest: str = cfg.PROOF_IMAGE_DIGEST
-) -> str:
-    """``repo@sha256:...`` when a digest is pinned, else ``repo:tag`` (dev only; the agent refuses unsigned images)."""
-    return f'{repo}@{digest}' if digest else f'{repo}:{tag}'
+def image_ref(vendor: str = NVIDIA) -> str:
+    """The proof image for a vendor: ``repo@sha256:...`` when a digest is pinned, else ``repo:tag`` (dev only; the
+    agent refuses unsigned images). The AMD image (``docker/proof/Dockerfile.rocm``) carries the HIP runtime instead
+    of CUDA's and has no published digest until the first MI300X run (vault 31 step 1)."""
+    if vendor == AMD:
+        repo, digest = cfg.PROOF_IMAGE_REPO_AMD, cfg.PROOF_IMAGE_DIGEST_AMD
+    else:
+        repo, digest = cfg.PROOF_IMAGE_REPO, cfg.PROOF_IMAGE_DIGEST
+    return f'{repo}@{digest}' if digest else f'{repo}:{cfg.PROOF_IMAGE_TAG}'
 
 
 def create_command(
@@ -227,8 +236,15 @@ def stage_box(
     timeout: float = cfg.PROOF_JOB_TIMEOUT_S,
 ) -> StagedProof:
     """Phase 1. Raises ``ProofUnavailable`` (provider) or whatever the transport raises."""
-    identity = BoxIdentity(tuple(g.uuid for g in gpus), gpus[0].name if gpus else '', gpus[0].driver if gpus else '')
-    return proof.stage(runner, identity, image or image_ref(), timeout)
+    vendor = gpus[0].vendor if gpus else NVIDIA
+    identity = BoxIdentity(
+        tuple(g.uuid for g in gpus),
+        gpus[0].name if gpus else '',
+        gpus[0].driver if gpus else '',
+        vendor,
+        tuple(g.render_node for g in gpus) if vendor == AMD else (),
+    )
+    return proof.stage(runner, identity, image or image_ref(vendor), timeout)
 
 
 def fire_box(

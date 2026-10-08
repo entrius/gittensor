@@ -40,6 +40,10 @@ PROOF_IMAGE_PROBE_TIMEOUT_S = 20.0
 PROOF_IMAGE_REPO = 'entrius/gt-proof'
 PROOF_IMAGE_TAG = 'dev'
 PROOF_IMAGE_DIGEST = 'sha256:e6be400329973f954459e2f0e760a66b27a423777c5de0bf1f667bf497cbb9fb'  # published with agent release 5.1.0 (9/17)
+# The AMD proof image (docker/proof/Dockerfile.rocm, vault 30 §7): the HIP runtime in place of CUDA's, the same
+# proof_job.py. No digest until the first MI300X run publishes one (vault 31 step 1); until then dev boxes only.
+PROOF_IMAGE_REPO_AMD = 'entrius/gt-proof-rocm'
+PROOF_IMAGE_DIGEST_AMD = ''
 
 # Identity and resources.
 AGENT_CONTAINER_NAME = 'gt-agent'  # the container `gitt up` starts (gittensor/agent/config.py AGENT_CONTAINER_NAME)

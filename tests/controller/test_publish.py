@@ -40,7 +40,7 @@ from gittensor.controller.publish import (
 )
 from gittensor.controller.reconcile import InstanceRecord, InstanceStore
 from gittensor.controller.registry import Registry
-from gittensor.controller.standing import CHECK_FAILED, CLEAN_LEASE
+from gittensor.controller.standing import CHECK_FAILED, CLEAN_LEASE, STANDARD
 from tests.controller.test_cli import invoke
 
 UUID_A = 'GPU-4f2a6b8c-1d3e-4a5b-9c7d-0e1f2a3b4c5d'
@@ -95,7 +95,11 @@ def fleet(now: float = NOW) -> tuple[dict[str, BoxState], dict[str, InstanceReco
             last_failed_why={'gpu_uuid_pin': WHY_PINNED},
             standing_events=[{'at': now - 1_500, 'kind': CHECK_FAILED, 'failed': ['gpu_uuid_pin']}],
         ),
-        HK_C: BoxState(HK_C, status=ADMIT, host='203.0.113.79', port=2200, source='chain'),
+        HK_C: BoxState(  # a --rent box whose range the probe could not reach: idle-only, the reason on it (29 §5)
+            HK_C, status=ADMIT, host='203.0.113.79', port=2200, source='chain',
+            rent_probe={'host': '203.0.113.79', 'port': PRIVATE['rent_low'] + 99, 'public_port': PRIVATE['rent_low'] + 99,
+                        'ok': False, 'reason': PRIVATE['transport'], 'code': why.RENT_PORT_UNREACHABLE},
+        ),
     }  # fmt: skip
     heartbeat = {'at': now - 20, 'ok': None, 'error': PRIVATE['transport']}
     instances = {
@@ -147,10 +151,15 @@ def test_the_contract(tmp_path):
     assert doc['totals'] == {'boxes': 3, 'cards': 2, 'cards_by_state': {LEASED: 1, DRAINING: 1}}
     a, b, c = (next(x for x in doc['boxes'] if x['hotkey'] == hk) for hk in (HK_A, HK_B, HK_C))
     assert set(a) == {
-        'hotkey', 'uid', 'status', 'standing', 'gpu_type', 'card_count', 'rentable', 'last_check_at', 'last_failed',
-        'last_failed_why', 'bench_until', 'benched_reason', 'ladder_rung', 'strikes', 'pay', 'last_event', 'cards',
+        'hotkey', 'uid', 'status', 'standing', 'gpu_type', 'card_count', 'rentable', 'rentable_why', 'last_check_at',
+        'last_failed', 'last_failed_why', 'bench_until', 'benched_reason', 'ladder_rung', 'strikes', 'pay',
+        'last_event', 'cards',
     }  # fmt: skip
     assert (a['rentable'], b['rentable'], c['rentable']) == (False, False, False) and doc['offers'] == {}
+    # why a --rent box is off the market: the probe's phrase, ours alone; None for a box that is rentable or never
+    # offered a range (or, b, is off it for a bench: that is last_failed_why's story)
+    assert (a['rentable_why'], b['rentable_why']) == (None, None)
+    assert c['rentable_why'] == why.PHRASES[why.RENT_PORT_UNREACHABLE] and '?' not in c['rentable_why']
     assert (a['status'], a['standing'], a['gpu_type'], a['card_count'], a['uid']) == (
         IDLE, 'probation', 'RTX5090', 2, 61,
     )  # fmt: skip
@@ -182,8 +191,9 @@ def test_the_contract(tmp_path):
 
 
 def test_a_box_is_offered_when_it_is_rentable_and_wholly_idle(tmp_path):
-    """29 §1 #7 and §7: rentable = a rent range, not benched, standing >= standard; offered = rentable and every card
-    idle. The size offered is the whole box."""
+    """29 §1 #7 (as amended by #1818) and §7: rentable = a rent range, not benched, standing at or above the gate
+    (probation unless `run --rental-min-standing` raises it); offered = rentable and every card idle. The size offered
+    is the whole box."""
     boxes, instances = fleet()
     a = boxes[HK_A]
     a.rent_ports = [31000, 31099]
@@ -196,9 +206,12 @@ def test_a_box_is_offered_when_it_is_rentable_and_wholly_idle(tmp_path):
     assert doc['offers'] == {}  # one card leased, one draining: rentable, not on offer
     a.cards = {UUID_A: CardState(IDLE, '', NOW), UUID_B: CardState(IDLE, '', NOW)}
     assert build_fleet(tmp_path, boxes, {}, {}, True, NOW)['offers'] == {'RTX5090': {'2': 1}}
-    a.standing_events = []  # back on probation: idle, but no paying customer
+    a.standing_events = []  # back on probation: still on offer (#1818: the pay holdback is what it has at stake)
     doc = build_fleet(tmp_path, boxes, {}, {}, True, NOW)
-    assert not next(x for x in doc['boxes'] if x['hotkey'] == HK_A)['rentable'] and doc['offers'] == {}
+    row = next(x for x in doc['boxes'] if x['hotkey'] == HK_A)
+    assert row['standing'] == 'probation' and row['rentable'] is True and doc['offers'] == {'RTX5090': {'2': 1}}
+    gated = build_fleet(tmp_path, boxes, {}, {}, True, NOW, rentable_min_standing=STANDARD)  # the gate raised
+    assert not next(x for x in gated['boxes'] if x['hotkey'] == HK_A)['rentable'] and gated['offers'] == {}
     assert '31000' not in json.dumps(doc)  # the range is the miner's business and the pod's, never the page's
 
 

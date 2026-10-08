@@ -119,6 +119,10 @@ class BoxState:
     # verdict. Empty: not for rent; the box is proved and paid idle only. Every full check re-reads it, so a miner who
     # restarts without --rent stops being rentable at the next round.
     rent_ports: List[int] = field(default_factory=list)
+    # The rent-range probe's outcome at the last verdict (``rent_probe.RentProbe.as_dict``: host, port, public_port,
+    # ok, reason, code). A range the controller could not reach leaves ``rent_ports`` empty and this says why
+    # (``status`` shows it; the page shows the ``code``'s phrase as ``rentable_why``). Empty: no range was offered.
+    rent_probe: Dict[str, object] = field(default_factory=dict)
     # Who put the box here: 'chain' (discovery read its endpoint off the metagraph and removes it when the hotkey
     # deregisters) or 'operator' (`gitt controller admit`; discovery leaves it alone). '' is a file from before this.
     source: str = ''
@@ -263,6 +267,7 @@ def apply_verdict(
     new.unreachable_count = 0
     new.unanswered_at = None
     new.rent_ports = list(verdict.rent_ports)
+    new.rent_probe = dict(verdict.rent_probe or {})
     if verdict.admitted:
         new.identity = identity_baseline(verdict) or new.identity
         new.not_run_count = 0

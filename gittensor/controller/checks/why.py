@@ -87,6 +87,11 @@ POWER_UNREPORTED = 'power_unreported'
 # fleet_uuid_unique
 UUID_CLAIMED_ELSEWHERE = 'uuid_claimed_elsewhere'
 
+# The rent-range probe (29 §5, ``rent_probe.py``). Not a failed check (the box is admitted idle-only), so these never
+# reach ``last_failed_why``: ``BoxState.rent_probe`` carries the code and the page renders it as ``rentable_why``.
+RENT_PORT_UNREACHABLE = 'rent_port_unreachable'
+RENT_LISTENER_FAILED = 'rent_listener_failed'
+
 
 PHRASES: Dict[str, str] = {
     # card_free. ``n`` is every foreign holder, whatever bucket it landed in; the code is the bucket that holds most
@@ -134,6 +139,9 @@ PHRASES: Dict[str, str] = {
     POWER_UNREPORTED: 'this box did not report a power limit on {n} card{s}',
     # fleet_uuid_unique
     UUID_CLAIMED_ELSEWHERE: 'another box in the pool claims {n} of the GPUs this box reports',
+    # the rent-range probe: no number, the range is the miner's business (publish never prints it)
+    RENT_PORT_UNREACHABLE: 'the rent port range could not be reached from the controller (a firewall or NAT in the way), so this box is proved and paid idle only',  # noqa: E501
+    RENT_LISTENER_FAILED: 'a listener on the rent port range would not start on this box, so this box is proved and paid idle only',  # noqa: E501
 }
 
 # A failure with nothing to classify: the name alone says it, so the phrase is fixed per name. Keyed by what

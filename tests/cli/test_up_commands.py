@@ -17,6 +17,7 @@ from gittensor.agent.launch import Workload, parse_workloads, workload_list_comm
 from gittensor.cli.main import cli
 from gittensor.cli.up_commands import prereqs
 from gittensor.cli.up_commands.prereqs import HostProbe, PrereqReport, check_ports, check_toolkit, run_prereqs
+from gittensor.controller.checks.vendor import AMD_RENDER_NODES_COMMAND, VENDOR_DETECT_COMMAND
 
 SMI_OK = 'NVIDIA GeForce RTX 5090, 580.65.06, GPU-1111\n'
 AGENT_REF = 'entrius/gt-agent@sha256:' + 'a' * 64
@@ -55,6 +56,8 @@ class FakeProbe:
         self.kernel = '580.65.06'
         self.uname = '6.8.0-45-generic'
         self.pod_ports: str = ''  # `docker ps --format {{.Ports}}` for our rental pods
+        self.modules = 'nvidia\n'  # the GPU kernel modules loaded (the controller's vendor detect command)
+        self.dri = ''  # `ls /dev/dri`'s render nodes on an AMD box
 
     def nvml_allowlist(self, url=''):
         return self.allowlist
@@ -105,7 +108,17 @@ class FakeProbe:
             return subprocess.CompletedProcess(cmd, 0, self.uname + '\n', '')
         if cmd[:2] == ['docker', 'ps'] and 'label=io.gittensor.rental' in cmd:
             return subprocess.CompletedProcess(cmd, 0, self.pod_ports, '')
+        if cmd[:2] == ['sh', '-c'] and cmd[2] == VENDOR_DETECT_COMMAND:
+            return subprocess.CompletedProcess(cmd, 0, self.modules, '')
+        if cmd[:2] == ['sh', '-c'] and cmd[2] == AMD_RENDER_NODES_COMMAND:
+            return subprocess.CompletedProcess(cmd, 0, self.dri, '')
         raise AssertionError(f'unexpected command {cmd}')
+
+    def vendor_detected(self):
+        return HostProbe.vendor_detected(self)  # type: ignore[arg-type]
+
+    def render_nodes(self):
+        return HostProbe.render_nodes(self)  # type: ignore[arg-type]
 
     def kernel_release(self):
         return HostProbe.kernel_release(self)  # type: ignore[arg-type]
@@ -179,16 +192,46 @@ class TestPrereqs:
     def test_all_pass(self, probe):
         report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
         assert report.ok and report.hotkey_ss58 == probe.ss58 and not report.already_up
-        assert [r.status for r in report.results] == ['pass'] * 10
-        assert [r.name for r in report.results][:2] == ['NVIDIA driver', 'Driver vetted']
-        assert [r.name for r in report.results][5:8] == ['Workload ports', 'Public IP', 'SSH port reachable']
+        assert [r.status for r in report.results] == ['pass'] * 11
+        assert [r.name for r in report.results][:3] == ['GPU vendor', 'NVIDIA driver', 'Driver vetted']
+        assert [r.name for r in report.results][6:9] == ['Workload ports', 'Public IP', 'SSH port reachable']
+        assert report.vendor == 'nvidia'
         assert report.public_ip == probe.ip and probe.chain_calls == 1  # the registration lookup only
 
     def test_no_driver_fails(self, probe):
         probe.smi = subprocess.CompletedProcess([], 127, '', 'nvidia-smi: command not found')
         report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
         assert not report.ok
-        assert report.results[0].name == 'NVIDIA driver' and report.results[0].status == 'fail'
+        assert report.results[1].name == 'NVIDIA driver' and report.results[1].status == 'fail'
+
+    def test_an_amd_box_has_its_own_driver_row_and_no_toolkit_row(self, probe):
+        """Vault 31 §2 #5: an AMD host has no nvidia-smi and no NVIDIA container toolkit; neither may block it. The
+        driver row is the in-tree amdgpu module and one render node per card (the model and stack floor come with
+        the AMD scrape, step 3)."""
+        probe.modules, probe.dri = 'amdgpu\n', 'renderD128\nrenderD129\n'
+        probe.smi = subprocess.CompletedProcess([], 127, '', 'nvidia-smi: command not found')
+        probe.binaries = {}
+        report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
+        assert report.ok and report.vendor == 'amd'
+        rows = {r.name: r for r in report.results}
+        assert rows['GPU vendor'].status == 'pass' and 'amdgpu' in rows['GPU vendor'].detail
+        assert rows['AMD driver'].status == 'pass' and rows['AMD driver'].detail.endswith('2 render node(s): renderD128, renderD129')  # fmt: skip
+        assert rows['NVIDIA container toolkit'].status == 'skip' and 'NVIDIA driver' not in rows
+        probe.dri = ''
+        report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
+        assert not report.ok and 'no render node' in {r.name: r for r in report.results}['AMD driver'].detail
+
+    def test_a_box_with_both_vendors_is_refused_by_name(self, probe):
+        probe.modules = 'nvidia\namdgpu\n'
+        report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
+        assert not report.ok and report.vendor == 'nvidia'
+        assert report.results[0].name == 'GPU vendor' and report.results[0].status == 'fail'
+        assert 'one vendor per box' in report.results[0].detail
+        # no module at all: the row passes and nvidia-smi says what is wrong, as before
+        probe.modules = ''
+        probe.smi = subprocess.CompletedProcess([], 127, '', 'nvidia-smi: command not found')
+        report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
+        assert report.results[0].status == 'pass' and report.results[1].status == 'fail'
 
     def test_rent_adds_the_sysbox_and_rent_port_rows_and_nothing_else(self, probe):
         """vault 29 §5: without --rent the table is as before; with it, Sysbox must be registered and the range must be
@@ -394,6 +437,17 @@ class TestUpCommand:
         assert AGENT_REF in out and 'Release channel' in out and '5.1.0' in out
         assert probe.ss58 in out
         assert docker_calls == [] and probe.chain_calls == 0
+
+    def test_an_amd_host_starts_the_runner_without_gpus_all(self, runner, docker_calls, probe):
+        probe.modules, probe.dri = 'amdgpu\n', 'renderD128\n'
+        probe.smi = subprocess.CompletedProcess([], 127, '', 'nvidia-smi: command not found')
+        probe.binaries = {}
+        result = runner.invoke(cli, [*UP, '--dry-run'])
+        assert result.exit_code == 0, result.output
+        out = result.output
+        assert 'AMD driver' in out and 'NVIDIA driver' not in out and 'skipped (AMD box' in out
+        assert '-e GT_AGENT_VENDOR=amd' in out and '--gpus all' not in out
+        assert 'docker run -d --name gt-agent --restart unless-stopped --privileged --pid host -v' in out
 
     def test_unverifiable_channel_fails_and_starts_nothing(self, runner, docker_calls, probe):
         with patch('gittensor.cli.up_commands.up._load_channel', side_effect=ChannelError('signature does not verify')):

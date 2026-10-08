@@ -135,7 +135,8 @@ class BoxState:
     # unreachable round until `gitt controller admit --force-rekey` or the pinned key answers at the new address.
     endpoint_changed: Dict[str, object] = field(default_factory=dict)
     # What the last passing full check saw, for the in-lease heartbeat's "same card?": {'power_limits': {uuid: W},
-    # 'nvml_md5': md5}.
+    # 'nvml_md5': md5} and, on an AMD box, {'render_nodes': {uuid: 'renderD<N>'}}: the nodes a pod or a proof is
+    # given are the ones the scrape saw on that card, re-pinned at every passing check (30 §1 #5).
     identity: Dict[str, object] = field(default_factory=dict)
     # Dated events WS-E folds into standing: {'at', 'kind', ...}. Kept across a bench.
     standing_events: List[dict] = field(default_factory=list)
@@ -165,6 +166,12 @@ class BoxState:
 
     def card(self, uuid: str) -> CardState:
         return self.cards.get(uuid) or CardState()
+
+    @property
+    def render_nodes(self) -> Dict[str, str]:
+        """AMD only: {uuid: 'renderD<N>'} as the last passing full check pinned it; {} on an NVIDIA box."""
+        nodes = self.identity.get('render_nodes')
+        return {str(k): str(v) for k, v in nodes.items()} if isinstance(nodes, dict) else {}
 
     def public_port(self, port: int) -> int:
         return int(self.port_map.get(str(port), port))
@@ -498,8 +505,9 @@ def record_start(
 
 
 def identity_baseline(verdict: CheckVerdict) -> dict:
-    """The power limit per card and the NVML library md5 a passing full check saw: the heartbeat's "same card?"
-    compares against these. Empty when the verdict carries neither."""
+    """The power limit per card and the NVML library md5 a passing full check saw (the heartbeat's "same card?"
+    compares against these) and, on an AMD box, the render node per card (what a pod or a proof is given). Empty
+    when the verdict carries none of them."""
     out: dict = {}
     power = verdict.check('power_limit')
     if power is not None and power.passed:
@@ -509,6 +517,8 @@ def identity_baseline(verdict: CheckVerdict) -> dict:
     nvml = verdict.check('nvml_digest')
     if nvml is not None and nvml.passed and nvml.evidence.get('md5'):
         out['nvml_md5'] = nvml.evidence['md5']
+    if verdict.render_nodes:
+        out['render_nodes'] = dict(verdict.render_nodes)
     return out
 
 

@@ -67,6 +67,9 @@ NVML_LIBRARY_MISSING = 'nvml_library_missing'
 NVML_DRIVER_UNKNOWN = 'nvml_driver_unknown'
 NVML_DIGEST_MISMATCH = 'nvml_digest_mismatch'
 
+# vendor
+VENDOR_MIXED = 'vendor_mixed'
+
 # gpu_spec
 SPEC_UNREADABLE = 'spec_unreadable'
 SPEC_CARD_COUNT = 'spec_card_count'
@@ -123,6 +126,8 @@ PHRASES: Dict[str, str] = {
     NVML_LIBRARY_MISSING: "we could not find or hash this box's NVIDIA management library",
     NVML_DRIVER_UNKNOWN: "this box's NVIDIA driver version is not on our vetted list yet",
     NVML_DIGEST_MISMATCH: "this box's NVIDIA management library is not the one published for its driver",
+    # vendor
+    VENDOR_MIXED: 'this box has GPUs from two vendors, and the pool admits one vendor per box',
     # gpu_spec
     SPEC_UNREADABLE: 'nvidia-smi did not answer on this box',
     SPEC_CARD_COUNT: 'this box reports {n} GPU{s}, not a box size the pool admits for its GPU type',
@@ -160,6 +165,7 @@ BY_NAME: Dict[str, str] = {
     'disk_free': 'this box does not have enough free disk space',
     'agent_image': 'the agent image on this box is not one we published',
     'nvml_digest': 'the NVIDIA driver and library on this box did not check out',
+    'vendor': 'this box has GPUs from more than one vendor',
     'gpu_spec': 'the GPUs on this box do not match the pool spec',
     'gpu_uuid_pin': 'the GPUs on this box are not the ones pinned when it was admitted',
     'power_limit': 'the GPU power limit on this box is below the pool floor',

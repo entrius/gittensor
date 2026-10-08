@@ -297,6 +297,7 @@ def build_fleet(
                 'status': box.status,
                 'standing': standing(box.standing_events, now),
                 'gpu_type': gpu_type,
+                'vendor': box.vendor,  # the switch the box was admitted under (30 §1 #2)
                 'card_count': len(cards),
                 # The miner opened a rent range and the box has the standing to take a customer (29 §1 #7). The range
                 # itself is not published: a customer gets the mapped ports of their own pod, nobody else needs them.

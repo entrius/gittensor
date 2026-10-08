@@ -29,9 +29,11 @@ from gittensor.controller.checks.scrape import (
     HostScrape,
     parse_device_holders,
 )
+from gittensor.controller.checks.vendor import BOTH, vendor_or_default
 from gittensor.controller.checks.verdict import CheckResult
 from gittensor.controller.proof.slot import GpuProof, ProbeResult, clip, probe_box
 
+VENDOR = 'vendor'
 GPU_SPEC = 'gpu_spec'
 GPU_UUID_PIN = 'gpu_uuid_pin'
 FLEET_UUID_UNIQUE = 'fleet_uuid_unique'
@@ -44,6 +46,20 @@ CARD_FREE = 'card_free'
 GPU_PROOF = 'gpu_proof'
 
 _UUID = re.compile(r'^GPU-[0-9a-fA-F-]{20,}$')
+
+
+def check_vendor(detected: str) -> CheckResult:
+    """One GPU vendor per box (30 §3; no mixed boxes, as no mixed types): a box with both the NVIDIA and the AMD
+    kernel module loaded is refused by name, not left to read as a broken nvidia-smi. No module at all passes here
+    and fails closed in ``gpu_spec`` as it always has."""
+    evidence = {'detected': detected, 'vendor': vendor_or_default(detected)}
+    if detected == BOTH:
+        return CheckResult(
+            VENDOR,
+            False,
+            {**evidence, 'reason': 'both nvidia and amdgpu are loaded', w.PUBLIC: {'code': w.VENDOR_MIXED}},
+        )
+    return CheckResult(VENDOR, True, evidence)
 
 
 def check_gpu_spec(gpus: Sequence[GpuInfo], spec: Optional[cfg.CardSpec] = None, scrape_error: str = '') -> CheckResult:
@@ -465,6 +481,7 @@ def identity_checks(
     adds the fleet-wide uniqueness check; without it the box is judged alone. ``ours`` (our instances' container IDs
     on this box) is what ``check_card_free`` judges the box's device holders against."""
     checks = [
+        check_vendor(scrape.vendor_detected),
         check_gpu_spec(scrape.gpus, spec, scrape.errors.get('nvidia_smi', '')),
         check_uuid_pin(scrape.gpus, pinned_uuids),
     ]

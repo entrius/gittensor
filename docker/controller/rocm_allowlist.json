@@ -1,3 +1,0 @@
-{
-  "_comment": "The vetted AMD stacks (vault 30 §6): amdgpu version -> the firmware bundle versions allowed per card type, curated with `gitt controller allowlist add --vendor amd` on a known-good box. Empty: every AMD box fails closed until the first stack is vetted on the MI300X measurement run."
-}

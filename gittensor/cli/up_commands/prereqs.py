@@ -46,6 +46,16 @@ from gittensor.controller.checks.scrape import (
     parse_kernel_driver,
     parse_md5,
 )
+from gittensor.controller.checks.vendor import (
+    AMD,
+    AMD_RENDER_NODES_COMMAND,
+    BOTH,
+    NVIDIA,
+    VENDOR_DETECT_COMMAND,
+    parse_render_nodes,
+    parse_vendor,
+    vendor_or_default,
+)
 
 DEFAULT_WALLET_PATH = Path.home() / '.bittensor' / 'wallets'
 PUBLIC_IP_SERVICES = ('https://checkip.amazonaws.com', 'https://api.ipify.org')  # each answers the caller's IP, plain
@@ -58,6 +68,8 @@ NVML_ALLOWLIST_TIMEOUT_S = 8.0
 DRIVER_VETTED_CHECK = 'Driver vetted'
 WORKLOAD_PORTS = range(WORKLOAD_PORT_RANGE[0], WORKLOAD_PORT_RANGE[1] + 1)
 SYSBOX_CHECK = 'Sysbox runtime'
+VENDOR_CHECK = 'GPU vendor'
+TOOLKIT_CHECK = 'NVIDIA container toolkit'
 RENT_PORTS_CHECK = 'Rent ports'
 SYSBOX_SETUP_URL = 'https://raw.githubusercontent.com/entrius/gittensor/main/docker/agent/sysbox-setup.sh'
 SYSBOX_KERNEL_MIN = (5, 19)  # overlayfs over ID-mapped mounts; older kernels fall back to shiftfs (Lium's check)
@@ -90,6 +102,7 @@ class PrereqReport:
     agent_state: str | None = None  # docker container status, None when no such container
     runner_state: str | None = None
     workloads: list[Workload] = field(default_factory=list)  # the controller's gt-i-* containers present on the box
+    vendor: str = NVIDIA  # the host's GPU vendor as the controller's scrape would judge it (vault 30 §1 #2)
 
     @property
     def ok(self) -> bool:
@@ -212,6 +225,16 @@ class HostProbe:
         proc = self.run(['sh', '-c', KERNEL_DRIVER_COMMAND])
         return parse_kernel_driver(proc.stdout) if proc.returncode == 0 else ''
 
+    def vendor_detected(self) -> str:
+        """Which GPU kernel module is loaded, by the controller's own test: 'nvidia', 'amd', 'both' or ''."""
+        proc = self.run(['sh', '-c', VENDOR_DETECT_COMMAND])
+        return parse_vendor(proc.stdout) if proc.returncode == 0 else ''
+
+    def render_nodes(self) -> list[str]:
+        """The ``/dev/dri/renderD*`` nodes on the host, one per AMD card."""
+        proc = self.run(['sh', '-c', AMD_RENDER_NODES_COMMAND])
+        return parse_render_nodes(proc.stdout) if proc.returncode == 0 else []
+
     def container_state(self, name: str) -> str | None:
         proc = self.run(['docker', 'inspect', '--format', '{{.State.Status}}', name])
         return proc.stdout.strip() or None if proc.returncode == 0 else None
@@ -253,6 +276,26 @@ def check_driver(probe: HostProbe) -> list[CheckResult]:
     if model is not None:
         results.append(model)
     return results
+
+
+def check_vendor(detected: str) -> CheckResult:
+    """The controller's ``vendor`` check, said here first: one GPU vendor per box (vault 30 §3)."""
+    if detected == BOTH:
+        return CheckResult(
+            VENDOR_CHECK, False, 'both the nvidia and the amdgpu kernel module are loaded: one vendor per box'
+        )
+    if detected == AMD:
+        return CheckResult(VENDOR_CHECK, True, 'amdgpu (cards attach as device nodes, no container runtime)')
+    return CheckResult(VENDOR_CHECK, True, 'nvidia' if detected == NVIDIA else 'no GPU kernel module found; checking nvidia-smi')  # fmt: skip
+
+
+def check_amd_driver(probe: HostProbe) -> CheckResult:
+    """The AMD box's driver row: the in-tree amdgpu module and one render node per card. The model, the stack floor
+    and the card ids come with the AMD scrape (vault 31 step 3); this is only what the agent needs to start."""
+    nodes = probe.render_nodes()
+    if not nodes:
+        return CheckResult('AMD driver', False, 'amdgpu is loaded but /dev/dri has no render node: no card is usable')
+    return CheckResult('AMD driver', True, f'amdgpu; {len(nodes)} render node(s): {", ".join(nodes)}')
 
 
 def check_gpu_model(names: Sequence[str]) -> CheckResult | None:
@@ -323,13 +366,11 @@ def check_docker(probe: HostProbe) -> CheckResult:
 def check_toolkit(probe: HostProbe) -> CheckResult:
     for binary in ('nvidia-ctk', 'nvidia-container-cli', 'nvidia-container-runtime'):
         if probe.which(binary):
-            return CheckResult('NVIDIA container toolkit', True, f'{binary} on PATH')
+            return CheckResult(TOOLKIT_CHECK, True, f'{binary} on PATH')
     proc = probe.run(['docker', 'info', '--format', '{{json .Runtimes}}'])
     if proc.returncode == 0 and '"nvidia"' in proc.stdout:
-        return CheckResult('NVIDIA container toolkit', True, 'nvidia runtime registered with docker')
-    return CheckResult(
-        'NVIDIA container toolkit', False, 'nvidia-ctk / nvidia-container-cli not found and no nvidia docker runtime'
-    )
+        return CheckResult(TOOLKIT_CHECK, True, 'nvidia runtime registered with docker')
+    return CheckResult(TOOLKIT_CHECK, False, 'nvidia-ctk / nvidia-container-cli not found and no nvidia docker runtime')
 
 
 def check_sysbox(probe: HostProbe) -> CheckResult:
@@ -527,10 +568,19 @@ def run_prereqs(
     ``dev_box`` (``--allow-dev-keys``, our own local builds): the Sysbox row is skipped (a Lium pod cannot run it; the
     controller then runs pods under runc with its own dev flag) and the range may be as narrow as a pod needs."""
     report = PrereqReport()
-    report.results.extend(check_driver(probe))
+    detected = probe.vendor_detected()
+    report.vendor = vendor_or_default(detected)
+    report.results.append(check_vendor(detected))
+    if report.vendor == AMD:
+        report.results.append(check_amd_driver(probe))
+    else:
+        report.results.extend(check_driver(probe))
     docker = check_docker(probe)
     report.results.append(docker)
-    report.results.append(check_toolkit(probe))
+    if report.vendor == AMD:
+        report.results.append(CheckResult(TOOLKIT_CHECK, None, 'skipped (AMD box: cards attach as device nodes)'))
+    else:
+        report.results.append(check_toolkit(probe))
     if docker.ok:
         report.agent_state = probe.container_state(AGENT_CONTAINER_NAME)
         report.runner_state = probe.container_state(RUNNER_CONTAINER_NAME)

@@ -35,6 +35,7 @@ from gittensor.agent.config import (
     ENV_RENT_PORTS,
     ENV_SSH_PORT,
     ENV_UPDATE_INTERVAL,
+    ENV_VENDOR,
     INSTANCE_LABEL,
     PORT_LABEL,
     RENT_PORTS_LABEL,
@@ -47,12 +48,17 @@ from gittensor.agent.config import (
     WORKLOAD_STOP_DEFAULT_S,
     rent_ports_label,
 )
+from gittensor.controller.checks.vendor import AMD, NVIDIA
 
 DOCKER_SOCK = '/var/run/docker.sock'
 
 # The privileges the agent needs and nothing more is not a claim we can make: this is Lium's executor footprint
 # (vault 22 §4). Privileged + pid host + docker.sock is host root for whoever holds the controller's CA key.
-AGENT_PRIVILEGE_FLAGS = ('--privileged', '--pid', 'host', '--gpus', 'all')
+AGENT_PRIVILEGE_FLAGS = ('--privileged', '--pid', 'host')
+# The NVIDIA container runtime attaches every card to the agent (nvidia-smi, the scrape). An AMD box has no such
+# runtime and ``docker run --gpus all`` fails outright there; ``--privileged`` already exposes ``/dev/kfd`` and
+# ``/dev/dri`` (vault 30 §1 #5), so on an AMD box the flag is simply left off.
+NVIDIA_GPU_FLAGS = ('--gpus', 'all')
 
 
 def agent_run_command(
@@ -64,11 +70,13 @@ def agent_run_command(
     name: str = AGENT_CONTAINER_NAME,
     allow_dev_keys: bool = False,
     rent_ports: tuple[int, int] | None = None,
+    vendor: str = NVIDIA,
 ) -> list[str]:
     """The agent container: what the runner starts (and restarts when the channel's digest moves). One published port,
     sshd. ``allow_dev_keys`` lets an image built on docker/agent/keys/make-dev-keys.sh keys start (local builds).
     ``rent_ports`` (``gitt up --rent``) is carried as a label for the controller to read: the box offers itself for
-    rental on that range (vault 29). docker/agent/runner.sh issues the same line; keep them together."""
+    rental on that range (vault 29). ``vendor`` is the host's (``gitt up`` detects it as the controller's scrape does);
+    ``amd`` leaves ``--gpus all`` off. docker/agent/runner.sh issues the same line; keep them together."""
     cmd = [
         'docker',
         'run',
@@ -78,6 +86,7 @@ def agent_run_command(
         '--restart',
         'unless-stopped',
         *AGENT_PRIVILEGE_FLAGS,
+        *(() if vendor == AMD else NVIDIA_GPU_FLAGS),
         '-v',
         f'{DOCKER_SOCK}:{DOCKER_SOCK}',
         '-v',
@@ -112,10 +121,13 @@ def runner_run_command(
     agent_name: str = AGENT_CONTAINER_NAME,
     name: str = RUNNER_CONTAINER_NAME,
     rent_ports: tuple[int, int] | None = None,
+    vendor: str = NVIDIA,
 ) -> list[str]:
     """The runner container: what ``gitt up`` actually issues. Needs only the docker socket. It follows the signed
-    channel at ``channel_url``, never a tag. ``rent_ports`` is handed on to every agent it starts."""
+    channel at ``channel_url``, never a tag. ``rent_ports`` and an AMD ``vendor`` are handed on to every agent it
+    starts."""
     rent = ['-e', f'{ENV_RENT_PORTS}={rent_ports_label(rent_ports)}'] if rent_ports else []
+    amd = ['-e', f'{ENV_VENDOR}={AMD}'] if vendor == AMD else []
     return [
         'docker',
         'run',
@@ -137,6 +149,7 @@ def runner_run_command(
         '-e',
         f'{ENV_UPDATE_INTERVAL}={update_interval_s}',
         *rent,
+        *amd,
         runner_image,
     ]
 

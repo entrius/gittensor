@@ -148,6 +148,7 @@ class RentalRecord:
     uuid: str = ''  # the first card (``InstanceRecord.uuid``); the ledger reads ``uuids`` as well
     uuids: list[str] = field(default_factory=list)
     vendor: str = NVIDIA  # the box's pinned vendor (30 §1 #2); records from before this field load as nvidia
+    render_nodes: dict[str, str] = field(default_factory=dict)  # AMD: {uuid: 'renderD<N>'}, the box's pin at placement
     container_id: str = ''
     host: str = ''
     port_map: dict[str, int] = field(default_factory=dict)  # str(pod port) -> the host port docker publishes it on
@@ -284,6 +285,15 @@ def pod_run_command(r: RentalRecord, network: str = RENTAL_NETWORK, runtime: str
     host mounts, no extra capabilities. ``runtime`` is ``runc`` only on a dev box that cannot run Sysbox (a Lium pod
     is one: it is a Sysbox container itself)."""
     devices = ','.join(r.uuids)
+    if r.vendor == AMD:
+        # every card of the box by its pinned render node (30 §1 #5): the nodes the scrape saw, nothing else
+        missing = [u for u in r.uuids if not r.render_nodes.get(u)]
+        if missing:
+            raise RentalError(f'{START_FAILED}: no render node pinned for {len(missing)} of {len(r.uuids)} card(s)')
+        attach = amd_attach_args([r.render_nodes[u] for u in r.uuids])
+    else:
+        # every card of the box by --gpus (docker reads the value as CSV: quoted, commas survive)
+        attach = [f'--gpus {shlex.quote(f'"device={devices}"')}']
     parts = [
         'docker run -d',
         f'--name {shlex.quote(r.name)}',
@@ -291,9 +301,7 @@ def pod_run_command(r: RentalRecord, network: str = RENTAL_NETWORK, runtime: str
         f'--label {shlex.quote(f"{RENTAL_LABEL}={r.id}")}',
         f'--label {shlex.quote(f"{RENTAL_ENDS_AT_LABEL}={int(r.ends_at)}")}',  # `gitt down` tells the miner how long
         f'--label {shlex.quote(f"{UUID_LABEL}={devices}")}',
-        # every card of the box: AMD by device nodes (30 §1 #5), NVIDIA by --gpus (docker reads the value as CSV:
-        # quoted, commas survive)
-        *(amd_attach_args(whole_box=True) if r.vendor == AMD else [f'--gpus {shlex.quote(f'"device={devices}"')}']),
+        *attach,
         f'--shm-size {POD_SHM_SIZE}',
         f'--pids-limit {POD_PIDS_LIMIT}',
         '--restart no',
@@ -601,6 +609,8 @@ class RentalReconciler:
             r.box, r.box_uid, r.state = box.box_id, box.uid, STARTING_R
             r.uuids = sorted(box.cards)
             r.uuid = r.uuids[0]
+            r.vendor = box.vendor
+            r.render_nodes = {u: box.render_nodes[u] for u in r.uuids if u in box.render_nodes}
             r.host = _public_host(box)
             with self._lock:
                 b = self._box(box.box_id)
@@ -626,6 +636,8 @@ class RentalReconciler:
                 continue
             if any(c.state != IDLE or c.instance_id for c in box.cards.values()):
                 continue
+            if box.vendor == AMD and any(u not in box.render_nodes for u in box.cards):
+                continue  # no render node pinned for a card: the pod could not be given it (30 §1 #5)
             fits.append(box)
         if not fits:
             return None

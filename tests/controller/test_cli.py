@@ -149,6 +149,7 @@ def test_check_admits_the_passing_box_and_pins_it(state):
     payload = json.loads(result.stdout)
     assert payload['verdict'] == 'ADMIT' and payload['status'] == {'before': IDLE, 'after': IDLE}
     assert [c['name'] for c in payload['checks']] == [
+        ck.VENDOR,
         ck.GPU_SPEC,
         ck.GPU_UUID_PIN,
         ck.FLEET_UUID_UNIQUE,

@@ -131,4 +131,5 @@ def finish_verdict(
         rent_ports=scrape.rent_ports,
         rent_probe=rent_probe.as_dict() if rent_probe is not None else None,
         vendor=scrape.vendor,
+        render_nodes={g.uuid: g.render_node for g in scrape.gpus if g.render_node},
     )

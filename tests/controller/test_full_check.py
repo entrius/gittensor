@@ -37,6 +37,7 @@ from tests.controller.conftest import (
 )
 
 ALL_CHECKS = [
+    ck.VENDOR,
     ck.GPU_SPEC,
     ck.GPU_UUID_PIN,
     ck.NVML_DIGEST,
@@ -81,11 +82,12 @@ def test_real_5090_fixture_is_admitted(proof, allowlist):
     assert calls[3] == f'docker rm -f {container_for(UUID_5090)}'
     assert len(proof.staged) == 1
     d = verdict.as_dict()
-    assert d['verdict'] == 'ADMIT' and d['checks'][0] == {
+    assert d['verdict'] == 'ADMIT' and d['checks'][1] == {
         'name': 'gpu_spec',
         'pass': True,
-        'evidence': d['checks'][0]['evidence'],
+        'evidence': d['checks'][1]['evidence'],
     }
+    assert d['checks'][0] == {'name': 'vendor', 'pass': True, 'evidence': {'detected': 'nvidia', 'vendor': 'nvidia'}}
 
 
 def test_admitted_box_re_checked_against_its_pin(proof, allowlist):

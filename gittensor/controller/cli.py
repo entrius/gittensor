@@ -2772,6 +2772,7 @@ def status_command(state_dir, json_mode):
                 'uid': box.uid,
                 'host': _host_field(box.host, box.port),
                 'status': box.status,
+                'vendor': box.vendor,
                 'standing': standing(box.standing_events, now),
                 'cards': cards,
                 'last_check_at': box.last_check_at,

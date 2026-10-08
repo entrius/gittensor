@@ -27,6 +27,7 @@ from gittensor.controller.checks.scrape import (
     nvidia_smi_command,
     rent_ports_command,
 )
+from gittensor.controller.checks.vendor import VENDOR_DETECT_COMMAND
 from gittensor.controller.proof.slot import (
     BoxIdentity,
     ProofUnavailable,
@@ -224,6 +225,7 @@ def passing_runner(
     """A box that passes everything. Tests override one command with ``runner.on(...)`` to make one check fail."""
     runner = FakeRunner(
         {
+            VENDOR_DETECT_COMMAND: 'nvidia\n',
             nvidia_smi_command(): nvidia_smi,
             NVML_MD5_COMMAND: nvml_md5,
             KERNEL_DRIVER_COMMAND: kernel_driver,

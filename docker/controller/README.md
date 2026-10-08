@@ -14,7 +14,7 @@ ssh-keygen refuse a uid with no passwd entry.
 
 | Mount | In the container | What |
 |---|---|---|
-| state dir (owned by `CONTROLLER_UID`) | `/state` | `boxes.json`, `instances.json`, `known_hosts`, `nvml_allowlist.json`, `registry/`, `deployments.json`, `controller.json` |
+| state dir (owned by `CONTROLLER_UID`) | `/state` | `boxes.json`, `instances.json`, `known_hosts`, `nvml_allowlist.json`, `rocm_allowlist.json`, `registry/`, `deployments.json`, `controller.json` |
 | SSH CA private key | `/secrets/gt_ca` (read-only) | signs the ~5-minute per-visit certificates |
 | proof provider source | `/opt/proof` (read-only, on `PYTHONPATH`) | the private `GpuProof` implementation |
 | proof binary + secret store | `/opt/proof-dist` (read-only) | e.g. `gt_proof`, `gt_proof.version`, `secret_store.json` |

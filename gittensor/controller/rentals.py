@@ -69,6 +69,7 @@ from gittensor.controller.checks.state import (
     record_start,
     transition_card,
 )
+from gittensor.controller.checks.vendor import AMD, NVIDIA, amd_attach_args
 from gittensor.controller.locks import BoxLocks
 from gittensor.controller.manifest import gpu_type_of
 from gittensor.controller.runspec import PlacementError, PullToken, image_present_command, pull_command
@@ -146,6 +147,7 @@ class RentalRecord:
     box_uid: int | None = None
     uuid: str = ''  # the first card (``InstanceRecord.uuid``); the ledger reads ``uuids`` as well
     uuids: list[str] = field(default_factory=list)
+    vendor: str = NVIDIA  # the box's pinned vendor (30 §1 #2); records from before this field load as nvidia
     container_id: str = ''
     host: str = ''
     port_map: dict[str, int] = field(default_factory=dict)  # str(pod port) -> the host port docker publishes it on
@@ -289,7 +291,9 @@ def pod_run_command(r: RentalRecord, network: str = RENTAL_NETWORK, runtime: str
         f'--label {shlex.quote(f"{RENTAL_LABEL}={r.id}")}',
         f'--label {shlex.quote(f"{RENTAL_ENDS_AT_LABEL}={int(r.ends_at)}")}',  # `gitt down` tells the miner how long
         f'--label {shlex.quote(f"{UUID_LABEL}={devices}")}',
-        f'--gpus {shlex.quote(f'"device={devices}"')}',  # docker reads the value as CSV: quoted, commas survive
+        # every card of the box: AMD by device nodes (30 §1 #5), NVIDIA by --gpus (docker reads the value as CSV:
+        # quoted, commas survive)
+        *(amd_attach_args(whole_box=True) if r.vendor == AMD else [f'--gpus {shlex.quote(f'"device={devices}"')}']),
         f'--shm-size {POD_SHM_SIZE}',
         f'--pids-limit {POD_PIDS_LIMIT}',
         '--restart no',

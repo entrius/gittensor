@@ -23,6 +23,7 @@ from typing import Dict, List, Mapping, Optional, Sequence
 from gittensor.agent.config import WORKLOAD_PORT_RANGE
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks import why as w
+from gittensor.controller.checks.vendor import NVIDIA
 from gittensor.controller.checks.verdict import NOT_RUN, CheckVerdict
 
 ADMIT = 'ADMIT'
@@ -79,6 +80,9 @@ class BoxState:
     status: str = ADMIT
     pinned_uuids: List[str] = field(default_factory=list)
     card_name: str = ''
+    # The vendor switch (30 §1 #2), pinned beside the UUIDs at admit; a box never changes vendor without
+    # re-admission. Files from before this field existed load as nvidia, which every box was.
+    vendor: str = NVIDIA
     bench_count: int = 0  # rungs climbed as of the last bench; ``ladder_rung`` is what clean time has left of it
     benched_at: Optional[float] = None
     bench_until: Optional[float] = None
@@ -275,6 +279,7 @@ def apply_verdict(
         if new.status == ADMIT:
             new.pinned_uuids = list(verdict.gpu_uuids)
             new.card_name = verdict.card_name
+            new.vendor = verdict.vendor
             new.admitted_at = now
             new.clean_paused_at = None
             new.clean_paused_s = 0.0

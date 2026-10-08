@@ -35,6 +35,7 @@ import yaml
 from gittensor.agent.config import BIND_LABEL, DRAIN_LABEL, ENTRY_LABEL, INSTANCE_LABEL, PORT_LABEL, UUID_LABEL
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import CommandResult, HostRunner
+from gittensor.controller.checks.vendor import AMD, NVIDIA, amd_attach_args
 from gittensor.controller.manifest import Artifact, Canary, Drain, Manifest
 
 _CONTAINER_ID = re.compile(r'^[0-9a-f]{64}$')
@@ -79,6 +80,8 @@ class RunSpec:
     manifest_host_path: str = ''
     drain_max_s: int = 0  # the manifest's drain.max_s, on the container as a label so `gitt down` can drain it too
     bind_address: str = ''  # the box's docker bridge gateway the port is published on; '': every address
+    vendor: str = NVIDIA  # the box's pinned vendor (30 §1 #2)
+    render_node: str = ''  # AMD only: the pinned card's /dev/dri/renderD<N>
 
     @property
     def name(self) -> str:
@@ -175,7 +178,10 @@ def run_command(spec: RunSpec) -> str:
         parts.append(f'--label {shlex.quote(f"{PORT_LABEL}={host_port}")}')  # the host port: what a restart re-adopts
     parts.append(f'--label {shlex.quote(f"{DRAIN_LABEL}={int(spec.drain_max_s)}")}')  # `gitt down` drains by it
     parts.append(f'--label {shlex.quote(f"{BIND_LABEL}={spec.bind}")}')
-    parts.append(f'--gpus "device={spec.uuid}"')
+    if spec.vendor == AMD:
+        parts += amd_attach_args([spec.render_node])
+    else:
+        parts.append(f'--gpus "device={spec.uuid}"')
     if spec.port is not None:
         publish = f'{spec.bind_address}:{host_port}:{spec.port}' if spec.bind_address else f'{host_port}:{spec.port}'
         parts.append(f'-p {shlex.quote(publish)}')

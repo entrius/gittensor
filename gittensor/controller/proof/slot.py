@@ -27,6 +27,7 @@ from typing import Callable, Dict, List, Optional, Protocol, Sequence, Tuple
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import HostRunner
 from gittensor.controller.checks.scrape import GpuInfo
+from gittensor.controller.checks.vendor import AMD, NVIDIA, amd_attach_args
 
 
 class ProofUnavailable(RuntimeError):
@@ -127,13 +128,17 @@ def image_ref(
     return f'{repo}@{digest}' if digest else f'{repo}:{tag}'
 
 
-def create_command(image: str, uuid: str, name: str, args: Sequence[str] = ()) -> str:
+def create_command(
+    image: str, uuid: str, name: str, args: Sequence[str] = (), vendor: str = NVIDIA, render_node: str = ''
+) -> str:
     """``docker create`` one proof container pinned to one card. Inside it that card is device 0. The container
-    is labelled so a restarted controller can find and remove strays."""
+    is labelled so a restarted controller can find and remove strays. An AMD card is pinned by its render node
+    (``vendor.amd_attach_args``), an NVIDIA card by ``--gpus`` as always."""
+    attach = amd_attach_args([render_node]) if vendor == AMD else [f'--gpus="device={uuid}"']
     parts = [
         'docker',
         'create',
-        f'--gpus="device={uuid}"',
+        *attach,
         '--name',
         name,
         '--label',
@@ -141,7 +146,7 @@ def create_command(image: str, uuid: str, name: str, args: Sequence[str] = ()) -
         image,
         *args,
     ]
-    return ' '.join(p if p.startswith('--gpus=') else shlex.quote(p) for p in parts)
+    return ' '.join(p if p.startswith(('--gpus=', '--device ', '--group-add ')) else shlex.quote(p) for p in parts)
 
 
 def start_command(container_id: str) -> str:

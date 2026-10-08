@@ -8,8 +8,6 @@ each earn with their own phrase, the KFD holder scan, the heartbeat re-reading t
 and the rows the catalog, the pay table and the fleet page carry. Nothing here has run on a card: the first MI300X
 run (31 step 1) replaces the fixtures and sets the proof's numbers."""
 
-from types import SimpleNamespace
-
 from gittensor.controller import heartbeat as hb
 from gittensor.controller.checks import amd_scrape as a
 from gittensor.controller.checks import checks as ck
@@ -29,6 +27,7 @@ from gittensor.controller.checks.vendor import AMD, NVIDIA
 from gittensor.controller.checks.verdict import BENCH, CheckVerdict
 from gittensor.controller.pay.rates import load_rates
 from gittensor.controller.publish import build_fleet
+from gittensor.controller.reconcile import InstanceRecord
 from tests.controller.conftest import (
     AMD_UUIDS,
     CONFIG,
@@ -243,12 +242,12 @@ def test_the_heartbeat_re_reads_the_serial_the_partition_the_node_and_the_kernel
     hb._same_card(nvidia_smi_not_asked, box)
     assert nvidia_smi_not_asked.calls == [a.AMD_SYSFS_COMMAND]
     # the exclusivity question is asked of the device nodes, box-wide, and nvidia-smi never
-    record = SimpleNamespace(uuid=uuid, container_id='c' * 64)
+    record = InstanceRecord(id='i1', entry='e', box=HK, uuid=uuid, container_id='c' * 64)
     alone = hb._alone(
         FakeRunner({AMD_DEVICE_HOLDERS_COMMAND: fixture('amd/device_holders_kfd_desktop.txt')}), [record], AMD
-    )  # type: ignore[list-item]
+    )
     assert not alone[uuid].ok and '(gnome-shell)' in alone[uuid].detail and 'pid 3310' not in alone[uuid].detail
-    free = hb._alone(FakeRunner({AMD_DEVICE_HOLDERS_COMMAND: NO_DEVICE_HOLDERS}), [record], AMD)  # type: ignore[list-item]
+    free = hb._alone(FakeRunner({AMD_DEVICE_HOLDERS_COMMAND: NO_DEVICE_HOLDERS}), [record], AMD)
     assert free[uuid].ok and free[uuid].detail == '0 device holder(s), none foreign'
 
 

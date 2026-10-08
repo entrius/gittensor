@@ -25,6 +25,7 @@ from gittensor.agent.config import (
     AGENT_CONTAINER_NAME,
     AGENT_IMAGE,
     DRAIN_LABEL,
+    DRAIN_MARKER,
     ENV_ALLOW_DEV_KEYS,
     ENV_CHANNEL_URL,
     ENV_CONTAINER_NAME,
@@ -37,6 +38,7 @@ from gittensor.agent.config import (
     INSTANCE_LABEL,
     PORT_LABEL,
     RENT_PORTS_LABEL,
+    RENTAL_ENDS_AT_LABEL,
     RUNNER_CONTAINER_NAME,
     RUNNER_IMAGE,
     SSH_HOSTKEY_VOLUME,
@@ -148,6 +150,7 @@ class Workload:
     state: str  # running, exited, ...
     port: int | None  # the host port it is published on (PORT_LABEL)
     drain_max_s: int | None  # DRAIN_LABEL; None: started before the label existed
+    ends_at: float | None = None  # a customer's pod: RENTAL_ENDS_AT_LABEL, when the rental is due to end
 
     @property
     def running(self) -> bool:
@@ -155,7 +158,14 @@ class Workload:
 
 
 _PS_FORMAT = '\t'.join(
-    ('{{.ID}}', '{{.Names}}', '{{.State}}', f'{{{{.Label "{PORT_LABEL}"}}}}', f'{{{{.Label "{DRAIN_LABEL}"}}}}')
+    (
+        '{{.ID}}',
+        '{{.Names}}',
+        '{{.State}}',
+        f'{{{{.Label "{PORT_LABEL}"}}}}',
+        f'{{{{.Label "{DRAIN_LABEL}"}}}}',
+        f'{{{{.Label "{RENTAL_ENDS_AT_LABEL}"}}}}',
+    )
 )
 
 
@@ -169,12 +179,43 @@ def parse_workloads(stdout: str) -> list[Workload]:
     out = []
     for line in stdout.splitlines():
         cols = line.rstrip('\n').split('\t')
-        if len(cols) != 5 or not cols[0]:
+        if len(cols) not in (5, 6) or not cols[0]:  # 5: a listing from before the ends_at label
             continue
         port = int(cols[3]) if cols[3].isdigit() else None
         drain = int(cols[4]) if cols[4].isdigit() else None
-        out.append(Workload(cols[0], cols[1], cols[2], port, drain))
+        ends_at = _number(cols[5]) if len(cols) == 6 else None
+        out.append(Workload(cols[0], cols[1], cols[2], port, drain, ends_at))
     return out
+
+
+def _number(text: str) -> float | None:
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def drain_mark_command(agent_name: str = AGENT_CONTAINER_NAME) -> list[str]:
+    """Tell the controller this box takes no new rental: the marker in the agent's volume (``DRAIN_MARKER``), read with
+    the rent-ports label on its next visit."""
+    return ['docker', 'exec', agent_name, 'touch', DRAIN_MARKER]
+
+
+def drain_clear_command(image: str) -> list[str]:
+    """`gitt up --rent`: the box is for rent again. Through a throwaway container on the volume, because the agent may
+    not be running yet (the runner starts it); ``image`` is the one `gitt up` is about to run, so it is present."""
+    return [
+        'docker',
+        'run',
+        '--rm',
+        '-v',
+        f'{SSH_HOSTKEY_VOLUME}:{SSH_HOSTKEY_VOLUME_MOUNT}',
+        '--entrypoint',
+        'rm',
+        image,
+        '-f',
+        DRAIN_MARKER,
+    ]
 
 
 def workload_stop_commands(workloads: list[Workload], now: bool = False) -> list[list[str]]:

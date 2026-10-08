@@ -13,7 +13,7 @@ import shlex
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from gittensor.agent.config import RENT_PORTS_LABEL, parse_rent_ports
+from gittensor.agent.config import DRAIN_MARKER, RENT_PORTS_LABEL, parse_rent_ports
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import HostRunner
 
@@ -60,8 +60,11 @@ def agent_image_id_command(container: str = cfg.AGENT_CONTAINER_NAME) -> str:
 def rent_ports_command(container: str = cfg.AGENT_CONTAINER_NAME) -> str:
     """The agent container's ``RENT_PORTS_LABEL`` (vault 29 §5): "LOW-HIGH" when the miner started it with
     ``gitt up --rent``, '' otherwise. Read on every visit: the label is on the running container, so a box is rentable
-    exactly as long as its agent says so, and a controller restart rebuilds the fact from the box like everything else."""
-    return f'docker inspect --format \'{{{{index .Config.Labels "{RENT_PORTS_LABEL}"}}}}\' {shlex.quote(container)}'
+    exactly as long as its agent says so, and a controller restart rebuilds the fact from the box like everything else.
+    A leaving miner's ``DRAIN_MARKER`` (`gitt down`, waiting for its customer) answers '' instead: no new pod lands
+    there while they wait, and their pay is never at stake for leaving (#1818)."""
+    label = f'docker inspect --format \'{{{{index .Config.Labels "{RENT_PORTS_LABEL}"}}}}\' {shlex.quote(container)}'
+    return f'test -e {shlex.quote(DRAIN_MARKER)} || {label}'
 
 
 def parse_rent_ports_label(stdout: str) -> List[int]:

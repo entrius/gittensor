@@ -76,7 +76,15 @@ RENT_PORTS_LABEL = 'io.gittensor.rent_ports'  # on the agent container: "LOW-HIG
 RENT_PORTS_DEFAULT = (31000, 31099)  # inclusive, what `--rent` opens when `--rent-ports` is not given
 RENT_PORTS_MIN = 100
 RENT_PORTS_MIN_DEV = 4  # a dev box (`--allow-dev-keys`): a Lium pod maps a handful of ports, enough for one pod
-RENTAL_LABEL = 'io.gittensor.rental'  # on a customer's pod: the rental id (29 §4); `gitt down` stops these too
+RENTAL_LABEL = 'io.gittensor.rental'  # on a customer's pod: the rental id (29 §4); `gitt down` waits for these
+RENTAL_ENDS_AT_LABEL = (
+    'io.gittensor.rental_ends_at'  # on a customer's pod: unix seconds, so `gitt down` can say how long
+)
+# A leaving miner's signal (issue #1818: pay is held back 48 h, so leaving must never mean forfeiting). `gitt down`
+# touches this file in the agent's volume; the controller reads it with the rent-ports label every visit and treats the
+# box as not for rent while it exists, so no new pod lands while the miner waits for the current customer. `gitt up
+# --rent` clears it.
+DRAIN_MARKER = f'{SSH_HOSTKEY_VOLUME_MOUNT}/draining'
 SYSBOX_RUNTIME = 'sysbox-runc'  # the runtime every pod runs under (Lium's executors: nvidia_docker_sysbox_setup.sh)
 SYSBOX_VERSION = '0.7.1'
 

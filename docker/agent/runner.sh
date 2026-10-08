@@ -11,6 +11,7 @@ NAME="${GT_AGENT_CONTAINER_NAME:-gt-agent}"
 SSH_PORT="${GT_AGENT_SSH_PORT:-2200}"
 MINER_HOTKEY="${GT_AGENT_MINER_HOTKEY:-}"
 RENT_PORTS="${GT_AGENT_RENT_PORTS:-}"  # "LOW-HIGH" from `gitt up --rent`; empty = the box is not for rent
+VENDOR="${GT_AGENT_VENDOR:-nvidia}"  # "amd" from `gitt up` on an AMD box: no NVIDIA runtime, so no --gpus all
 INTERVAL="${GT_AGENT_UPDATE_INTERVAL_S:-60}"
 VOLUME="${GT_AGENT_SSH_VOLUME:-gt-agent-ssh}"
 ALLOWED_SIGNERS="${GT_AGENT_ALLOWED_SIGNERS:-/etc/gt-agent/allowed_signers}"
@@ -49,8 +50,12 @@ start_agent() {
     # Mirror gittensor/agent/launch.py agent_run_command.
     rent_label=""
     [ -n "$RENT_PORTS" ] && rent_label="--label io.gittensor.rent_ports=$RENT_PORTS"
-    # shellcheck disable=SC2086  # $rent_label is empty or one --label flag pair, never user text with spaces
-    docker run -d --name "$NAME" --restart unless-stopped --privileged --pid host --gpus all $rent_label \
+    # The NVIDIA container runtime attaches the cards; an AMD box has none, and --privileged already exposes
+    # /dev/kfd and /dev/dri (vault 30 §1 #5).
+    gpu_flags="--gpus all"
+    [ "$VENDOR" = "amd" ] && gpu_flags=""
+    # shellcheck disable=SC2086  # $gpu_flags and $rent_label are fixed flag pairs or empty, never user text with spaces
+    docker run -d --name "$NAME" --restart unless-stopped --privileged --pid host $gpu_flags $rent_label \
         -v /var/run/docker.sock:/var/run/docker.sock \
         -v "$VOLUME:/var/lib/gt-agent" \
         -p "$SSH_PORT:$SSH_PORT" \

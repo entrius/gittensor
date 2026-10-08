@@ -72,7 +72,12 @@ def plan_commands(
     if no_update:
         target = AGENT_CONTAINER_NAME
         cmd = agent_run_command(
-            image=image, ssh_port=ssh_port, miner_hotkey=hotkey, allow_dev_keys=allow_dev_keys, rent_ports=rent_ports
+            image=image,
+            ssh_port=ssh_port,
+            miner_hotkey=hotkey,
+            allow_dev_keys=allow_dev_keys,
+            rent_ports=rent_ports,
+            vendor=report.vendor,
         )
         state = report.agent_state
     else:
@@ -85,6 +90,7 @@ def plan_commands(
             miner_hotkey=hotkey,
             channel_url=channel_url,
             rent_ports=rent_ports,
+            vendor=report.vendor,
         )
         state = report.runner_state
     plan = workload_stop_commands(report.workloads) if reclaim else []
@@ -365,6 +371,7 @@ def up_command(
             image_digest=agent_digest,
             allow_dev_keys=allow_dev_keys,
             rent_ports=rent_ports,
+            vendor=report.vendor,
         )
 
     if json_mode:

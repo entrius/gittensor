@@ -47,6 +47,10 @@ class CheckVerdict:
     # None when the agent offered no range to probe or the caller could not probe (``run_full_check`` has no address).
     rent_ports: List[int] = field(default_factory=list)
     rent_probe: Optional[dict] = None
+    vendor: str = 'nvidia'  # what the scrape judged the box as (``HostScrape.vendor``); pinned on the box at admit
+    # AMD only: {uuid: 'renderD<N>'} as the scrape saw it; ``state.identity_baseline`` re-pins it at every passing
+    # full check (minors can change across a reboot). Empty on an NVIDIA box.
+    render_nodes: Dict[str, str] = field(default_factory=dict)
 
     @property
     def admitted(self) -> bool:
@@ -79,6 +83,8 @@ class CheckVerdict:
             'checked_at': self.checked_at,
             'rent_ports': self.rent_ports,
             'rent_probe': self.rent_probe,
+            'vendor': self.vendor,
+            'render_nodes': dict(self.render_nodes),
             'checks': [c.as_dict() for c in self.checks],
         }
 
@@ -92,6 +98,8 @@ class CheckVerdict:
         now=None,
         rent_ports: Sequence[int] = (),
         rent_probe: Optional[Mapping[str, Any]] = None,
+        vendor: str = 'nvidia',
+        render_nodes: Optional[Mapping[str, str]] = None,
     ) -> 'CheckVerdict':
         clean = all(c.passed and not c.skipped for c in checks)
         reachable = rent_probe is None or bool(rent_probe.get('ok'))  # a range the probe could not reach is no range
@@ -106,4 +114,6 @@ class CheckVerdict:
             now if now is not None else time.time(),
             list(rent_ports) if reachable else [],
             dict(rent_probe) if rent_probe is not None else None,
+            vendor,
+            dict(render_nodes or {}),
         )

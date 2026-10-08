@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from gittensor.agent.config import DRAIN_MARKER, RENT_PORTS_LABEL, parse_rent_ports
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import HostRunner
+from gittensor.controller.checks.vendor import NVIDIA, VENDOR_DETECT_COMMAND, parse_vendor, vendor_or_default
 
 NVIDIA_SMI_FIELDS = (
     'uuid',
@@ -110,7 +111,9 @@ class GpuInfo:
     power_default_limit_w: Optional[float]
     power_max_limit_w: Optional[float]
     pci_bus_id: str
-    compute_cap: str
+    compute_cap: str  # NVIDIA: the compute capability; AMD: the gfx target (30 §3)
+    vendor: str = NVIDIA
+    render_node: str = ''  # AMD only: the card's /dev/dri/renderD<N>, what a container is given to see it
 
     @property
     def memory_total_bytes(self) -> Optional[int]:
@@ -251,6 +254,8 @@ def parse_device_holders(stdout: str) -> dict[int, DeviceHolder]:
 
 @dataclass
 class HostScrape:
+    # As detected (``vendor.parse_vendor``: 'nvidia', 'amd', 'both' or ''); ``vendor`` is what the box is judged as.
+    vendor_detected: str = ''
     gpus: List[GpuInfo] = field(default_factory=list)
     nvml_md5: str = ''
     nvml_path: str = ''
@@ -262,6 +267,10 @@ class HostScrape:
     network: Dict[str, Tuple[int, float]] = field(default_factory=dict)
     device_holders: str = ''  # DEVICE_HOLDERS_COMMAND's raw stdout; ``checks.check_card_free`` parses and judges it
     errors: Dict[str, str] = field(default_factory=dict)  # scrape step -> what went wrong (fails that check)
+
+    @property
+    def vendor(self) -> str:
+        return vendor_or_default(self.vendor_detected)
 
     @property
     def driver(self) -> str:
@@ -296,6 +305,10 @@ def scrape_host(
     """Every identity and resource fact the sub-checks judge, in one pass. A step that fails records its error and
     leaves its field empty; the judge for that field then fails closed."""
     scrape = HostScrape()
+    out = _run(runner, scrape, 'vendor', VENDOR_DETECT_COMMAND, timeout)
+    if out is not None:
+        scrape.vendor_detected = parse_vendor(out)
+    # The NVIDIA scrape, unchanged: the AMD avenue (30 §3, ``amd_scrape``) branches here once it exists.
     out = _run(runner, scrape, 'nvidia_smi', nvidia_smi_command(), cfg.NVIDIA_SMI_TIMEOUT_S)
     if out is not None:
         try:

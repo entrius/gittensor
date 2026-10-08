@@ -12,6 +12,7 @@ import pytest
 from gittensor.agent import channel, config
 from gittensor.agent.launch import (
     AGENT_PRIVILEGE_FLAGS,
+    NVIDIA_GPU_FLAGS,
     agent_run_command,
     down_commands,
     render,
@@ -80,8 +81,9 @@ class TestRunLines:
         """runner.sh reproduces agent_run_command in shell; keep the two from drifting apart."""
         script = RUNNER_SH.read_text()
         run_block = script[script.index('docker run -d') : script.index('"$image"', script.index('docker run -d'))]
-        for flag in AGENT_PRIVILEGE_FLAGS:
+        for flag in (*AGENT_PRIVILEGE_FLAGS, '$gpu_flags', '$rent_label'):
             assert flag in run_block
+        assert f'gpu_flags="{" ".join(NVIDIA_GPU_FLAGS)}"' in script  # the default; an AMD box empties it
         for needle in (
             '--restart unless-stopped',
             '-v /var/run/docker.sock:/var/run/docker.sock',
@@ -265,3 +267,19 @@ class TestChannel:
         assert c.agent == AGENT_REF
         with pytest.raises(channel.ChannelError, match='fetch'):
             channel.load('https://x/missing.json', pubkey=pub, opener=opener)
+
+
+def test_an_amd_box_starts_the_agent_without_the_nvidia_runtime():
+    """Vault 31 §2 #5: there is no NVIDIA container runtime on an AMD box, so `docker run --gpus all` fails outright
+    there and the agent could never start. `gitt up` detects the vendor and leaves the flag off; `--privileged`
+    already exposes /dev/kfd and /dev/dri. The runner gets the same word as an env and does the same in shell."""
+    nvidia = render(agent_run_command(image=AGENT_REF, ssh_port=2200))
+    amd = render(agent_run_command(image=AGENT_REF, ssh_port=2200, vendor='amd'))
+    assert '--privileged --pid host --gpus all -v /var/run/docker.sock' in nvidia
+    assert '--privileged --pid host -v /var/run/docker.sock' in amd and '--gpus' not in amd
+    assert amd.replace('--privileged --pid host', '--privileged --pid host --gpus all') == nvidia  # the only difference
+    assert '-e GT_AGENT_VENDOR=amd' in render(runner_run_command(runner_image=RUNNER_REF, ssh_port=2200, vendor='amd'))
+    assert 'GT_AGENT_VENDOR' not in render(runner_run_command(runner_image=RUNNER_REF, ssh_port=2200))
+    script = RUNNER_SH.read_text()
+    assert 'VENDOR="${GT_AGENT_VENDOR:-nvidia}"' in script
+    assert '[ "$VENDOR" = "amd" ] && gpu_flags=""' in script

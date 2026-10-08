@@ -129,6 +129,7 @@ ENV_UPDATE_INTERVAL = 'GT_AGENT_UPDATE_INTERVAL_S'
 ENV_CHANNEL_URL = 'GT_AGENT_CHANNEL_URL'
 ENV_ALLOW_DEV_KEYS = 'GT_AGENT_ALLOW_DEV_KEYS'
 ENV_RENT_PORTS = 'GT_AGENT_RENT_PORTS'  # "LOW-HIGH"; the runner turns it into RENT_PORTS_LABEL on the agent
+ENV_VENDOR = 'GT_AGENT_VENDOR'  # 'amd' on an AMD box (vault 30 §1 #5): the runner starts the agent without --gpus all
 
 
 def rent_ports_label(ports: tuple[int, int] | None) -> str:

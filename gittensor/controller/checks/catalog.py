@@ -19,6 +19,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
+from gittensor.controller.checks.vendor import NVIDIA, VENDORS
+
 CATALOG_PATH = Path(__file__).with_name('gpu_catalog.json')
 QUALIFIED = 'qualified'
 LISTED = 'listed'
@@ -46,6 +48,11 @@ class CardSpec:
     vram_total_mib_max: int = 33_000
     counts: Tuple[int, ...] = COUNTS_DEFAULT  # the card counts a box of this type may carry, ascending
     status: str = QUALIFIED
+    # The vendor switch (vault 30 §1 #2): ``nvidia`` rows are judged by ``names`` + ``compute_cap`` as today; an ``amd``
+    # row is judged by its PCI device ids and gfx target (30 §2), ``names`` being the display names only.
+    vendor: str = NVIDIA
+    pci_ids: Tuple[str, ...] = ()  # e.g. ('0x74a1',), lowercase hex as sysfs prints it
+    gfx_target: str = ''  # e.g. 'gfx942', the proof binary's build target
 
     @property
     def name(self) -> str:
@@ -73,6 +80,9 @@ def parse_catalog(doc: dict, source: str = '') -> Dict[str, CardSpec]:
                 vram_total_mib_max=int(row.get('vram_mib_max', nominal * VRAM_CEIL_RATIO)),
                 counts=tuple(sorted({int(c) for c in row.get('counts', COUNTS_DEFAULT)})),
                 status=str(row['status']),
+                vendor=str(row.get('vendor', NVIDIA)).strip().lower(),
+                pci_ids=tuple(str(p).strip().lower() for p in row.get('pci_ids', ())),
+                gfx_target=str(row.get('gfx_target', '')).strip().lower(),
             )
         except (KeyError, TypeError, ValueError) as e:
             raise CatalogError(f'{source}: {gpu_type}: {e!r}') from e
@@ -82,6 +92,10 @@ def parse_catalog(doc: dict, source: str = '') -> Dict[str, CardSpec]:
             raise CatalogError(f'{source}: {gpu_type}: empty VRAM window')
         if not spec.counts or not all(1 <= c <= COUNT_MAX for c in spec.counts):
             raise CatalogError(f'{source}: {gpu_type}: counts must be one or more box sizes between 1 and {COUNT_MAX}')
+        if spec.vendor not in VENDORS:
+            raise CatalogError(f'{source}: {gpu_type}: vendor must be one of {", ".join(VENDORS)}')
+        if spec.vendor != NVIDIA and not (spec.pci_ids and spec.gfx_target):
+            raise CatalogError(f'{source}: {gpu_type}: a {spec.vendor} row needs pci_ids and gfx_target')
         for name in names:
             if name in seen:
                 raise CatalogError(f'{source}: {name!r} is listed under both {seen[name]} and {gpu_type}')

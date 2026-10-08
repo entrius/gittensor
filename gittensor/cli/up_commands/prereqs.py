@@ -39,7 +39,9 @@ from gittensor.agent.config import (
     is_compute_axon,
 )
 from gittensor.agent.launch import Workload, parse_workloads, workload_list_command
-from gittensor.controller.checks.catalog import load_catalog, spec_for_name
+from gittensor.controller.checks import config as ccfg
+from gittensor.controller.checks.amd_scrape import AMD_SYSFS_COMMAND, AmdCard, AmdStack, parse_amd_sysfs, version_tuple
+from gittensor.controller.checks.catalog import load_catalog, spec_for_name, spec_for_pci_id
 from gittensor.controller.checks.scrape import (
     KERNEL_DRIVER_COMMAND,
     NVML_MD5_COMMAND,
@@ -48,11 +50,9 @@ from gittensor.controller.checks.scrape import (
 )
 from gittensor.controller.checks.vendor import (
     AMD,
-    AMD_RENDER_NODES_COMMAND,
     BOTH,
     NVIDIA,
     VENDOR_DETECT_COMMAND,
-    parse_render_nodes,
     parse_vendor,
     vendor_or_default,
 )
@@ -230,10 +230,10 @@ class HostProbe:
         proc = self.run(['sh', '-c', VENDOR_DETECT_COMMAND])
         return parse_vendor(proc.stdout) if proc.returncode == 0 else ''
 
-    def render_nodes(self) -> list[str]:
-        """The ``/dev/dri/renderD*`` nodes on the host, one per AMD card."""
-        proc = self.run(['sh', '-c', AMD_RENDER_NODES_COMMAND])
-        return parse_render_nodes(proc.stdout) if proc.returncode == 0 else []
+    def amd_sysfs(self) -> tuple[list[AmdCard], AmdStack]:
+        """The AMD cards and the stack as the controller's own scrape reads them (``amd_scrape``)."""
+        proc = self.run(['sh', '-c', AMD_SYSFS_COMMAND])
+        return parse_amd_sysfs(proc.stdout) if proc.returncode == 0 else ([], AmdStack())
 
     def container_state(self, name: str) -> str | None:
         proc = self.run(['docker', 'inspect', '--format', '{{.State.Status}}', name])
@@ -289,13 +289,45 @@ def check_vendor(detected: str) -> CheckResult:
     return CheckResult(VENDOR_CHECK, True, 'nvidia' if detected == NVIDIA else 'no GPU kernel module found; checking nvidia-smi')  # fmt: skip
 
 
-def check_amd_driver(probe: HostProbe) -> CheckResult:
-    """The AMD box's driver row: the in-tree amdgpu module and one render node per card. The model, the stack floor
-    and the card ids come with the AMD scrape (vault 31 step 3); this is only what the agent needs to start."""
-    nodes = probe.render_nodes()
-    if not nodes:
-        return CheckResult('AMD driver', False, 'amdgpu is loaded but /dev/dri has no render node: no card is usable')
-    return CheckResult('AMD driver', True, f'amdgpu; {len(nodes)} render node(s): {", ".join(nodes)}')
+AMD_DRIVER_CHECK = 'AMD driver'
+AMD_FLOOR_CHECK = 'AMD driver floor'
+
+
+def check_amd_driver(probe: HostProbe) -> list[CheckResult]:
+    """The AMD box's driver rows, the controller's ``gpu_spec`` and ``amd_stack`` rules said here first (vault 31
+    step 4): every card with a usable serial and whole (SPX / NPS1), its type by PCI id, and the kernel or DKMS
+    driver at the pool floor."""
+    cards, stack = probe.amd_sysfs()
+    if not cards:
+        return [CheckResult(AMD_DRIVER_CHECK, False, 'amdgpu is loaded but sysfs lists no AMD card: no card is usable')]
+    problems = []
+    names = []
+    for c in cards:
+        spec = spec_for_pci_id(c.device_id)
+        names.append(spec.gpu_type if spec is not None else f'{c.device_id} (not in the GPU catalog)')
+        if not c.id_ok:
+            problems.append(f'{c.render_node} reports no usable serial (unique_id): the pool cannot pin the card')
+        if not c.whole:
+            problems.append(f'{c.render_node} is partitioned ({c.partition}): the pool admits SPX / NPS1 only')
+    if problems:
+        return [CheckResult(AMD_DRIVER_CHECK, False, '; '.join(problems)[:200])]
+    detail = f'amdgpu; {len(cards)} card(s): {", ".join(sorted(set(names)))}; {", ".join(c.render_node for c in cards)}'
+    rows = [CheckResult(AMD_DRIVER_CHECK, True, detail)]
+    kmin, dmin = ccfg.AMD_KERNEL_MIN, ccfg.AMD_DKMS_MIN
+    if version_tuple(stack.kernel) >= kmin:
+        rows.append(CheckResult(AMD_FLOOR_CHECK, True, f'kernel {stack.kernel}'))
+    elif stack.amdgpu and version_tuple(stack.amdgpu) >= dmin:
+        rows.append(CheckResult(AMD_FLOOR_CHECK, True, f'amdgpu DKMS {stack.amdgpu} on kernel {stack.kernel}'))
+    else:
+        rows.append(
+            CheckResult(
+                AMD_FLOOR_CHECK,
+                False,
+                f'kernel {stack.kernel} is below {kmin[0]}.{kmin[1]} and no amdgpu DKMS driver at or above '
+                f'{dmin[0]}.{dmin[1]} is loaded: update the kernel or install the ROCm driver',
+            )
+        )
+    return rows
 
 
 def check_gpu_model(names: Sequence[str]) -> CheckResult | None:
@@ -571,10 +603,7 @@ def run_prereqs(
     detected = probe.vendor_detected()
     report.vendor = vendor_or_default(detected)
     report.results.append(check_vendor(detected))
-    if report.vendor == AMD:
-        report.results.append(check_amd_driver(probe))
-    else:
-        report.results.extend(check_driver(probe))
+    report.results.extend(check_amd_driver(probe) if report.vendor == AMD else check_driver(probe))
     docker = check_docker(probe)
     report.results.append(docker)
     if report.vendor == AMD:

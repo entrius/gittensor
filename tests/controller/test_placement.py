@@ -24,7 +24,7 @@ import gittensor.cli.main  # noqa: F401  (the CLI package must load before gitte
 from gittensor.controller import cli as ctl
 from gittensor.controller.checks.config import RTX_5090
 from gittensor.controller.checks.runner import CommandResult, FakeRunner, regex
-from gittensor.controller.checks.scrape import NVML_MD5_COMMAND
+from gittensor.controller.checks.scrape import DEVICE_HOLDERS_COMMAND, NVML_MD5_COMMAND
 from gittensor.controller.checks.state import (
     BENCHED,
     CHECKING,
@@ -43,7 +43,6 @@ from gittensor.controller.checks.state import (
     transition_card,
 )
 from gittensor.controller.checks.verdict import CheckResult, CheckVerdict
-from gittensor.controller.heartbeat import DEVICE_HOLDERS_COMMAND
 from gittensor.controller.manifest import load_manifest, parse_manifest
 from gittensor.controller.reconcile import InstanceRecord, InstanceStore, Reconciler
 from gittensor.controller.registry import DeploymentStore, Registry, make_entry, sign_bytes

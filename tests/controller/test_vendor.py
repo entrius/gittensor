@@ -65,8 +65,9 @@ def test_the_verdict_carries_the_vendor_and_admit_pins_it():
     assert BoxState.from_dict({'box_id': 'hk', 'status': IDLE, 'pinned_uuids': [UUID_5090]}).vendor == v.NVIDIA
 
 
-def test_every_catalog_row_today_is_nvidia_and_an_amd_row_needs_its_ids():
-    assert {spec.vendor for spec in load_catalog().values()} == {v.NVIDIA}
+def test_an_amd_catalog_row_needs_its_ids_and_an_nvidia_row_none():
+    assert {spec.vendor for spec in load_catalog().values()} == {v.NVIDIA, v.AMD}
+    assert all(spec.pci_ids and spec.gfx_target for spec in load_catalog().values() if spec.vendor == v.AMD)
     spec = parse_catalog({'MI300X': {**AMD_ROW, 'vendor': 'amd', 'pci_ids': ['0x74A1'], 'gfx_target': 'GFX942'}})[
         'MI300X'
     ]
@@ -92,7 +93,6 @@ def test_an_amd_card_is_attached_by_device_nodes_and_an_nvidia_card_by_gpus():
         '--group-add video',
         '--group-add render',
     ]  # never all of /dev/dri
-    assert v.parse_render_nodes('renderD129\nrenderD128\ncard0\ncard1\nby-path\n') == ['renderD128', 'renderD129']
     # the proof container: one card, its render node
     line = slot.create_command(
         'img', 'AMD-0123456789abcdef', 'gt-proof-0', ['--x'], vendor=v.AMD, render_node='renderD128'

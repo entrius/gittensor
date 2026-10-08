@@ -106,6 +106,10 @@ LOST_AFTER_MISSES = 3
 # Images the rent page promises run sshd on :22 (gittensor-app rental-images.ts: keep the lists equal). Pre-pulled on
 # idle rentable boxes.
 QUICK_PICK_IMAGES = ('daturaai/pytorch:2.12.0-py3.12-cuda12.8-devel-ubuntu24.04-dind',)
+# The AMD quick-picks (31 step 4: an SSH-ready ROCm PyTorch, a ROCm terminal, vLLM) are not published yet, so an AMD
+# box pre-pulls nothing: the CUDA images above would be dead weight on it, and a customer's own image is pulled at
+# order time as on any box.
+QUICK_PICK_IMAGES_AMD: tuple[str, ...] = ()
 # What a runc dev box can run: the same image family without docker-in-docker (its entrypoint starts dockerd first and
 # exits without privileges). The production quick-pick stays the dind image, under Sysbox.
 QUICK_PICK_NO_DIND = 'daturaai/pytorch:2.6.0-py3.12-cuda12.6.3-devel-ubuntu24.04'
@@ -652,6 +656,8 @@ class RentalReconciler:
             if box.status != IDLE or not box_rentable(box, now, min_level=self.min_standing) or not box.cards:
                 continue
             if any(c.state != IDLE for c in box.cards.values()) or self.rentals.on_box(box.box_id):
+                continue
+            if box.vendor == AMD and not QUICK_PICK_IMAGES_AMD:
                 continue
             t = self._prepulling.get(box.box_id)
             if t is not None and t.is_alive():

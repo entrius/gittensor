@@ -30,6 +30,7 @@ from typing import Any
 
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks import why as w
+from gittensor.controller.checks.catalog import spec_for_name
 from gittensor.controller.checks.state import BENCHED, IDLE, BoxState, ladder_rung
 from gittensor.controller.manifest import gpu_type_of
 from gittensor.controller.pay.ledger import Ledger, is_withheld
@@ -187,6 +188,11 @@ def _last_event(events: list[dict], kinds: frozenset[str] | None = None) -> dict
     return None
 
 
+def _gfx_target(card_name: str) -> str | None:
+    spec = spec_for_name(card_name) if card_name else None
+    return (spec.gfx_target or None) if spec is not None else None
+
+
 def _rates(implied: Mapping[str, Any]) -> dict[str, dict]:
     """Per GPU type, the idle / leased USD per card-hour: what the last scorecard implied (what was really paid),
     else the rate table's targets."""
@@ -298,6 +304,7 @@ def build_fleet(
                 'standing': standing(box.standing_events, now),
                 'gpu_type': gpu_type,
                 'vendor': box.vendor,  # the switch the box was admitted under (30 §1 #2)
+                'gfx_target': _gfx_target(box.card_name),  # AMD only: what the rent page shows beside the type (30 §8)
                 'card_count': len(cards),
                 # The miner opened a rent range and the box has the standing to take a customer (29 §1 #7). The range
                 # itself is not published: a customer gets the mapped ports of their own pod, nobody else needs them.

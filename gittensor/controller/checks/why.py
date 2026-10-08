@@ -46,6 +46,7 @@ CARD_FREE_UNSCANNABLE = 'card_free_unscannable'
 PROOF_STAGING = 'proof_staging'
 PROOF_NO_ANSWER = 'proof_no_answer'
 PROOF_RUNTIME_NVIDIA = 'proof_runtime_nvidia'
+PROOF_RUNTIME_AMD = 'proof_runtime_amd'
 PROOF_CONTAINER = 'proof_container'
 PROOF_WRONG_CARD = 'proof_wrong_card'
 PROOF_BAD_ANSWER = 'proof_bad_answer'
@@ -72,6 +73,9 @@ VENDOR_MIXED = 'vendor_mixed'
 
 # gpu_spec
 SPEC_UNREADABLE = 'spec_unreadable'
+SPEC_SYSFS_UNREADABLE = 'spec_sysfs_unreadable'  # the AMD scrape
+SPEC_ID_MISSING = 'spec_id_missing'  # an AMD card with no serial, a zero one, or one KFD disagrees with
+SPEC_PARTITIONED = 'spec_partitioned'  # an MI300-class card not in SPX / NPS1
 SPEC_CARD_COUNT = 'spec_card_count'
 SPEC_MODEL = 'spec_model'
 SPEC_COMPUTE_CAP = 'spec_compute_cap'
@@ -89,6 +93,10 @@ POWER_UNREPORTED = 'power_unreported'
 
 # fleet_uuid_unique
 UUID_CLAIMED_ELSEWHERE = 'uuid_claimed_elsewhere'
+
+# amd_stack (the AMD sibling of nvml_digest: a record and one floor, no allowlist)
+STACK_UNREADABLE = 'stack_unreadable'
+STACK_BELOW_FLOOR = 'stack_below_floor'
 
 # The rent-range probe (29 §5, ``rent_probe.py``). Not a failed check (the box is admitted idle-only), so these never
 # reach ``last_failed_why``: ``BoxState.rent_probe`` carries the code and the page renders it as ``rentable_why``.
@@ -109,6 +117,7 @@ PHRASES: Dict[str, str] = {
     PROOF_STAGING: 'we could not set up the GPU proof on this box',
     PROOF_NO_ANSWER: 'no card answered the GPU proof',
     PROOF_RUNTIME_NVIDIA: 'the NVIDIA container runtime would not start our GPU proof container ({n} card{s})',
+    PROOF_RUNTIME_AMD: 'the AMD compute device would not start our GPU proof container ({n} card{s})',
     PROOF_CONTAINER: 'our GPU proof container would not start on this box ({n} card{s})',
     PROOF_WRONG_CARD: 'a card answered the GPU proof for a different GPU ({n} card{s})',
     PROOF_BAD_ANSWER: 'the GPU proof did not check out on {n} card{s} of this box',
@@ -135,6 +144,9 @@ PHRASES: Dict[str, str] = {
     SPEC_COMPUTE_CAP: 'the GPU compute capability on this box is not the one the pool admits ({n} card{s})',
     SPEC_VRAM: 'the GPU memory on this box is outside the range the pool admits ({n} card{s})',
     SPEC_BAD_UUID: 'this box reported a malformed GPU UUID ({n} card{s})',
+    SPEC_SYSFS_UNREADABLE: "this box's AMD cards could not be read from sysfs",
+    SPEC_ID_MISSING: 'this box did not report a usable serial on {n} card{s}',
+    SPEC_PARTITIONED: 'the pool admits whole cards only, and this box has {n} partitioned card{s}',
     # gpu_uuid_pin
     UUID_DUPLICATE: 'this box reported the same GPU UUID twice',
     UUID_CHANGED: 'the GPUs on this box are not the ones pinned when it was admitted ({missing} gone, {extra} new)',
@@ -144,6 +156,9 @@ PHRASES: Dict[str, str] = {
     POWER_UNREPORTED: 'this box did not report a power limit on {n} card{s}',
     # fleet_uuid_unique
     UUID_CLAIMED_ELSEWHERE: 'another box in the pool claims {n} of the GPUs this box reports',
+    # amd_stack
+    STACK_UNREADABLE: "we could not read this box's kernel and AMD driver versions",
+    STACK_BELOW_FLOOR: "this box's kernel and AMD driver are older than the pool floor",
     # the rent-range probe: no number, the range is the miner's business (publish never prints it)
     RENT_PORT_UNREACHABLE: 'the rent port range could not be reached from the controller (a firewall or NAT in the way), so this box is proved and paid idle only',  # noqa: E501
     RENT_LISTENER_FAILED: 'a listener on the rent port range would not start on this box, so this box is proved and paid idle only',  # noqa: E501
@@ -165,6 +180,7 @@ BY_NAME: Dict[str, str] = {
     'disk_free': 'this box does not have enough free disk space',
     'agent_image': 'the agent image on this box is not one we published',
     'nvml_digest': 'the NVIDIA driver and library on this box did not check out',
+    'amd_stack': "this box's kernel and AMD driver did not check out",
     'vendor': 'this box has GPUs from more than one vendor',
     'gpu_spec': 'the GPUs on this box do not match the pool spec',
     'gpu_uuid_pin': 'the GPUs on this box are not the ones pinned when it was admitted',

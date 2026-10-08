@@ -5,6 +5,7 @@
 provider in the slot, and a ``FakeRunner`` that answers every command the check issues the way a real, honest box
 would."""
 
+import dataclasses
 import hashlib
 import json
 import re
@@ -13,10 +14,13 @@ from typing import Callable, Dict, Optional
 
 import pytest
 
+from gittensor.controller.checks.amd_scrape import AMD_SYSFS_COMMAND
+from gittensor.controller.checks.catalog import QUALIFIED, load_catalog
 from gittensor.controller.checks.full_check import FullCheckConfig
 from gittensor.controller.checks.nvml_allowlist import NvmlAllowlist
 from gittensor.controller.checks.runner import CommandResult, FakeRunner, HostRunner, regex
 from gittensor.controller.checks.scrape import (
+    AMD_DEVICE_HOLDERS_COMMAND,
     DEVICE_HOLDERS_COMMAND,
     KERNEL_DRIVER_COMMAND,
     NVML_MD5_COMMAND,
@@ -58,6 +62,14 @@ PROOF_IMAGE = 'entrius/gt-proof:test'
 NO_DEVICE_HOLDERS = '\n'
 CONFIG = FullCheckConfig(agent_image_digests=(AGENT_DIGEST,), network_targets=NETWORK_TARGETS, proof_image=PROOF_IMAGE)
 FAKE_BINARY = b'\x7fELF-fake-sealed-proof'
+# The AMD box (vault 30 §3, 31 step 3): the synthetic MI300X fixtures (fixtures/amd/README.md). Every AMD catalog row is
+# listed, so an admitted AMD box in a test carries the MI300X row flipped to qualified in its config, as the first
+# real run will flip it.
+AMD_UUIDS = [f'AMD-{0x2D6E1A4F8C3B7E90 + i:016x}' for i in range(8)]
+AMD_VRAM_TOTAL_BYTES = 206_158_430_208  # 192 GiB, what sysfs mem_info_vram_total says on an MI300X
+AMD_FILLED_BYTES = int(FILL_RATIO * AMD_VRAM_TOTAL_BYTES)
+MI300X_QUALIFIED = dataclasses.replace(load_catalog()['MI300X'], status=QUALIFIED)
+CONFIG_AMD = dataclasses.replace(CONFIG, spec=MI300X_QUALIFIED, proof_image_amd='entrius/gt-proof-rocm:test')
 
 
 def fixture(name: str) -> str:
@@ -92,8 +104,10 @@ class FakeProof:
         challenges: Dict[str, str] = {}
         for i, uuid in enumerate(identity.uuids):
             challenge = challenge_for(uuid, self.version)
+            node = identity.render_nodes[i] if i < len(identity.render_nodes) else ''
             result = runner.run(
-                create_command(image, uuid, f'gt-proof-{i}', ['--', '--challenge', challenge]), timeout=timeout
+                create_command(image, uuid, f'gt-proof-{i}', ['--', '--challenge', challenge], identity.vendor, node),
+                timeout=timeout,
             )
             if not result.ok:
                 raise ProofUnavailable(f'docker create failed: {(result.stderr or result.stdout).strip()[:200]}')
@@ -158,6 +172,10 @@ def allowlist() -> NvmlAllowlist:
 
 
 _CREATE_DEVICE = re.compile(r'^docker create --gpus="device=([^"]+)"')
+# an AMD card's line: attached by device nodes, the card named only by the label (30 §1 #5)
+_CREATE_AMD = re.compile(
+    r'^docker create --device /dev/kfd --device /dev/dri/renderD\d+ .*--label io\.gittensor\.proof\.uuid=(\S+)'
+)  # noqa: E501
 _CREATE_CHALLENGE = re.compile(r'--challenge (\w+)')
 _START = re.compile(r'^docker start -a (\w+)$')
 
@@ -177,7 +195,7 @@ def job_responder(
     cards: Dict[str, str] = {}
 
     def respond(command: str) -> str | CommandResult:
-        m = _CREATE_DEVICE.match(command)
+        m = _CREATE_DEVICE.match(command) or _CREATE_AMD.match(command)
         if m:
             card = m.group(1)
             cid = container_for(card)
@@ -240,6 +258,36 @@ def passing_runner(
         runner.on(network_command(url), '200 4812345.000\n')
     runner.on(regex(r'^if docker image inspect '), 'ready\n')  # the proof image is on the box (proof_image_ready)
     runner.on(regex(r'^docker (create|cp|start|rm) '), job or job_responder())
+    return runner
+
+
+def passing_amd_runner(
+    sysfs: str = fixture('amd/sysfs_mi300x_1.txt'),
+    agent_image: str = AGENT_IMAGE_OUT,
+    agent_image_id: str = AGENT_IMAGE_ID + '\n',
+    df: str = fixture('df_docker.txt'),
+    device_holders: str = NO_DEVICE_HOLDERS,
+    network_targets=NETWORK_TARGETS,
+    job=None,
+    rent_ports: str = '\n',
+) -> FakeRunner:
+    """An MI300X box that passes everything: the amdgpu module loaded, the sysfs pass answered from the fixture, no
+    nvidia-smi anywhere, the proof answered from a container attached by device nodes."""
+    runner = FakeRunner(
+        {
+            VENDOR_DETECT_COMMAND: 'amdgpu\n',
+            AMD_SYSFS_COMMAND: sysfs,
+            agent_image_command(): agent_image,
+            agent_image_id_command(): agent_image_id,
+            rent_ports_command(): rent_ports,
+            disk_free_command(): df,
+            AMD_DEVICE_HOLDERS_COMMAND: device_holders,
+        }
+    )
+    for url in network_targets:
+        runner.on(network_command(url), '200 4812345.000\n')
+    runner.on(regex(r'^if docker image inspect '), 'ready\n')
+    runner.on(regex(r'^docker (create|cp|start|rm) '), job or job_responder(filled_bytes=AMD_FILLED_BYTES))
     return runner
 
 

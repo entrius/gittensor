@@ -34,14 +34,16 @@ CID = 'c' * 64
 KEY = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKeyForTests0000000000000000000000000 alex'
 
 
-def rentable_box(hk: str = HK, cards=(U1, U2), standing_s: float = 8 * 3600, **kw) -> BoxState:
+def rentable_box(
+    hk: str = HK, cards=(U1, U2), standing_s: float = 8 * 3600, card_name: str = 'NVIDIA GeForce RTX 5090', **kw
+) -> BoxState:
     kw.setdefault('rent_ports', [31000, 31099])
     kw.setdefault('uid', 45)
     return BoxState(
         hk,
         status=IDLE,
         pinned_uuids=list(cards),
-        card_name='NVIDIA GeForce RTX 5090',
+        card_name=card_name,
         host='203.0.113.7',
         port=2200,
         last_check_at=NOW - 300,

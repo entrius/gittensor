@@ -108,11 +108,14 @@ def test_two_card_box_is_staged_once_and_fired_on_both_cards(proof, allowlist):
 
 
 def test_wrong_gpu_model_fails_gpu_spec_and_stages_nothing(proof, allowlist):
-    runner = passing_runner(nvidia_smi=fixture('nvidia_smi_4090.csv'))
+    runner = passing_runner(nvidia_smi=fixture('nvidia_smi_4080.csv'))
     verdict = run_full_check(runner, allowlist, proof, config=CONFIG)
     assert verdict.verdict == BENCH and verdict.failed == [ck.GPU_SPEC] and verdict.skipped == [ck.GPU_PROOF]
     reason = check(verdict, ck.GPU_SPEC).evidence['reason']
-    assert "'NVIDIA GeForce RTX 4090'" in reason and 'not in the GPU catalog' in reason
+    assert "'NVIDIA GeForce RTX 4080'" in reason and 'not in the GPU catalog' in reason
+    # a listed type (a 4090, 10/8) is refused the same way, naming the type
+    verdict = run_full_check(passing_runner(nvidia_smi=fixture('nvidia_smi_4090.csv')), allowlist, proof, config=CONFIG)
+    assert verdict.failed == [ck.GPU_SPEC] and '(RTX4090) is listed but not qualified' in check(verdict, ck.GPU_SPEC).evidence['reason']  # fmt: skip
     assert proof.staged == [] and proof_calls(runner) == []
 
 

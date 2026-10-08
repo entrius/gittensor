@@ -1,5 +1,5 @@
 {
-  "_comment": "The GPU types the pool knows. names: every string nvidia-smi prints for the type. vram_mib: the nominal size; a card is accepted inside nominal x [0.90, 1.05] unless vram_mib_min / vram_mib_max give a measured window. counts: the box sizes admitted for the type (a rental takes the whole box); default [1, 2, 4, 8]. status: qualified = admitted; listed = known but not admitted. Only the RTX5090 has been run on a real card. The other six are admitted on Lium's names and sizes (gpu_spec_table.py, 10/5) and on the proof built for their architectures, not yet on a run of our own: confirm each on a real card before the compute share pays. RTXPRO6000 carries a floor of 95000 MiB (both editions report 97887): at the default 0.90 floor the proof's fill floor for it would sit inside an H100's window.",
+  "_comment": "The GPU types the pool knows. names: every string nvidia-smi prints for the type. vram_mib: the nominal size; a card is accepted inside nominal x [0.90, 1.05] unless vram_mib_min / vram_mib_max give a measured window. counts: the box sizes admitted for the type (a rental takes the whole box); default [1, 2, 4, 8]. status: qualified = admitted; listed = known but not admitted. Only the RTX5090 has been run on a real card. The other six are admitted on Lium's names and sizes (gpu_spec_table.py, 10/5) and on the proof built for their architectures, not yet on a run of our own: confirm each on a real card before the compute share pays. RTXPRO6000 carries a floor of 95000 MiB (both editions report 97887): at the default 0.90 floor the proof's fill floor for it would sit inside an H100's window. RTX3090 and RTX4090 (10/8) are the entry cards an individual owns; listed until one of each is run. They share one 24 GB window (a 3090 reports 24576, a 4090 24564), so the fill cannot tell them apart: the kernel does, the proof's sm_89 code does not load on a 3090 (sm_86), and a 4090 answering a 3090's challenge is a dearer card claiming a cheaper one.",
   "RTX5090": {
     "names": ["NVIDIA GeForce RTX 5090"],
     "compute_cap": "12.0",
@@ -44,5 +44,17 @@
     "compute_cap": "10.3",
     "vram_mib": 294912,
     "status": "qualified"
+  },
+  "RTX3090": {
+    "names": ["NVIDIA GeForce RTX 3090"],
+    "compute_cap": "8.6",
+    "vram_mib": 24576,
+    "status": "listed"
+  },
+  "RTX4090": {
+    "names": ["NVIDIA GeForce RTX 4090"],
+    "compute_cap": "8.9",
+    "vram_mib": 24576,
+    "status": "listed"
   }
 }

@@ -65,7 +65,11 @@ def test_the_sysfs_pass_yields_the_cards_joined_to_their_kfd_nodes():
     cards, stack = a.parse_amd_sysfs(SYSFS_1)
     (c,) = cards
     assert c.render_node == 'renderD128' and c.pci == '0000:03:00.0' and c.uuid == AMD_UUIDS[0]
-    assert c.device_id == '0x74a1' and c.product_name == 'AMD Instinct MI300X OAM' and a.AMD_VENDOR_ID in a.AMD_SYSFS_COMMAND
+    assert (
+        c.device_id == '0x74a1'
+        and c.product_name == 'AMD Instinct MI300X OAM'
+        and a.AMD_VENDOR_ID in a.AMD_SYSFS_COMMAND
+    )
     assert c.memory_total_mib == 196_608 and c.vram_bytes == 206_158_430_208
     assert (c.power_cap_w, c.power_cap_default_w, c.power_cap_max_w) == (750.0, 750.0, 750.0)
     assert c.partition == 'SPX/NPS1' and c.whole and c.vbios == '113-M3000100-102'
@@ -108,11 +112,17 @@ def test_the_amd_scrape_asks_sysfs_and_opens_nothing_on_the_card():
     assert g.memory_total_mib == 196_608 and g.power_limit_w == 750.0 and g.driver == '6.8.0-45-generic'
     assert scrape.driver == '6.8.0-45-generic' and scrape.amd_stack is not None and len(scrape.amd_cards) == 1
     # a card no row lists keeps a name that says so; the id, not the name, is what the spec check judges
-    unknown = scrape_host(passing_amd_runner(sysfs=SYSFS_1.replace('device=0x74a1', 'device=0x7777')), network_targets=())
+    unknown = scrape_host(
+        passing_amd_runner(sysfs=SYSFS_1.replace('device=0x74a1', 'device=0x7777')), network_targets=()
+    )
     assert unknown.gpus[0].name == 'AMD Instinct MI300X OAM' and spec_for_pci_id('0x7777') is None
     # a dead transport on the sysfs step fails that step and leaves no cards
-    dead = scrape_host(FakeRunner().on(a.AMD_SYSFS_COMMAND, ConnectionError('reset')).on(
-        'for m in nvidia amdgpu; do test -d /sys/module/$m && echo $m; done; true', 'amdgpu\n'), network_targets=())
+    dead = scrape_host(
+        FakeRunner()
+        .on(a.AMD_SYSFS_COMMAND, ConnectionError('reset'))
+        .on('for m in nvidia amdgpu; do test -d /sys/module/$m && echo $m; done; true', 'amdgpu\n'),
+        network_targets=(),
+    )
     assert dead.vendor == AMD and dead.gpus == [] and 'ConnectionError' in dead.errors['amd_sysfs']
 
 
@@ -150,7 +160,11 @@ def test_an_eight_card_box_is_one_box_and_every_card_gets_its_own_node(proof, al
     assert [c.split('--device /dev/dri/')[1].split(' ')[0] for c in creates] == [f'renderD{128 + i}' for i in range(8)]
     assert verdict.render_nodes == {u: f'renderD{128 + i}' for i, u in enumerate(AMD_UUIDS)}
     # four cards is not a size the MI300X row admits (the market sells 8x; 1x is the measurement VM)
-    four = '\n'.join(line for line in SYSFS_8.splitlines() if not any(f'renderD{128 + i}' in line or f'-- {i + 1}' == line for i in range(4, 8)))
+    four = '\n'.join(
+        line
+        for line in SYSFS_8.splitlines()
+        if not any(f'renderD{128 + i}' in line or f'-- {i + 1}' == line for i in range(4, 8))
+    )
     verdict = run_full_check(passing_amd_runner(sysfs=four), allowlist, proof, pinned_uuids=None, config=CONFIG_AMD)
     assert verdict.verdict == BENCH and verdict.failed == [ck.GPU_SPEC]
     assert why_of(verdict, ck.GPU_SPEC) == 'this box reports 4 GPUs, not a box size the pool admits for its GPU type'
@@ -198,7 +212,7 @@ def test_kfd_and_render_node_holders_are_judged_like_nvidia_nodes():
     assert ck.check_card_free(holders, ours={'c' * 64}, vendor=AMD).evidence[w.PUBLIC] == {'code': w.DESKTOP_SESSION, 'n': 1}  # fmt: skip
     assert ck.check_card_free(holders, ours=(), vendor=NVIDIA).passed  # the NVIDIA pattern sees no NVIDIA node
     assert ck.check_card_free(NO_DEVICE_HOLDERS, ours=(), vendor=AMD).passed
-    assert '-lname /dev/kfd -o -lname \'/dev/dri/renderD*\'' in AMD_DEVICE_HOLDERS_COMMAND
+    assert "-lname /dev/kfd -o -lname '/dev/dri/renderD*'" in AMD_DEVICE_HOLDERS_COMMAND
     # the proof's own refusals: the device, not a container runtime, is what says no on AMD
     public = ck._proof_public([{'passed': False, 'not_run': True, 'reason': 'container never started: Error response from daemon: error gathering device information while adding custom device "/dev/kfd": no such file'}])  # fmt: skip
     assert public == {'code': w.PROOF_RUNTIME_AMD, 'n': 1}
@@ -230,7 +244,9 @@ def test_the_heartbeat_re_reads_the_serial_the_partition_the_node_and_the_kernel
     assert nvidia_smi_not_asked.calls == [a.AMD_SYSFS_COMMAND]
     # the exclusivity question is asked of the device nodes, box-wide, and nvidia-smi never
     record = SimpleNamespace(uuid=uuid, container_id='c' * 64)
-    alone = hb._alone(FakeRunner({AMD_DEVICE_HOLDERS_COMMAND: fixture('amd/device_holders_kfd_desktop.txt')}), [record], AMD)  # type: ignore[list-item]
+    alone = hb._alone(
+        FakeRunner({AMD_DEVICE_HOLDERS_COMMAND: fixture('amd/device_holders_kfd_desktop.txt')}), [record], AMD
+    )  # type: ignore[list-item]
     assert not alone[uuid].ok and '(gnome-shell)' in alone[uuid].detail and 'pid 3310' not in alone[uuid].detail
     free = hb._alone(FakeRunner({AMD_DEVICE_HOLDERS_COMMAND: NO_DEVICE_HOLDERS}), [record], AMD)  # type: ignore[list-item]
     assert free[uuid].ok and free[uuid].detail == '0 device holder(s), none foreign'
@@ -243,7 +259,9 @@ def test_the_amd_rows_are_listed_matched_by_pci_id_and_priced():
     catalog = load_catalog()
     amd = {t: s for t, s in catalog.items() if s.vendor == AMD}
     assert set(amd) == {'MI300X', 'MI325X', 'MI350', 'MI300A', 'R9700'}
-    assert all(s.status == LISTED and s.pci_ids and s.gfx_target and s.compute_cap == s.gfx_target for s in amd.values())
+    assert all(
+        s.status == LISTED and s.pci_ids and s.gfx_target and s.compute_cap == s.gfx_target for s in amd.values()
+    )
     ids = [i for s in amd.values() for i in s.pci_ids]
     assert len(ids) == len(set(ids)) and spec_for_pci_id('0x74A1') is amd['MI300X'] and spec_for_pci_id('') is None
     assert amd['MI300X'].counts == (1, 8) and amd['MI350'].names == ('AMD Instinct MI350X', 'AMD Instinct MI355X')

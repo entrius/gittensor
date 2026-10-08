@@ -38,8 +38,9 @@ def card(line: str, **changes: str):
 
 def test_the_catalog_lists_and_admits_every_phase_1_type():
     catalog = load_catalog()
-    assert set(catalog) == {'RTX5090', 'RTXPRO6000', 'L40S', 'H100', 'H200', 'B200', 'B300'}
-    assert all(s.qualified for s in catalog.values())
+    assert set(catalog) == {'RTX5090', 'RTXPRO6000', 'L40S', 'H100', 'H200', 'B200', 'B300', 'RTX3090', 'RTX4090'}
+    # The entry cards (10/8) wait for a run on a real card; everything else is admitted.
+    assert {t for t, s in catalog.items() if not s.qualified} == {'RTX3090', 'RTX4090'}
     assert all(s.status in (QUALIFIED, LISTED) for s in catalog.values())
     assert catalog['RTX5090'] is RTX_5090 and (RTX_5090.vram_total_mib_min, RTX_5090.vram_total_mib_max) == (
         32_000,
@@ -62,7 +63,35 @@ def test_names_map_to_types_and_an_unknown_name_normalises():
     assert spec_for_name(' NVIDIA H100 PCIe ') is spec_for_type('H100')
     assert gpu_type_of('NVIDIA H200 NVL') == 'H200' and gpu_type_of('NVIDIA B300 SXM6 PC') == 'B300'
     assert gpu_type_of('NVIDIA RTX PRO 6000 Blackwell Server Edition') == 'RTXPRO6000'
-    assert spec_for_name('NVIDIA GeForce RTX 4090') is None and gpu_type_of('NVIDIA GeForce RTX 4090') == 'RTX4090'
+    assert spec_for_name('NVIDIA GeForce RTX 4080') is None and gpu_type_of('NVIDIA GeForce RTX 4080') == 'RTX4080'
+    assert gpu_type_of('NVIDIA GeForce RTX 3090') == 'RTX3090' and gpu_type_of('NVIDIA GeForce RTX 4090') == 'RTX4090'
+
+
+def test_the_3090_and_the_4090_share_a_window_and_the_kernel_tells_them_apart():
+    """The one pair the fill cannot separate (both 24 GB): the proof's sm_89 code does not load on a 3090 (sm_86),
+    and a 4090 answering a 3090's challenge is a dearer card claiming a cheaper one. Every other size is in one
+    window only (the parametrised test above)."""
+    three, four = spec_for_type('RTX3090'), spec_for_type('RTX4090')
+    assert three is not None and four is not None and not three.qualified and not four.qualified
+    assert (three.vram_total_mib_min, three.vram_total_mib_max) == (four.vram_total_mib_min, four.vram_total_mib_max)
+    assert three.compute_cap == '8.6' and four.compute_cap == '8.9'
+    for observed in (24576, 24564):  # what a 3090 and a 4090 report
+        inside = {t for t, s in load_catalog().items() if s.vram_total_mib_min <= observed <= s.vram_total_mib_max}
+        assert inside == {'RTX3090', 'RTX4090'}
+    assert check_gpu_spec_names_hold(three, four)
+
+
+def check_gpu_spec_names_hold(three, four) -> bool:
+    """A 4090 under the 3090 spec and a 3090 under the 4090 spec both fail the spec rule on name and compute cap."""
+    (card_4090,) = card(
+        H100, uuid='GPU-44444444-2222-4333-8444-555555555555', name='NVIDIA GeForce RTX 4090', vram='24564', cap='8.9'
+    )
+    (card_3090,) = card(
+        H100, uuid='GPU-33333333-2222-4333-8444-555555555555', name='NVIDIA GeForce RTX 3090', vram='24576', cap='8.6'
+    )
+    as_3090 = ck.check_gpu_spec([card_4090], three)
+    as_4090 = ck.check_gpu_spec([card_3090], four)
+    return not as_3090.passed and not as_4090.passed and ck.check_gpu_spec([card_3090], three).passed
 
 
 def test_a_listed_type_is_not_admitted_until_it_is_qualified(monkeypatch):
@@ -144,5 +173,7 @@ def test_gitt_up_names_the_model_rule_before_the_controller_does():
     assert check_gpu_model(['NVIDIA H100 PCIe', 'NVIDIA H100 80GB HBM3']) is None
     mixed = check_gpu_model([five, 'NVIDIA H100 PCIe'])
     assert mixed is not None and 'one type' in mixed.detail and not mixed.required
-    unknown = check_gpu_model([five, 'NVIDIA GeForce RTX 4090'])
-    assert unknown is not None and 'RTX 4090' in unknown.detail
+    unknown = check_gpu_model([five, 'NVIDIA GeForce RTX 4080'])
+    assert unknown is not None and 'RTX 4080' in unknown.detail
+    listed = check_gpu_model(['NVIDIA GeForce RTX 3090'])  # known, not admitted yet: the same answer as unknown
+    assert listed is not None and 'pool admits' in listed.detail and 'RTX3090' not in listed.detail.split('found')[0]

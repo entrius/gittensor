@@ -95,6 +95,7 @@ class RepoTimeDecayConfig:
     sigmoid_midpoint_days: Optional[float] = None
     sigmoid_steepness: Optional[float] = None
     min_multiplier: Optional[float] = None
+    absolute_share: Optional[bool] = None
 
 
 @dataclass(frozen=True)
@@ -105,6 +106,8 @@ class ResolvedTimeDecay:
     sigmoid_midpoint_days: float
     sigmoid_steepness: float
     min_multiplier: float
+    # When True the repo pays out only the decayed fraction of its slice (Σ decayed / Σ undecayed); the rest recycles.
+    absolute_share: bool = False
 
 
 @dataclass
@@ -121,6 +124,7 @@ class RepoScoringConfig:
     standard_issue_multiplier: Optional[float] = None
     maintainer_issue_multiplier: Optional[float] = None
     src_tok_saturation_scale: Optional[float] = None
+    king_of_the_hill: Optional[bool] = None
     time_decay: RepoTimeDecayConfig = field(default_factory=RepoTimeDecayConfig)
 
 
@@ -135,6 +139,11 @@ class ResolvedScoring:
     maintainer_issue_multiplier: float
     src_tok_saturation_scale: float
     time_decay: ResolvedTimeDecay
+    # When True only the latest crowned PR (scoring label, in the lookback window) is paid from the repo's PR slice;
+    # per-PR scores are unchanged. The king is picked among PRs of repo-eligible miners evaluated this round, so a
+    # non-miner / deregistered / penalized crown can't dethrone and the previous king can keep earning for up to
+    # pr_lookback_days. TODO: pick the king from repo-level data before a large share.
+    king_of_the_hill: bool = False
 
 
 @dataclass
@@ -219,6 +228,7 @@ def resolve_time_decay(cfg: Optional[RepoTimeDecayConfig]) -> ResolvedTimeDecay:
         sigmoid_midpoint_days=float(pick(cfg.sigmoid_midpoint_days, TIME_DECAY_SIGMOID_MIDPOINT)),
         sigmoid_steepness=float(pick(cfg.sigmoid_steepness, TIME_DECAY_SIGMOID_STEEPNESS_SCALAR)),
         min_multiplier=float(pick(cfg.min_multiplier, TIME_DECAY_MIN_MULTIPLIER)),
+        absolute_share=bool(cfg.absolute_share),
     )
 
 
@@ -237,6 +247,7 @@ def resolve_scoring(cfg: Optional[RepoScoringConfig]) -> ResolvedScoring:
         maintainer_issue_multiplier=float(pick(cfg.maintainer_issue_multiplier, MAINTAINER_ISSUE_MULTIPLIER)),
         src_tok_saturation_scale=float(pick(cfg.src_tok_saturation_scale, SRC_TOK_SATURATION_SCALE)),
         time_decay=resolve_time_decay(cfg.time_decay),
+        king_of_the_hill=bool(cfg.king_of_the_hill),
     )
 
 
@@ -343,6 +354,7 @@ def _parse_eligibility(repo_name: str, raw: Any) -> RepoEligibilityConfig:
 
 
 _SCORING_INT_FIELDS = ('pr_lookback_days',)
+_SCORING_BOOL_FIELDS = ('king_of_the_hill',)
 _SCORING_FLOAT_FIELDS = (
     'open_pr_collateral_percent',
     'review_penalty_rate',
@@ -363,8 +375,15 @@ def _coerce_scoring_value(repo_name: str, field_name: str, raw_value: Any, caste
         raise RepositoryRegistryError(f'{repo_name} scoring.{field_name} must be a number: {e}') from e
 
 
+def _coerce_scoring_bool(repo_name: str, field_name: str, raw_value: Any) -> Optional[bool]:
+    if raw_value is not None and not isinstance(raw_value, bool):
+        raise RepositoryRegistryError(f'{repo_name} scoring.{field_name} must be a bool, got {type(raw_value)}')
+    return raw_value
+
+
 _TIME_DECAY_INT_FIELDS = ('grace_period_hours',)
 _TIME_DECAY_FLOAT_FIELDS = ('sigmoid_midpoint_days', 'sigmoid_steepness', 'min_multiplier')
+_TIME_DECAY_BOOL_FIELDS = ('absolute_share',)
 
 
 def _parse_time_decay(repo_name: str, raw: Any) -> RepoTimeDecayConfig:
@@ -374,7 +393,7 @@ def _parse_time_decay(repo_name: str, raw: Any) -> RepoTimeDecayConfig:
     if not isinstance(raw, dict):
         raise RepositoryRegistryError(f'{repo_name} scoring.time_decay must be an object, got {type(raw)}')
 
-    known = set(_TIME_DECAY_INT_FIELDS) | set(_TIME_DECAY_FLOAT_FIELDS)
+    known = set(_TIME_DECAY_INT_FIELDS) | set(_TIME_DECAY_FLOAT_FIELDS) | set(_TIME_DECAY_BOOL_FIELDS)
     unknown = sorted(set(raw) - known)
     if unknown:
         raise RepositoryRegistryError(f'{repo_name} scoring.time_decay has unknown keys: {unknown}')
@@ -384,6 +403,8 @@ def _parse_time_decay(repo_name: str, raw: Any) -> RepoTimeDecayConfig:
         kwargs[field_name] = _coerce_scoring_value(repo_name, f'time_decay.{field_name}', raw.get(field_name), int)
     for field_name in _TIME_DECAY_FLOAT_FIELDS:
         kwargs[field_name] = _coerce_scoring_value(repo_name, f'time_decay.{field_name}', raw.get(field_name), float)
+    for field_name in _TIME_DECAY_BOOL_FIELDS:
+        kwargs[field_name] = _coerce_scoring_bool(repo_name, f'time_decay.{field_name}', raw.get(field_name))
     return RepoTimeDecayConfig(**kwargs)
 
 
@@ -394,7 +415,8 @@ def _parse_scoring(repo_name: str, raw: Any) -> RepoScoringConfig:
     if not isinstance(raw, dict):
         raise RepositoryRegistryError(f'{repo_name} scoring must be an object, got {type(raw)}')
 
-    unknown = sorted(set(raw) - set(_SCORING_INT_FIELDS) - set(_SCORING_FLOAT_FIELDS) - {'time_decay'})
+    known = set(_SCORING_INT_FIELDS) | set(_SCORING_FLOAT_FIELDS) | set(_SCORING_BOOL_FIELDS) | {'time_decay'}
+    unknown = sorted(set(raw) - known)
     if unknown:
         raise RepositoryRegistryError(f'{repo_name} scoring has unknown keys: {unknown}')
 
@@ -403,6 +425,8 @@ def _parse_scoring(repo_name: str, raw: Any) -> RepoScoringConfig:
         kwargs[field_name] = _coerce_scoring_value(repo_name, field_name, raw.get(field_name), int)
     for field_name in _SCORING_FLOAT_FIELDS:
         kwargs[field_name] = _coerce_scoring_value(repo_name, field_name, raw.get(field_name), float)
+    for field_name in _SCORING_BOOL_FIELDS:
+        kwargs[field_name] = _coerce_scoring_bool(repo_name, field_name, raw.get(field_name))
     kwargs['time_decay'] = _parse_time_decay(repo_name, raw.get('time_decay'))
     return RepoScoringConfig(**kwargs)
 

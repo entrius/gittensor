@@ -3,6 +3,7 @@
 
 """Round-level emission allocation by repository emission shares."""
 
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Dict, Iterator, Optional
 
 import bittensor as bt
@@ -14,7 +15,7 @@ from gittensor.constants import (
     OSS_EMISSION_SHARE,
     RECYCLE_UID,
 )
-from gittensor.validator.utils.load_weights import RepositoryConfig
+from gittensor.validator.utils.load_weights import RepositoryConfig, resolve_scoring
 
 if TYPE_CHECKING:
     from gittensor.validator.compute_pool import ComputePool
@@ -32,8 +33,8 @@ def blend_emission_pools(
     Each repo's ``emission_share * OSS_EMISSION_SHARE`` slice is distributed
     only within that repo. PR and issue-discovery sub-slices are split by the
     repo's ``issue_discovery_share`` and spill only inside the same repo when
-    exactly one side has eligible non-zero scorers. Empty repo slices and
-    registry slack recycle to UID 0.
+    exactly one side has eligible non-zero scorers. Empty repo slices, the
+    decayed-away part of ``absolute_share`` repos, and registry slack recycle to UID 0.
 
     When a repo sets ``maintainer_cut`` and ``maintainer_uids_by_repo`` lists
     registered maintainer miners for it, ``maintainer_cut`` of that repo's slice
@@ -100,43 +101,25 @@ def calculate_repo_emission_breakdown(
 ) -> Iterator[RepoEmissionAllocation]:
     """Return per-repository reward allocation details without adding recycle slack.
 
-    Two independent piles: the maintainer cut is paid at the repo's *base* rate
-    (``maintainer_cut * emission_share * OSS``) and is never scaled, so a maintainer's
-    take cannot be inflated by other repos going dead. Everything else forms a
-    subnet-wide scoring pool released only to repos with PR/issue scorers this round,
-    weighted by their post-cut scoring share. Ineligible/empty scoring shares thus flow
-    to active scorers instead of recycling; with no active repos the scoring pool
-    recycles. Registry slack (configured shares < 1.0) recycles either way.
+    Each repo pays only its own ``emission_share * OSS`` slice; nothing pools across repos.
+    The maintainer cut comes off the top; the scoring remainder goes to the repo's PR/issue
+    scorers, and recycles when the repo has none this round.
+
+    With ``scoring.time_decay.absolute_share`` each sub-slice pays out only
+    ``Σ decayed / Σ undecayed`` of itself (pro-rata by decayed score) and recycles the rest,
+    so decay shrinks the payout rather than just reweighting scorers.
+
+    With ``scoring.king_of_the_hill`` only the latest crowned PR (scoring label, inside the lookback
+    window) is paid from the repo's PR slice, at its own decayed score; per-PR scores are unchanged.
+    The king is chosen among PRs of repo-eligible miners evaluated this round (registered, fetched):
+    a crown by a non-miner, deregistered or penalized author can't dethrone, so the previous king can
+    keep earning for up to ``pr_lookback_days``. TODO: pick the king from repo-level data before a large share.
     """
     maintainer_map = maintainer_uids_by_repo or {}
 
-    # Pass 1: classify each repo and size the scoring pool vs the active scoring share.
-    plans: list[tuple[str, RepositoryConfig, list[int], float, bool]] = []
-    total_scoring_share = 0.0
-    active_scoring_share = 0.0
     for repo_name, repo_config in master_repositories.items():
         if repo_config.emission_share <= 0:
             continue
-        eligible_maintainers = (
-            [uid for uid in (maintainer_map.get(repo_name) or []) if uid in miner_uids]
-            if repo_config.maintainer_cut > 0.0
-            else []
-        )
-        cut_fraction = repo_config.maintainer_cut if eligible_maintainers else 0.0
-        scoring_share = repo_config.emission_share * (1.0 - cut_fraction)
-        is_active = _repo_has_scorers(miner_evaluations, repo_name, repo_config, miner_uids)
-
-        total_scoring_share += scoring_share
-        if is_active:
-            active_scoring_share += scoring_share
-        plans.append((repo_name, repo_config, eligible_maintainers, scoring_share, is_active))
-
-    # The scoring pool is released to active repos pro-rata by scoring share; with none
-    # active the pool recycles (multiplier 0 routes each repo's scoring share to recycle).
-    scoring_multiplier = total_scoring_share / active_scoring_share if active_scoring_share > 0 else 0.0
-
-    # Pass 2: emit per-repo allocations.
-    for repo_name, repo_config, eligible_maintainers, scoring_share, is_active in plans:
         allocation = RepoEmissionAllocation(
             repository_full_name=repo_name,
             emission_share=repo_config.emission_share,
@@ -145,27 +128,32 @@ def calculate_repo_emission_breakdown(
             maintainer_cut=repo_config.maintainer_cut,
         )
 
-        # Maintainer pile: base-rate carve-out split evenly among registered maintainers.
+        # Maintainer carve-out split evenly among registered maintainers.
+        eligible_maintainers = (
+            [uid for uid in (maintainer_map.get(repo_name) or []) if uid in miner_uids]
+            if repo_config.maintainer_cut > 0.0
+            else []
+        )
+        cut_fraction = repo_config.maintainer_cut if eligible_maintainers else 0.0
         if eligible_maintainers:
             carve_out = repo_config.maintainer_cut * repo_config.emission_share * OSS_EMISSION_SHARE
             per_maintainer = carve_out / len(eligible_maintainers)
             allocation.maintainer_carve_out = carve_out
             allocation.maintainer_rewards = {uid: per_maintainer for uid in eligible_maintainers}
 
-        allocation.pr_scores = _collect_repo_pr_scores(miner_evaluations, repo_name, miner_uids)
+        scoring_cfg = resolve_scoring(repo_config.scoring)
+        king_undecayed: Optional[float] = None
+        if scoring_cfg.king_of_the_hill:
+            allocation.pr_scores, king_undecayed = _collect_king_of_the_hill_score(
+                miner_evaluations, repo_name, miner_uids, scoring_cfg.pr_lookback_days
+            )
+        else:
+            allocation.pr_scores = _collect_repo_pr_scores(miner_evaluations, repo_name, miner_uids)
         allocation.issue_discovery_scores = _collect_repo_issue_discovery_scores(
             miner_evaluations, repo_name, miner_uids
         )
 
-        if not is_active:
-            # Inactive repo's scoring share is redistributed to active repos; it only
-            # recycles when nothing is active anywhere.
-            if active_scoring_share <= 0:
-                allocation.recycled_amount += scoring_share * OSS_EMISSION_SHARE
-            yield allocation
-            continue
-
-        scoring_slice = scoring_share * OSS_EMISSION_SHARE * scoring_multiplier
+        scoring_slice = repo_config.emission_share * (1.0 - cut_fraction) * OSS_EMISSION_SHARE
         issue_share = repo_config.issue_discovery_share
         pr_scores = allocation.pr_scores if issue_share < 1.0 else {}
         issue_scores = allocation.issue_discovery_scores if issue_share > 0.0 else {}
@@ -177,34 +165,94 @@ def calculate_repo_emission_breakdown(
             allocation.issue_discovery_slice = scoring_slice * issue_share
         elif pr_total > 0:
             allocation.pr_slice = scoring_slice
-        else:
+        elif issue_total > 0:
             allocation.issue_discovery_slice = scoring_slice
+        else:
+            allocation.recycled_amount += scoring_slice
+            yield allocation
+            continue
 
-        allocation.pr_rewards, pr_unallocated = _calculate_score_rewards(pr_scores, allocation.pr_slice, miner_uids)
+        pr_paid, issue_paid = allocation.pr_slice, allocation.issue_discovery_slice
+        if scoring_cfg.time_decay.absolute_share:
+            if king_undecayed is None:
+                king_undecayed = _collect_repo_pr_undecayed_total(miner_evaluations, repo_name, miner_uids)
+            issue_undecayed = _collect_repo_issue_undecayed_total(miner_evaluations, repo_name, miner_uids)
+            pr_paid *= _decayed_fraction(pr_total, king_undecayed)
+            issue_paid *= _decayed_fraction(issue_total, issue_undecayed)
+
+        allocation.pr_rewards, pr_unallocated = _calculate_score_rewards(pr_scores, pr_paid, miner_uids)
         allocation.issue_discovery_rewards, issue_unallocated = _calculate_score_rewards(
-            issue_scores, allocation.issue_discovery_slice, miner_uids
+            issue_scores, issue_paid, miner_uids
         )
-        allocation.recycled_amount += pr_unallocated + issue_unallocated
+        decayed_away = (allocation.pr_slice - pr_paid) + (allocation.issue_discovery_slice - issue_paid)
+        allocation.recycled_amount += decayed_away + pr_unallocated + issue_unallocated
         yield allocation
 
 
-def _repo_has_scorers(
+def _decayed_fraction(decayed_total: float, undecayed_total: float) -> float:
+    """Share of a sub-slice an ``absolute_share`` repo pays out: Σ decayed / Σ undecayed, capped at 1."""
+    return decayed_total / max(decayed_total, undecayed_total) if decayed_total > 0 else 0.0
+
+
+def _collect_king_of_the_hill_score(
     miner_evaluations: Dict[int, MinerEvaluation],
     repo_name: str,
-    repo_config: RepositoryConfig,
     miner_uids: set[int],
-) -> bool:
-    """True when the repo has a scorer on a side that pays out (mirrors the split gates).
+    lookback_days: int,
+) -> tuple[Dict[int, float], float]:
+    """The king's ``{uid: decayed score}`` and undecayed score; empty when no crowned PR is in the window.
 
-    Maintainer presence alone does NOT make a repo active: a maintainer-only repo pays
-    its base-rate cut but its scoring share is redistributed to repos that did work.
+    The king is the latest-merged PR with a scoring label (label multiplier > 0), ties to the higher PR number,
+    among scoring miners eligible in the repo.
     """
-    issue_share = repo_config.issue_discovery_share
-    if issue_share < 1.0 and _collect_repo_pr_scores(miner_evaluations, repo_name, miner_uids):
-        return True
-    if issue_share > 0.0 and _collect_repo_issue_discovery_scores(miner_evaluations, repo_name, miner_uids):
-        return True
-    return False
+    cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+    crowned = [
+        (pr.merged_at, pr.number, uid, pr)
+        for uid, evaluation in miner_evaluations.items()
+        if _is_scoring_evaluation(uid, evaluation, miner_uids)
+        and (repo_eval := evaluation.repo_evaluations.get(repo_name)) is not None
+        and repo_eval.is_eligible
+        for pr in evaluation.merged_prs
+        if pr.repository_full_name.lower() == repo_name
+        and pr.label_multiplier > 0
+        and pr.merged_at is not None
+        and pr.merged_at >= cutoff
+    ]
+    if not crowned:
+        return {}, 0.0
+    _, _, uid, king = max(crowned, key=lambda c: (c[0], c[1]))
+    if king.earned_score <= 0:
+        return {}, 0.0
+    return {uid: king.earned_score}, king.undecayed_score
+
+
+def _collect_repo_pr_undecayed_total(
+    miner_evaluations: Dict[int, MinerEvaluation],
+    repo_name: str,
+    miner_uids: set[int],
+) -> float:
+    """Σ undecayed PR scores across the repo's scoring miners (fully decayed ones included)."""
+    return sum(
+        repo_eval.undecayed_total_score
+        for uid, evaluation in miner_evaluations.items()
+        if _is_scoring_evaluation(uid, evaluation, miner_uids)
+        and (repo_eval := evaluation.repo_evaluations.get(repo_name)) is not None
+    )
+
+
+def _collect_repo_issue_undecayed_total(
+    miner_evaluations: Dict[int, MinerEvaluation],
+    repo_name: str,
+    miner_uids: set[int],
+) -> float:
+    """Σ undecayed issue-discovery scores across the repo's scoring miners (fully decayed ones included)."""
+    return sum(
+        issue.discovery_undecayed_score
+        for uid, evaluation in miner_evaluations.items()
+        if _is_scoring_evaluation(uid, evaluation, miner_uids)
+        for issue in evaluation.issue_discovery_issues
+        if issue.repository_full_name.lower() == repo_name
+    )
 
 
 def _calculate_score_rewards(

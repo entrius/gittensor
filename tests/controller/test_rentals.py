@@ -174,6 +174,7 @@ def test_an_order_is_placed_started_and_active_and_the_cards_are_leased(tmp_path
     report = rec.run_pass()
     r = store.rentals[r.id]
     assert [a.kind for a in report.actions] == ['place', 'active'] and report.ok
+    assert all('ubuntu:24.04' in a.detail for a in report.actions)  # a grep of the id says which image, both lines
     assert r.state == rt.ACTIVE and r.box == HK and r.box_uid == 45 and r.uuids == [U1, U2] and r.uuid == U1
     assert r.container_id == CID and r.host == '203.0.113.7' and r.port_map == {'22': 31000}
     assert r.started_at == r.pay_from == clock.t and r.pay_open

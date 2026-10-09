@@ -153,7 +153,6 @@ class RentalRecord:
     uuids: list[str] = field(default_factory=list)
     vendor: str = NVIDIA  # the box's pinned vendor (30 §1 #2); records from before this field load as nvidia
     render_nodes: dict[str, str] = field(default_factory=dict)  # AMD: {uuid: 'renderD<N>'}, the box's pin at placement
-    amd_gids: list[int] = field(default_factory=list)  # AMD: the host's video/render gids, numeric, at placement
     container_id: str = ''
     host: str = ''
     port_map: dict[str, int] = field(default_factory=dict)  # str(pod port) -> the host port docker publishes it on
@@ -295,7 +294,7 @@ def pod_run_command(r: RentalRecord, network: str = RENTAL_NETWORK, runtime: str
         missing = [u for u in r.uuids if not r.render_nodes.get(u)]
         if missing:
             raise RentalError(f'{START_FAILED}: no render node pinned for {len(missing)} of {len(r.uuids)} card(s)')
-        attach = amd_attach_args([r.render_nodes[u] for u in r.uuids], r.amd_gids)
+        attach = amd_attach_args([r.render_nodes[u] for u in r.uuids])
     else:
         # every card of the box by --gpus (docker reads the value as CSV: quoted, commas survive)
         attach = [f'--gpus {shlex.quote(f'"device={devices}"')}']
@@ -616,7 +615,6 @@ class RentalReconciler:
             r.uuid = r.uuids[0]
             r.vendor = box.vendor
             r.render_nodes = {u: box.render_nodes[u] for u in r.uuids if u in box.render_nodes}
-            r.amd_gids = box.amd_gids
             r.host = _public_host(box)
             with self._lock:
                 b = self._box(box.box_id)

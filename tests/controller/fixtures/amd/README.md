@@ -12,7 +12,7 @@ DigitalOcean 1x MI325X GPU Droplet on 2026-10-09 (Ubuntu 24.04.4, kernel 6.8.0-1
 | `mem_info_vram_total` | 256 GiB exactly | 274542362624 B = 261824 MiB (0.3 % under the nominal 262144) |
 | `power1_cap*` | 750 W (an MI300X) | 1000 W, cap = default = max |
 | `/sys/module/amdgpu/version` | absent (in-tree) | present: the DKMS driver's version |
-| `--group-add video --group-add render` | names | **fails** ("Unable to find group render": docker resolves names inside the container); the command now prints the host's gids, `video` 44 and `render` 992 here (the two `gid_*` lines were appended to the capture from `getent group` on the same box) |
+| `--group-add video --group-add render` on the proof / pod | works | **fails**: docker resolves the names inside the container and the image has no `render` group; and under Sysbox the nodes are nobody:nogroup, so no group bit applies. No `--group-add`; the nodes are 0666 on the host (`gitt up` checks, `sysbox-setup.sh` sets) |
 | KFD nodes | one per card | node 0 is the CPU (all zeros); the card is node 1 |
 | render nodes | `renderD128` is the card | `renderD128` is the virtio display (vendor 0x1af4, skipped); the card is `renderD129`; `renderD130`-`136` exist with no device files |
 

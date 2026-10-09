@@ -76,8 +76,7 @@ def test_the_sysfs_pass_yields_the_cards_joined_to_their_kfd_nodes():
     # the KFD node joined on the render minor: the gfx target, and the same serial in decimal
     assert c.gfx_target == 'gfx942' and c.kfd_unique_id == c.unique_id and c.id_ok
     assert stack.kernel == '6.8.0-137-generic' and stack.amdgpu == '6.19.14.31400000'
-    assert stack.gids == (44, 992)  # the host's video/render gids, what --group-add must say (names fail in-container)
-    assert stack.as_dict() == {'kernel': '6.8.0-137-generic', 'amdgpu': '6.19.14.31400000', 'gids': [44, 992]}
+    assert stack.as_dict() == {'kernel': '6.8.0-137-generic', 'amdgpu': '6.19.14.31400000'}
     eight, _ = a.parse_amd_sysfs(SYSFS_8)
     assert [c.render_node for c in eight] == [f'renderD{129 + i}' for i in range(8)]
     assert [c.uuid for c in eight] == AMD_UUIDS and len({c.pci for c in eight}) == 8
@@ -89,9 +88,6 @@ def test_the_sysfs_pass_yields_the_cards_joined_to_their_kfd_nodes():
     (consumer,) = a.parse_amd_sysfs(SYSFS_1.replace('current_compute_partition=SPX', 'current_compute_partition=').replace('current_memory_partition=NPS1', 'current_memory_partition='))[0]  # fmt: skip
     assert consumer.whole and consumer.partition == '-/-'
     assert a.parse_amd_sysfs('') == ([], a.AmdStack())
-    assert a.parse_amd_sysfs(SYSFS_1.replace('gid_render=992', 'gid_render='))[1].gids == (
-        44,
-    )  # no render group: video only
 
 
 def test_gfx_targets_decode_from_the_kfd_version_number():
@@ -151,16 +147,15 @@ def test_an_mi325x_box_is_admitted_proved_by_device_nodes_and_pinned(proof, allo
     assert stack['passed_on'] == 'kernel' and stack['record']['kernel'] == '6.8.0-137-generic'
     # the proof container: attached by device nodes, the HIP image, never --gpus
     (create,) = [c for c in runner.calls if c.startswith('docker create')]
-    assert create.startswith('docker create --device /dev/kfd --device /dev/dri/renderD129 --group-add 44 --group-add 992 --name gt-proof-0')  # fmt: skip
-    assert '--group-add video' not in create  # numeric gids: a name does not resolve inside the proof image
+    assert create.startswith('docker create --device /dev/kfd --device /dev/dri/renderD129 --name gt-proof-0')
+    assert '--group-add' not in create  # a group name does not resolve inside the image, and Sysbox ignores group bits
     assert '--gpus' not in create and 'entrius/gt-proof-rocm:test' in create and f'io.gittensor.proof.uuid={AMD_UUIDS[0]}' in create  # fmt: skip
     assert verdict.check(ck.NVML_DIGEST) is None  # no NVML allowlist on AMD: the stack record and its floor instead
     # state: vendor, render nodes and the stack pinned beside the power baseline
     box = apply_verdict(BoxState('hk', ADMIT), verdict, now=1_000.0)
     assert box.status == IDLE and box.vendor == AMD and box.pinned_uuids == AMD_UUIDS[:1]
     assert box.render_nodes == {AMD_UUIDS[0]: 'renderD129'} and box.identity['power_limits'] == {AMD_UUIDS[0]: 1000.0}
-    assert box.identity['amd_stack'] == {'kernel': '6.8.0-137-generic', 'amdgpu': '6.19.14.31400000', 'gids': [44, 992], 'vbios': {AMD_UUIDS[0]: '113-M3250101-100'}}  # fmt: skip
-    assert box.amd_gids == [44, 992]  # what a rental pod on this box gets as --group-add
+    assert box.identity['amd_stack'] == {'kernel': '6.8.0-137-generic', 'amdgpu': '6.19.14.31400000', 'vbios': {AMD_UUIDS[0]: '113-M3250101-100'}}  # fmt: skip
 
 
 def test_an_eight_card_box_is_one_box_and_every_card_gets_its_own_node(proof, allowlist):
@@ -182,10 +177,14 @@ def test_an_eight_card_box_is_one_box_and_every_card_gets_its_own_node(proof, al
 
 
 def test_a_listed_amd_type_is_not_admitted_until_the_row_flips(proof, allowlist):
-    """Every AMD row is listed until the digest run flips it: on the catalog as shipped, the box benches."""
-    verdict = run_full_check(passing_amd_runner(), allowlist, proof, pinned_uuids=None, config=CONFIG, now=1_000.0)
+    """An AMD row is listed until its digest run flips it: an MI300X (the droplet's card with the MI300X device id) on the
+    catalog as shipped benches, and the phrase names the type, not a missing marketing name."""
+    mi300x = passing_amd_runner(sysfs=SYSFS_1.replace('device=0x74b9', 'device=0x74a1'))
+    verdict = run_full_check(mi300x, allowlist, proof, pinned_uuids=None, config=CONFIG, now=1_000.0)
     assert verdict.verdict == BENCH and verdict.failed == [ck.GPU_SPEC]
-    assert '(MI325X) is listed but not qualified' in str(check(verdict, ck.GPU_SPEC).evidence['reason'])
+    assert (
+        str(check(verdict, ck.GPU_SPEC).evidence['reason']) == 'model 0x74a1 (MI300X) is listed but not qualified yet'
+    )
     assert why_of(verdict, ck.GPU_SPEC) == w.render({'code': w.SPEC_MODEL, 'n': 1})
     assert check(verdict, ck.GPU_PROOF).skipped and proof.staged == []
 
@@ -273,9 +272,10 @@ def test_the_amd_rows_are_listed_matched_by_pci_id_and_priced():
     catalog = load_catalog()
     amd = {t: s for t, s in catalog.items() if s.vendor == AMD}
     assert set(amd) == {'MI300X', 'MI325X', 'MI350', 'MI300A', 'R9700'}
-    assert all(
-        s.status == LISTED and s.pci_ids and s.gfx_target and s.compute_cap == s.gfx_target for s in amd.values()
-    )
+    assert all(s.pci_ids and s.gfx_target and s.compute_cap == s.gfx_target for s in amd.values())
+    # MI325X qualified 10/9: the digest reproduced on four runs on the droplet, fill and time limit met (vault 33);
+    # MI300X stays listed until Alex calls whether its gfx942 sibling qualifies it
+    assert amd['MI325X'].qualified and all(s.status == LISTED for t, s in amd.items() if t != 'MI325X')
     ids = [i for s in amd.values() for i in s.pci_ids]
     assert len(ids) == len(set(ids)) and spec_for_pci_id('0x74A1') is amd['MI300X'] and spec_for_pci_id('') is None
     # the droplet's MI325X reports device 0x74b9 (0x74a5, AMD's listed id, is its subsystem id): both find the row

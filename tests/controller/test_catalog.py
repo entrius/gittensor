@@ -43,7 +43,8 @@ def test_the_catalog_lists_and_admits_every_phase_1_type():
     # The entry cards (10/8) wait for a run on a real card; everything else NVIDIA is admitted. Every AMD row waits
     # for the MI300X run (vault 31 step 1; tests/controller/test_amd.py).
     assert {t for t in nvidia if not catalog[t].qualified} == {'RTX3090', 'RTX4090'}
-    assert all(not s.qualified for s in catalog.values() if s.vendor == 'amd')
+    # AMD: the MI325X qualified on the 10/9 droplet (its digest reproduced); the other rows wait for a run of their own
+    assert {t for t, s in catalog.items() if s.vendor == 'amd' and s.qualified} == {'MI325X'}
     assert all(s.status in (QUALIFIED, LISTED) for s in catalog.values())
     assert catalog['RTX5090'] is RTX_5090 and (RTX_5090.vram_total_mib_min, RTX_5090.vram_total_mib_max) == (
         32_000,

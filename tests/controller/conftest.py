@@ -106,15 +106,7 @@ class FakeProof:
             challenge = challenge_for(uuid, self.version)
             node = identity.render_nodes[i] if i < len(identity.render_nodes) else ''
             result = runner.run(
-                create_command(
-                    image,
-                    uuid,
-                    f'gt-proof-{i}',
-                    ['--', '--challenge', challenge],
-                    identity.vendor,
-                    node,
-                    identity.amd_gids,
-                ),  # fmt: skip
+                create_command(image, uuid, f'gt-proof-{i}', ['--', '--challenge', challenge], identity.vendor, node),
                 timeout=timeout,
             )
             if not result.ok:

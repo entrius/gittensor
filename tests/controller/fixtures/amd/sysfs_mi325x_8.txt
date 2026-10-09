@@ -131,5 +131,3 @@ drm_render_minor 136
 unique_id 7447773420259116018
 kernel=6.8.0-137-generic
 amdgpu=6.19.14.31400000
-gid_video=44
-gid_render=992

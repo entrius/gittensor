@@ -116,8 +116,8 @@ def test_every_check_name_has_something_to_say():
     }  # fmt: skip
     assert names <= set(w.BY_NAME)
     assert {UNREACHABLE, DEREGISTERED, 'failed_starts', 'external_use'} <= set(w.BY_NAME)
-    assert all(w.render({'code': code, 'n': 1, 'low': 1, 'high': 2, 'missing': 1, 'extra': 1, 'floor_gb': 50})
-               for code in w.PHRASES)  # fmt: skip
+    ours = {'n': 1, 'low': 1, 'high': 2, 'missing': 1, 'extra': 1, 'floor_gb': 50, 'pct': 90, 'kmaj': 6, 'kmin': 8, 'dmaj': 6, 'dmin': 2}  # fmt: skip
+    assert all(w.render({'code': code, **ours}) for code in w.PHRASES)
 
 
 # ---------------------------------------------------------------- card_free ------------------------------------------
@@ -232,7 +232,10 @@ def test_agent_image_separates_our_fault_from_theirs():
 def test_nvml_digest_never_names_the_driver_or_the_digest():
     allowlist = NvmlAllowlist({DRIVER: [NVML_MD5]})
     unknown = allowlist.judge('999.99.99', NVML_MD5)
-    assert phrase_of(unknown) == "this box's NVIDIA driver version is not on our vetted list yet"
+    assert phrase_of(unknown) == (
+        "this box's NVIDIA driver version is not on our vetted list yet "
+        '(install a listed driver, or ask in the Discord to have it vetted)'
+    )
     assert '999.99.99' not in phrase_of(unknown) and '999.99.99' in unknown.evidence['driver']
     mismatch = allowlist.judge(DRIVER, 'f' * 32)
     assert phrase_of(mismatch) == ("this box's NVIDIA management library is not the one published for its driver")
@@ -270,7 +273,9 @@ def test_power_limit_and_fleet_uniqueness():
 
     gpus = parse_nvidia_smi(fixture('nvidia_smi_5090.csv'))
     gpus[0].power_limit_w = 100.0
-    assert phrase_of(ck.check_power_limit(gpus)) == 'the power limit is set below the pool floor on 1 card'
+    assert phrase_of(ck.check_power_limit(gpus)) == (
+        "the power limit is set below the pool floor on 1 card (the floor is 90 percent of the card's default limit)"
+    )
     gpus[0].power_limit_w = None
     assert phrase_of(ck.check_power_limit(gpus)) == 'this box did not report a power limit on 1 card'
     assert phrase_of(ck.check_power_limit([])) == 'this box reported no GPUs'

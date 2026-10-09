@@ -29,6 +29,8 @@ the 50 GB floor", never "4.1 GB free".
 from collections import Counter
 from typing import Any, Dict, Iterable, Mapping, Optional, Sequence
 
+from gittensor.controller.checks import config as cfg
+
 MAX_COUNT = 999  # the largest integer a phrase prints (``render``)
 PUBLIC = 'public'  # the evidence key a check writes its classification under: {'code': ..., <name>: <int>, ...}
 
@@ -133,7 +135,7 @@ PHRASES: Dict[str, str] = {
     NVML_DRIVER_MISSING: 'this box did not report an NVIDIA driver version',
     NVML_DRIVER_DISAGREES: 'nvidia-smi and the kernel module report different NVIDIA driver versions',
     NVML_LIBRARY_MISSING: "we could not find or hash this box's NVIDIA management library",
-    NVML_DRIVER_UNKNOWN: "this box's NVIDIA driver version is not on our vetted list yet",
+    NVML_DRIVER_UNKNOWN: "this box's NVIDIA driver version is not on our vetted list yet (install a listed driver, or ask in the Discord to have it vetted)",  # noqa: E501
     NVML_DIGEST_MISMATCH: "this box's NVIDIA management library is not the one published for its driver",
     # vendor
     VENDOR_MIXED: 'this box has GPUs from two vendors, and the pool admits one vendor per box',
@@ -152,13 +154,13 @@ PHRASES: Dict[str, str] = {
     UUID_CHANGED: 'the GPUs on this box are not the ones pinned when it was admitted ({missing} gone, {extra} new)',
     # power_limit
     POWER_NO_GPUS: 'this box reported no GPUs',
-    POWER_BELOW_FLOOR: 'the power limit is set below the pool floor on {n} card{s}',
+    POWER_BELOW_FLOOR: "the power limit is set below the pool floor on {n} card{s} (the floor is {pct} percent of the card's default limit)",  # noqa: E501
     POWER_UNREPORTED: 'this box did not report a power limit on {n} card{s}',
     # fleet_uuid_unique
     UUID_CLAIMED_ELSEWHERE: 'another box in the pool claims {n} of the GPUs this box reports',
     # amd_stack
     STACK_UNREADABLE: "we could not read this box's kernel and AMD driver versions",
-    STACK_BELOW_FLOOR: "this box's kernel and AMD driver are older than the pool floor",
+    STACK_BELOW_FLOOR: "this box's kernel and AMD driver are older than the pool floor (kernel {kmaj}.{kmin} or amdgpu DKMS {dmaj}.{dmin})",  # noqa: E501
     # the rent-range probe: no number, the range is the miner's business (publish never prints it)
     RENT_PORT_UNREACHABLE: 'the rent port range could not be reached from the controller (a firewall or NAT in the way), so this box is proved and paid idle only',  # noqa: E501
     RENT_LISTENER_FAILED: 'a listener on the rent port range would not start on this box, so this box is proved and paid idle only',  # noqa: E501
@@ -167,9 +169,9 @@ PHRASES: Dict[str, str] = {
 # A failure with nothing to classify: the name alone says it, so the phrase is fixed per name. Keyed by what
 # ``BoxState.last_failed`` holds — including the ``heartbeat:`` prefix an in-lease failure is stored under.
 BY_NAME: Dict[str, str] = {
-    'ssh_unreachable': "this box's agent did not answer for several rounds",
+    'ssh_unreachable': f"this box's agent did not answer for {cfg.UNREACHABLE_BENCH_AFTER} rounds in a row (the sshd port is closed, the agent is down, or the box is off)",  # noqa: E501
     'deregistered': 'this hotkey is no longer registered on the subnet',
-    'failed_starts': 'our workload failed to start on this box several times in a row',
+    'failed_starts': f'a pod failed to start on this box {cfg.FAILED_STARTS_BENCH_AFTER} times in a row (it did not come up, or its sshd never answered)',  # noqa: E501
     'external_use': 'the GPU we were paying for was doing work that was not ours',
     'heartbeat:same_card': 'the GPU under our workload changed while it was leased',
     'heartbeat:our_container': 'our workload container was not running on this box',

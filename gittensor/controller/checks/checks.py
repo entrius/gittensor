@@ -257,7 +257,13 @@ def check_amd_stack(
                 **evidence,
                 # the versions are the box's and stay in the log; the floor is ours
                 'reason': f'kernel {stack.kernel} below {kernel_min[0]}.{kernel_min[1]} and no DKMS amdgpu at or above {dkms_min[0]}.{dkms_min[1]}',  # noqa: E501
-                w.PUBLIC: {'code': w.STACK_BELOW_FLOOR},
+                w.PUBLIC: {
+                    'code': w.STACK_BELOW_FLOOR,
+                    'kmaj': kernel_min[0],
+                    'kmin': kernel_min[1],
+                    'dmaj': dkms_min[0],
+                    'dmin': dkms_min[1],
+                },
             },
         )
     return CheckResult(AMD_STACK, True, {**evidence, 'passed_on': 'kernel' if kernel_ok else 'dkms'})
@@ -320,7 +326,7 @@ def check_power_limit(gpus: Sequence[GpuInfo], min_ratio: float = cfg.POWER_LIMI
                 **evidence,
                 'reason': 'power limit below floor: ' + '; '.join(low),
                 # The floor is ours; the watts are theirs and stay in the log.
-                w.PUBLIC: {'code': w.POWER_BELOW_FLOOR, 'n': len(low)},
+                w.PUBLIC: {'code': w.POWER_BELOW_FLOOR, 'n': len(low), 'pct': int(round(min_ratio * 100))},
             },
         )
     if incomplete:

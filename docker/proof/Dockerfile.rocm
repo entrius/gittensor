@@ -7,9 +7,11 @@
 #
 #   docker build -f docker/proof/Dockerfile.rocm -t entrius/gt-proof-rocm:dev .
 #
-# Not yet built or published (10/8): no docker on the dev VM. The first MI300X run (31 step 1) builds it, runs the
-# proof twice and pins the pushed digest in gittensor/controller/checks/config.py PROOF_IMAGE_DIGEST_AMD. The ROCm
-# version is one pin, bumped deliberately with the binary's build image (gt-proof ci/build.sh --vendor amd).
+# Built and published by .github/workflows/agent-images.yml beside entrius/gt-proof (the `proof_rocm` job: a push
+# touching docker/proof/** builds it, a workflow_dispatch run tags entrius/gt-proof-rocm:<version> and pushes it; the
+# run prints the digest to pin in gittensor/controller/checks/config.py PROOF_IMAGE_DIGEST_AMD). The first MI300X run
+# (31 step 1, vault 33) runs the proof in it twice before the pin lands. The ROCm version is one pin, bumped
+# deliberately with the binary's build image (gt-proof ci/build.sh --vendor amd).
 
 ARG UBUNTU_VERSION=24.04
 ARG ROCM_VERSION=6.4.1

@@ -5,9 +5,12 @@ name: agent images
 #   entrius/gt-agent          the miner's sshd-only agent; trusts the CA public key baked in (GT_CA_PUB variable)
 #   entrius/gt-agent-runner   the self-updater; trusts the release public key baked in (GT_RELEASE_PUB variable)
 #   entrius/gt-proof          the empty base image the sealed GPU proof runs in (no binary, no secret)
+#   entrius/gt-proof-rocm     the AMD sibling of gt-proof (HIP runtime in place of CUDA's; vault 30 §7, 31 step 2)
 # A push touching these paths only builds (dry run). Publishing is workflow_dispatch only: nothing reaches Docker
 # Hub or the channel by accident. The signed channel is opened as a PR against the branch the run was started from; the
 # runners follow the copy on `main` (gittensor/agent/config.py AGENT_CHANNEL_URL), so it goes live on merge.
+# The two proof base images are not in the channel: they are pinned by digest in gittensor/controller/checks/config.py
+# (PROOF_IMAGE_DIGEST, PROOF_IMAGE_DIGEST_AMD); the `pins` job prints both lines at the end of a publishing run.
 # Keys: vault 27 (the ceremony). GT_RELEASE_KEY is the release private key (repo secret); the public halves are
 # repo variables. The controller's CA private key is never here.
 
@@ -35,6 +38,9 @@ jobs:
   images:
     name: ${{ github.event_name == 'workflow_dispatch' && 'build, push, sign the channel' || 'build only (dry run)' }}
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      proof_digest: ${{ steps.proof.outputs.digest }}
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
@@ -155,3 +161,68 @@ jobs:
           gh pr create --base "${{ github.ref_name }}" --head "$BRANCH" --title "$TITLE" \
             --body "Signed by the agent-images workflow (run ${{ github.run_id }}). Merge to make the channel live on \`${{ github.ref_name }}\`; runners and \`gitt up\` follow the copy on \`main\`." \
             || echo "::warning::could not open the PR (Actions may not be allowed to create pull requests): open it from https://github.com/${{ github.repository }}/compare/${{ github.ref_name }}...$BRANCH"
+
+  # The AMD proof base image, its own job: the same triggers and path filter (docker/proof/** covers
+  # docker/proof/Dockerfile.rocm), the same Docker Hub credentials, the same push-on-dispatch-only rule. Like gt-proof
+  # it carries no binary and no secret and is not in the signed channel: the controller pins its digest
+  # (PROOF_IMAGE_DIGEST_AMD). Its build pulls the HIP runtime from repo.radeon.com (~600 MB), so it runs beside the
+  # CUDA images rather than inside their job: a hiccup there never blocks the channel.
+  proof_rocm:
+    name: ${{ github.event_name == 'workflow_dispatch' && 'build, push gt-proof-rocm' || 'build gt-proof-rocm (dry run)' }}
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.proof_rocm.outputs.digest }}
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Resolve tags
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            V="${{ inputs.version }}"
+          else
+            V="dev-${GITHUB_SHA::8}"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Docker Hub
+        if: github.event_name == 'workflow_dispatch'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build gt-proof-rocm (base image, no binary)
+        id: proof_rocm
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/proof/Dockerfile.rocm
+          push: ${{ github.event_name == 'workflow_dispatch' }}
+          build-args: |
+            GT_PROOF_VERSION=${{ steps.tag.outputs.version }}
+          tags: entrius/gt-proof-rocm:${{ steps.tag.outputs.version }}
+          cache-from: type=gha,scope=gt-proof-rocm
+          cache-to: type=gha,mode=max,scope=gt-proof-rocm
+
+      - name: Print the digest
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "gt-proof-rocm: entrius/gt-proof-rocm@${{ steps.proof_rocm.outputs.digest }}  (pin in gittensor/controller/checks/config.py PROOF_IMAGE_DIGEST_AMD)"
+
+  # Both proof pins side by side, once both images are on Docker Hub: what goes into checks/config.py for this release.
+  pins:
+    name: proof image pins
+    if: github.event_name == 'workflow_dispatch'
+    needs: [images, proof_rocm]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print the pins
+        run: |
+          echo "== proof image pins, release ${{ needs.images.outputs.version }} (gittensor/controller/checks/config.py) =="
+          echo "gt-proof:      entrius/gt-proof@${{ needs.images.outputs.proof_digest }}  (pin in gittensor/controller/checks/config.py PROOF_IMAGE_DIGEST)"
+          echo "gt-proof-rocm: entrius/gt-proof-rocm@${{ needs.proof_rocm.outputs.digest }}  (pin in gittensor/controller/checks/config.py PROOF_IMAGE_DIGEST_AMD)"

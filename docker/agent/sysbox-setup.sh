@@ -128,7 +128,7 @@ if [ "$VENDOR" = amd ]; then
     nodes=""
     for n in /dev/dri/renderD*; do [ -e "$n" ] && nodes="$nodes --device $n"; done
     # shellcheck disable=SC2086  # $nodes is a list of --device flags built from the box's own /dev/dri
-    verify="docker run --rm --runtime=sysbox-runc --device /dev/kfd $nodes --group-add video --group-add render $VERIFY_IMAGE_AMD rocminfo"
+    verify="docker run --rm --runtime=sysbox-runc --device /dev/kfd $nodes --group-add $(getent group video | cut -d: -f3) --group-add $(getent group render | cut -d: -f3) $VERIFY_IMAGE_AMD rocminfo"
 else
     verify="docker run --rm --runtime=sysbox-runc --gpus all $VERIFY_IMAGE nvidia-smi -L"
 fi

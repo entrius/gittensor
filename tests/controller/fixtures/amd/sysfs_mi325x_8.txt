@@ -1,0 +1,133 @@
+== renderD129 0000:83:00.0
+unique_id=675bce773a2403eb
+vendor=0x1002
+device=0x74b9
+product_name=
+mem_info_vram_total=274542362624
+current_compute_partition=SPX
+current_memory_partition=NPS1
+vbios_version=113-M3250101-100
+power1_cap=1000000000
+power1_cap_default=1000000000
+power1_cap_max=1000000000
+== renderD130 0000:a3:00.0
+unique_id=675bce773a2403ec
+vendor=0x1002
+device=0x74b9
+product_name=
+mem_info_vram_total=274542362624
+current_compute_partition=SPX
+current_memory_partition=NPS1
+vbios_version=113-M3250101-100
+power1_cap=1000000000
+power1_cap_default=1000000000
+power1_cap_max=1000000000
+== renderD131 0000:c3:00.0
+unique_id=675bce773a2403ed
+vendor=0x1002
+device=0x74b9
+product_name=
+mem_info_vram_total=274542362624
+current_compute_partition=SPX
+current_memory_partition=NPS1
+vbios_version=113-M3250101-100
+power1_cap=1000000000
+power1_cap_default=1000000000
+power1_cap_max=1000000000
+== renderD132 0000:e3:00.0
+unique_id=675bce773a2403ee
+vendor=0x1002
+device=0x74b9
+product_name=
+mem_info_vram_total=274542362624
+current_compute_partition=SPX
+current_memory_partition=NPS1
+vbios_version=113-M3250101-100
+power1_cap=1000000000
+power1_cap_default=1000000000
+power1_cap_max=1000000000
+== renderD133 0000:03:00.0
+unique_id=675bce773a2403ef
+vendor=0x1002
+device=0x74b9
+product_name=
+mem_info_vram_total=274542362624
+current_compute_partition=SPX
+current_memory_partition=NPS1
+vbios_version=113-M3250101-100
+power1_cap=1000000000
+power1_cap_default=1000000000
+power1_cap_max=1000000000
+== renderD134 0000:23:00.0
+unique_id=675bce773a2403f0
+vendor=0x1002
+device=0x74b9
+product_name=
+mem_info_vram_total=274542362624
+current_compute_partition=SPX
+current_memory_partition=NPS1
+vbios_version=113-M3250101-100
+power1_cap=1000000000
+power1_cap_default=1000000000
+power1_cap_max=1000000000
+== renderD135 0000:43:00.0
+unique_id=675bce773a2403f1
+vendor=0x1002
+device=0x74b9
+product_name=
+mem_info_vram_total=274542362624
+current_compute_partition=SPX
+current_memory_partition=NPS1
+vbios_version=113-M3250101-100
+power1_cap=1000000000
+power1_cap_default=1000000000
+power1_cap_max=1000000000
+== renderD136 0000:63:00.0
+unique_id=675bce773a2403f2
+vendor=0x1002
+device=0x74b9
+product_name=
+mem_info_vram_total=274542362624
+current_compute_partition=SPX
+current_memory_partition=NPS1
+vbios_version=113-M3250101-100
+power1_cap=1000000000
+power1_cap_default=1000000000
+power1_cap_max=1000000000
+-- 0
+gfx_target_version 0
+drm_render_minor 0
+-- 1
+gfx_target_version 90402
+drm_render_minor 129
+unique_id 7447773420259116011
+-- 2
+gfx_target_version 90402
+drm_render_minor 130
+unique_id 7447773420259116012
+-- 3
+gfx_target_version 90402
+drm_render_minor 131
+unique_id 7447773420259116013
+-- 4
+gfx_target_version 90402
+drm_render_minor 132
+unique_id 7447773420259116014
+-- 5
+gfx_target_version 90402
+drm_render_minor 133
+unique_id 7447773420259116015
+-- 6
+gfx_target_version 90402
+drm_render_minor 134
+unique_id 7447773420259116016
+-- 7
+gfx_target_version 90402
+drm_render_minor 135
+unique_id 7447773420259116017
+-- 8
+gfx_target_version 90402
+drm_render_minor 136
+unique_id 7447773420259116018
+kernel=6.8.0-137-generic
+amdgpu=6.19.14.31400000

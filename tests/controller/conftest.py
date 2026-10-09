@@ -62,14 +62,14 @@ PROOF_IMAGE = 'entrius/gt-proof:test'
 NO_DEVICE_HOLDERS = '\n'
 CONFIG = FullCheckConfig(agent_image_digests=(AGENT_DIGEST,), network_targets=NETWORK_TARGETS, proof_image=PROOF_IMAGE)
 FAKE_BINARY = b'\x7fELF-fake-sealed-proof'
-# The AMD box (vault 30 §3, 31 step 3): the synthetic MI300X fixtures (fixtures/amd/README.md). Every AMD catalog row is
-# listed, so an admitted AMD box in a test carries the MI300X row flipped to qualified in its config, as the first
-# real run will flip it.
-AMD_UUIDS = [f'AMD-{0x2D6E1A4F8C3B7E90 + i:016x}' for i in range(8)]
-AMD_VRAM_TOTAL_BYTES = 206_158_430_208  # 192 GiB, what sysfs mem_info_vram_total says on an MI300X
+# The AMD box (vault 30 §3, 31 step 3): the MI325X fixtures (fixtures/amd/README.md: the 1-card file is a real capture
+# from the 10/9 droplet, the 8-card file is derived from it). Every AMD catalog row is listed, so an admitted AMD box in
+# a test carries the MI325X row flipped to qualified in its config, as the digest run will flip it.
+AMD_UUIDS = [f'AMD-{0x675BCE773A2403EB + i:016x}' for i in range(8)]  # [0] is the droplet's card
+AMD_VRAM_TOTAL_BYTES = 274_542_362_624  # what sysfs mem_info_vram_total said on the MI325X (261824 MiB)
 AMD_FILLED_BYTES = int(FILL_RATIO * AMD_VRAM_TOTAL_BYTES)
-MI300X_QUALIFIED = dataclasses.replace(load_catalog()['MI300X'], status=QUALIFIED)
-CONFIG_AMD = dataclasses.replace(CONFIG, spec=MI300X_QUALIFIED, proof_image_amd='entrius/gt-proof-rocm:test')
+MI325X_QUALIFIED = dataclasses.replace(load_catalog()['MI325X'], status=QUALIFIED)
+CONFIG_AMD = dataclasses.replace(CONFIG, spec=MI325X_QUALIFIED, proof_image_amd='entrius/gt-proof-rocm:test')
 
 
 def fixture(name: str) -> str:
@@ -262,7 +262,7 @@ def passing_runner(
 
 
 def passing_amd_runner(
-    sysfs: str = fixture('amd/sysfs_mi300x_1.txt'),
+    sysfs: str = fixture('amd/sysfs_mi325x_1.txt'),
     agent_image: str = AGENT_IMAGE_OUT,
     agent_image_id: str = AGENT_IMAGE_ID + '\n',
     df: str = fixture('df_docker.txt'),
@@ -271,7 +271,7 @@ def passing_amd_runner(
     job=None,
     rent_ports: str = '\n',
 ) -> FakeRunner:
-    """An MI300X box that passes everything: the amdgpu module loaded, the sysfs pass answered from the fixture, no
+    """An MI325X box (the droplet's capture) that passes everything: the amdgpu module loaded, the sysfs pass answered from the fixture, no
     nvidia-smi anywhere, the proof answered from a container attached by device nodes."""
     runner = FakeRunner(
         {

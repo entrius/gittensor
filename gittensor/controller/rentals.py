@@ -296,6 +296,11 @@ def pod_run_command(r: RentalRecord, network: str = RENTAL_NETWORK, runtime: str
         if missing:
             raise RentalError(f'{START_FAILED}: no render node pinned for {len(missing)} of {len(r.uuids)} card(s)')
         attach = amd_attach_args([r.render_nodes[u] for u in r.uuids])
+        if runtime == SYSBOX_RUNTIME:
+            # sysbox-fs emulates /sys/devices/virtual and serves the KFD topology ROCr reads as empty files; the
+            # host's is mounted read-only at a side path and bound over the emulated one right after start
+            # (``kfd_topology_bind_command``), the one host mount a pod ever gets (vault 30 §10, measured 10/9)
+            attach.append(f'-v {KFD_TOPOLOGY_HOST}:{KFD_TOPOLOGY_SIDE}:ro')
     else:
         # every card of the box by --gpus (docker reads the value as CSV: quoted, commas survive)
         attach = [f'--gpus {shlex.quote(f'"device={devices}"')}']
@@ -322,6 +327,18 @@ def pod_run_command(r: RentalRecord, network: str = RENTAL_NETWORK, runtime: str
     parts += [f'-e {shlex.quote(f"{k}={v}")}' for k, v in sorted(r.env.items()) if k != 'PUBLIC_KEY']
     parts.append(shlex.quote(r.image))
     return ' '.join(parts)
+
+
+KFD_TOPOLOGY_HOST = '/sys/devices/virtual/kfd'
+KFD_TOPOLOGY_SIDE = '/host-kfd'
+
+
+def kfd_topology_bind_command(container_id: str) -> str:
+    """Inside a Sysbox pod on an AMD box, bind the host's KFD topology (mounted at the side path by
+    ``pod_run_command``) over the empty one sysbox-fs emulates, as root, before the customer's first ROCr call."""
+    return f'docker exec -u 0 {shlex.quote(container_id)} sh -c ' + shlex.quote(
+        f'mount --bind {KFD_TOPOLOGY_SIDE}/kfd/topology {KFD_TOPOLOGY_HOST}/kfd/topology'
+    )
 
 
 def authorized_keys_command(container_id: str, keys: Iterable[str]) -> str:
@@ -752,6 +769,8 @@ class RentalReconciler:
                 raise RentalError(f'{START_FAILED}: docker run gave no container id')
             r.container_id = cid
             self._put(r)
+            if r.vendor == AMD and self.runtime == SYSBOX_RUNTIME:
+                self._check(runner.run(kfd_topology_bind_command(cid), timeout=t), 'kfd topology bind')
             self._check(
                 runner.run(authorized_keys_command(cid, r.ssh_pubkeys), timeout=t, stdin=keys_stdin(r.ssh_pubkeys)),
                 'authorized_keys',

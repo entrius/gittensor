@@ -17,7 +17,7 @@ ssh-keygen refuse a uid with no passwd entry.
 | state dir (owned by `CONTROLLER_UID`) | `/state` | `boxes.json`, `instances.json`, `known_hosts`, `nvml_allowlist.json`, `registry/`, `deployments.json`, `controller.json` |
 | SSH CA private key | `/secrets/gt_ca` (read-only) | signs the ~5-minute per-visit certificates |
 | proof provider source | `/opt/proof` (read-only, on `PYTHONPATH`) | the private `GpuProof` implementation |
-| proof binary + secret store | `/opt/proof-dist` (read-only) | e.g. `gt_proof`, `gt_proof.version`, `secret_store.json` |
+| proof binary + secret store | `/opt/proof-dist` (read-only) | e.g. `gt_proof`, `gt_proof.version`, `secret_store.json`; with AMD boxes also `gt_proof_rocm` (the same version and secret, gt-proof `ci/build.sh --vendor all`) |
 | pull token (optional) | `/secrets/pull_token` (read-only) | `username:token`, read-only Docker Hub |
 
 The image's entrypoint is **`gitt controller run`**: the controller as one long-lived process.
@@ -34,8 +34,13 @@ docker run -d --name gt-controller --restart unless-stopped --stop-timeout 150 \
     --proof <module:Class> \
     --proof-args secret_store=/opt/proof-dist/secret_store.json \
     --proof-args version=@/opt/proof-dist/gt_proof.version \
-    --proof-args binary_path=/opt/proof-dist/gt_proof
+    --proof-args binary_path=/opt/proof-dist/gt_proof \
+    --proof-args binary_path_amd=/opt/proof-dist/gt_proof_rocm   # only with AMD boxes in the fleet
 ```
+
+`binary_path_amd` is the HIP binary for AMD cards (`entrius/gt-proof-rocm`, pinned by `PROOF_IMAGE_DIGEST_AMD`); without
+it an AMD box cannot be staged and fails its check. Both binaries come out of one gt-proof build (`ci/gen_secret.sh &&
+ci/build.sh --vendor all`), so they always carry the one current version.
 
 | `run` flag | Default | What |
 |---|---|---|

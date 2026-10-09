@@ -159,6 +159,7 @@ def test_check_admits_the_passing_box_and_pins_it(state):
         ck.DISK_FREE,
         ck.CARD_FREE,
         ck.NETWORK,
+        ck.HOST_SPEC,
         ck.GPU_PROOF,
     ]
     assert {'connect', 'scrape', 'stage', 'fire', 'cleanup', 'total'} <= set(payload['timings_ms'])
@@ -677,11 +678,11 @@ def test_a_rent_box_whose_range_the_controller_cannot_reach_is_admitted_idle_onl
     the reason on it, no failed check, no strike, no standing event. A reachable range is kept."""
     monkeypatch.setattr('gittensor.controller.checks.config.RENT_PROBE_TIMEOUT_S', 0.0)  # one dial, no wait
     admit(state, HK_A, '10.0.0.1')
-    admit(state, HK_B, '10.0.0.2', key=KEY_2, extra=('--port-map', '31003=45003'))
+    admit(state, HK_B, '10.0.0.2', key=KEY_2, extra=('--port-map', '31099=45099'))
     smi_b = fixture('nvidia_smi_5090.csv').replace(UUID_5090, UUID_5090_B)
     by_box = {
         HK_A: rent_box_runner(rent_ports='31000-31099\n'),
-        HK_B: rent_box_runner(rent_ports='31000-31003\n', nvidia_smi=smi_b),
+        HK_B: rent_box_runner(rent_ports='31000-31099\n', nvidia_smi=smi_b),
     }
     dialled = {}
 
@@ -692,13 +693,13 @@ def test_a_rent_box_whose_range_the_controller_cannot_reach_is_admitted_idle_onl
     with runners(by_box), patch('gittensor.controller.checks.rent_probe.ssh_banner', dial):
         result = invoke(*round_args(state))
     assert result.exit_code == 0, result.output
-    assert dialled == {'10.0.0.1': 31099, '10.0.0.2': 45003}  # the top of each range, B's as its host remaps it
+    assert dialled == {'10.0.0.1': 31099, '10.0.0.2': 45099}  # the top of each range, B's as its host remaps it
     a, b = store(state).boxes[HK_A], store(state).boxes[HK_B]
     assert a.status == IDLE and a.rent_ports == [] and not box_rentable(a, min_level=PROBATION)
     assert a.rent_probe['code'] == why.RENT_PORT_UNREACHABLE and str(a.rent_probe['reason']).startswith('10.0.0.1:31099 unreachable')  # fmt: skip
     assert a.last_failed == [] and a.not_run_count == 0  # the miner's configuration, not fraud: no strike, no bench
     assert [e['kind'] for e in a.standing_events] == [e['kind'] for e in b.standing_events]  # and no event
-    assert b.status == IDLE and b.rent_ports == [31000, 31003] and b.rent_probe['ok']
+    assert b.status == IDLE and b.rent_ports == [31000, 31099] and b.rent_probe['ok']
     assert box_rentable(b, min_level=PROBATION)
     run = next(c for c in by_box[HK_A].calls if 'docker run --rm -d' in c)
     assert run == listener_run_command(AGENT_IMAGE_ID, 31099) and 'docker rm -f gt-rent-probe-31099' in by_box[HK_A].calls  # fmt: skip
@@ -707,7 +708,7 @@ def test_a_rent_box_whose_range_the_controller_cannot_reach_is_admitted_idle_onl
     shown = json.loads(invoke('status', '--state-dir', state, '--json').stdout)
     rows = {r['hotkey']: r for r in shown['boxes']}
     assert rows[HK_A]['rent_ports'] == [] and rows[HK_A]['rent_probe']['code'] == why.RENT_PORT_UNREACHABLE
-    assert rows[HK_A]['rentable'] is False and rows[HK_B]['rent_ports'] == [31000, 31003]
+    assert rows[HK_A]['rentable'] is False and rows[HK_B]['rent_ports'] == [31000, 31099]
     assert rows[HK_B]['rentable'] is box_rentable(b)  # at the daemon's default gate, whatever it is
     text = invoke('status', '--state-dir', state).output
     assert 'idle-only: rent ports closed' in text and '10.0.0.1:31099' in text

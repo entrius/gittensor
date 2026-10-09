@@ -51,6 +51,10 @@ class CheckVerdict:
     # AMD only: {uuid: 'renderD<N>'} as the scrape saw it; ``state.identity_baseline`` re-pins it at every passing
     # full check (minors can change across a reboot). Empty on an NVIDIA box.
     render_nodes: Dict[str, str] = field(default_factory=dict)
+    # The host record the ``host_spec`` check wrote (host specs, 10/9): RAM, CPU threads, disk size, the download EMA and its
+    # rounds under the floor, the shortfall codes. ``state.apply_verdict`` keeps it on the box; empty when the check
+    # did not run.
+    host: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def admitted(self) -> bool:
@@ -85,6 +89,7 @@ class CheckVerdict:
             'rent_probe': self.rent_probe,
             'vendor': self.vendor,
             'render_nodes': dict(self.render_nodes),
+            'host': dict(self.host),
             'checks': [c.as_dict() for c in self.checks],
         }
 
@@ -102,6 +107,8 @@ class CheckVerdict:
         render_nodes: Optional[Mapping[str, str]] = None,
     ) -> 'CheckVerdict':
         clean = all(c.passed and not c.skipped for c in checks)
+        host_check = next((c for c in checks if c.name == 'host_spec'), None)
+        host = host_check.evidence.get('host') if host_check is not None else None
         reachable = rent_probe is None or bool(rent_probe.get('ok'))  # a range the probe could not reach is no range
         # A named failure is a BENCH whatever else could not run; NOT_RUN is only "nothing failed, something never ran".
         only_not_run = any(c.not_run for c in checks) and all(c.passed or c.not_run for c in checks)
@@ -116,4 +123,5 @@ class CheckVerdict:
             dict(rent_probe) if rent_probe is not None else None,
             vendor,
             dict(render_nodes or {}),
+            dict(host) if isinstance(host, Mapping) else {},
         )

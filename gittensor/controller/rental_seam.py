@@ -184,6 +184,7 @@ class RentalPoller:
             rental_id=o['id'],
             box_uid=int(box_uid) if isinstance(box_uid, int) else None,
             now=now,
+            country=str(o.get('country') or ''),
         )
         r.ends_at = ends_at  # the app's exact number, not our rounding of it
         self.store.put(r)

@@ -59,6 +59,7 @@ from gittensor.controller.checks.state import (
     remove_requested,
 )
 from gittensor.controller.discovery import ChainEndpoint, DiscoverReport, Discovery
+from gittensor.controller.geo import Lookup, lookup_ip, refresh_locations
 from gittensor.controller.heartbeat import Watch, WatchReport
 from gittensor.controller.locks import BoxLocks
 from gittensor.controller.pay.ledger import Ledger, pay_lag, settle_window
@@ -178,6 +179,7 @@ class Controller:
         self.registry = registry
         self.network, self.netuid = network, netuid
         self.publisher = Publisher(state.root)
+        self.geo_lookup: Lookup = lookup_ip  # tests swap in a fake; the pass itself is pure (``geo.py``)
         self._images: dict[str, str | None] = {}  # entry id -> image reference, for the public document
         self.wall = wall
         self.oracle = oracle or FailSafeOracle(StaticOracle())
@@ -674,6 +676,21 @@ class Controller:
         self.reporter.discover(report)
         return report
 
+    def geo_once(self) -> dict[str, dict]:
+        """Where the boxes are (host specs, 10/9): at most ``GEO_PER_PASS`` lookups of boxes that are due, written to
+        their records. Its own loop, off the round's path; a lookup that fails is a miss retried after a day."""
+        with self.write_lock:
+            boxes = dict(self.boxes.boxes)
+        found = refresh_locations(boxes, time.time(), self.geo_lookup)
+        if found:
+            with self.write_lock:
+                for box_id, record in found.items():
+                    box = self.boxes.boxes.get(box_id)
+                    if box is not None:
+                        box.location = record
+                self.boxes.save()
+        return found
+
     def _background_done(self, report: ReconcileReport) -> None:
         with self.write_lock:
             self.status['reconcile']['last_background'] = {
@@ -732,8 +749,9 @@ class Controller:
             ('scorecard', self.scorecard_once, self.intervals.scorecard_s, None),
             # Its own loop, not the watch tick: a watch pass held up by SSH timeouts must not make the page say stale.
             ('publish', lambda: self.publish_once(force=True), cfg.PUBLISH_INTERVAL_S, None),
+            ('geo', self.geo_once, self.intervals.discover_s, None),  # a few lookups a pass, never on the round's path
         )
-        first_wait = {}
+        first_wait = {'geo': 30.0}
         if self.read_chain is not None:
             # Discovery before round 1 (Kimbo 9/16): a box already on chain is in the first round instead of waiting
             # at ADMIT for the first discovery pass. A failed read changes nothing; the loop retries on its interval.

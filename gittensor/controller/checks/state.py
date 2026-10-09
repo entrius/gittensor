@@ -138,6 +138,15 @@ class BoxState:
     # 'nvml_md5': md5} and, on an AMD box, {'render_nodes': {uuid: 'renderD<N>'}}: the nodes a pod or a proof is
     # given are the ones the scrape saw on that card, re-pinned at every passing check (30 §1 #5).
     identity: Dict[str, object] = field(default_factory=dict)
+    # The host around the cards as the last check saw it (host specs, 10/9, ``checks.check_host_spec``): ram_gb, cpu_threads,
+    # disk_total_gb, down_mbps (an EMA across rounds), down_sample_mbps, down_at, down_below_rounds (consecutive
+    # sampled rounds with the EMA under the floor; a bench starts it over), up_mbps (None: not measured), shortfalls
+    # (the public codes). Written by every verdict, kept across a bench: it is the box's history, not its standing.
+    # (``host`` above is the sshd address; this is the machine.)
+    host_specs: Dict[str, object] = field(default_factory=dict)
+    # Where the box is (``controller/geo.py``): {'country': ISO-3166 alpha-2 or 'unknown', 'region', 'city', 'at',
+    # 'ip'}, looked up from ``host`` once and refreshed weekly. The country is what a `--country` order is placed by.
+    location: Dict[str, object] = field(default_factory=dict)
     # Dated events WS-E folds into standing: {'at', 'kind', ...}. Kept across a bench.
     standing_events: List[dict] = field(default_factory=list)
     # When a hard in-lease failure (a heartbeat) stopped this box's pay; WS-F withholds the leased accrual from it.
@@ -247,6 +256,8 @@ def _bench(
     new.not_run_at = None
     new.clean_paused_at = None
     new.clean_paused_s = 0.0
+    if new.host_specs:  # the bandwidth counts start over with the bench; the EMAs are history and stay
+        new.host_specs = {**new.host_specs, 'down_below_rounds': 0, 'up_below_rounds': 0}
     return new
 
 
@@ -271,10 +282,12 @@ def apply_verdict(
     failed and a check that could not run is a strike (``apply_not_run``)."""
     why = w.from_results(verdict.checks)
     if verdict.verdict == NOT_RUN:
-        return apply_not_run(state, verdict.not_run, now, ladder=ladder, proved=proved, why=why)
+        return apply_not_run(state, verdict.not_run, now, ladder=ladder, proved=proved, why=why, host=verdict.host)
     new = BoxState.from_dict(state.as_dict())
     new.last_check_at = now
     _set_failed(new, verdict.failed, why)
+    if verdict.host:
+        new.host_specs = dict(verdict.host)
     new.unreachable_count = 0
     new.unanswered_at = None
     new.rent_ports = list(verdict.rent_ports)
@@ -310,6 +323,7 @@ def apply_not_run(
     ladder: Sequence[int] = cfg.BENCH_BACKOFF_LADDER_S,
     proved: Optional[Sequence[str]] = None,
     why: Optional[Mapping[str, str]] = None,
+    host: Optional[Mapping[str, object]] = None,
 ) -> BoxState:
     """The state after a check that could not be carried out (Kimbo 9/19): a strike. No answer was judged, so it is no
     caught cheat, and no proof either: ``last_check_at`` does not move, and the cards the proof was for (``proved``;
@@ -319,6 +333,8 @@ def apply_not_run(
     new = BoxState.from_dict(state.as_dict())
     new.unreachable_count = 0  # the box answered
     new.unanswered_at = None
+    if host:  # the scrape ran: the host record (the download EMA) moves on even though nothing was judged
+        new.host_specs = dict(host)
     new.not_run_count += 1
     new.not_run_at = now
     if new.not_run_count >= bench_after:
@@ -459,6 +475,14 @@ def release_from_bench(state: BoxState, now: float) -> BoxState:
         )
         new.withheld_from = None
     return new
+
+
+def download_due(state: BoxState, now: float, interval_s: float = cfg.FULL_CHECK_INTERVAL_S) -> bool:
+    """Whether a visit outside the round (the one-box re-prove, `gitt controller check`) should run the download
+    probe: one real transfer per box per round, so only when the last sample is a round old. The round itself
+    always probes."""
+    at = state.host_specs.get('down_at')
+    return not isinstance(at, (int, float)) or isinstance(at, bool) or now - float(at) >= interval_s
 
 
 def due_for_check(state: BoxState, now: float, interval_s: float = cfg.FULL_CHECK_INTERVAL_S) -> bool:

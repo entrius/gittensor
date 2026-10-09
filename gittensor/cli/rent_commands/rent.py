@@ -79,6 +79,33 @@ def _api(cfg: RentConfig) -> RentApi:
     return RentApi(cfg.url, cfg.key)
 
 
+def _host_cell(box: dict, key: str) -> str:
+    """One host column of `gitt rent ls`: the guaranteed floor (``≥``) when the pool guarantees it, else the least the
+    free boxes of that size have right now, else ``—``."""
+    for source, mark in (('guaranteed', '≥'), ('observed_min', '')):
+        value = (box.get(source) or {}).get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return f'{mark}{value:.0f}'
+    return '—'
+
+
+LINKS = {'nvlink': 'NVLink', 'xgmi': 'XGMI', 'pcie': 'PCIe', 'single': '1 card'}
+
+
+def _link(box: dict) -> str:
+    """The worst interconnect among the free boxes of the row, as a word."""
+    return LINKS.get(str((box.get('observed_min') or {}).get('interconnect') or ''), '—')
+
+
+def _where(box: dict) -> str:
+    """The countries the row's free boxes are in: up to three codes, then a count."""
+    countries = (box.get('availability') or {}).get('countries') or []  # the app's name for the row's `available`
+    countries = [c for c in countries if isinstance(c, str)]
+    if not countries:
+        return '—'
+    return ', '.join(countries[:3]) + (f' +{len(countries) - 3}' if len(countries) > 3 else '')
+
+
 def _usd(cents: int | float | None) -> str:
     return f'${(cents or 0) / 100:.2f}'
 
@@ -158,9 +185,10 @@ def ls_command(show_all, json_mode):
         return
     cents = bal.get('balance_cents') or 0
     table = Table(title='boxes for rent', show_lines=False)
-    for col in ('GPU', 'Box', '$/hr', 'Free', 'Runway'):
-        table.add_column(col, justify='right' if col in ('$/hr', 'Free', 'Runway') else 'left')
+    for col in ('GPU', 'Box', '$/hr', 'Free', 'RAM', 'CPUs', '↓Mbps', '↑Mbps', 'Link', 'Where', 'Runway'):
+        table.add_column(col, justify='left' if col in ('GPU', 'Box', 'Link', 'Where') else 'right')
     rows = 0
+    guaranteed_any = False
     for o in offers.get('offers') or []:
         for b in o.get('boxes') or []:
             free = int(b.get('available') or 0)
@@ -168,10 +196,20 @@ def ls_command(show_all, json_mode):
                 continue
             per_hr = float(b.get('usd_per_hr') or 0)
             runway = f'{cents / 100 / per_hr:.1f} h' if per_hr and cents > 0 else '—'
-            table.add_row(str(o['gpu_type']), f'{b["gpu_count"]}×', f'{per_hr:.2f}', str(free), runway)
+            host = [_host_cell(b, key) for key in ('ram_gb', 'cpu_threads', 'down_mbps', 'up_mbps')]
+            guaranteed_any = guaranteed_any or any(c.startswith('≥') for c in host)
+            table.add_row(
+                str(o['gpu_type']), f'{b["gpu_count"]}×', f'{per_hr:.2f}', str(free), *host, _link(b), _where(b), runway
+            )
             rows += 1
     if rows:
         console.print(table)
+        console.print(
+            '[dim]RAM GB, CPU threads, download / upload Mbps: '
+            + ('≥ is guaranteed by the pool floor; ' if guaranteed_any else '')
+            + 'a plain number is the least a free box of that size has right now; '
+            'Where is the countries the free boxes are in (`gitt rent up --country XX` places in one)[/dim]'
+        )
     else:
         console.print('Nothing is free right now; `gitt rent ls --all` shows the catalog.')
     images = offers.get('images') or []
@@ -198,10 +236,13 @@ def ls_command(show_all, json_mode):
 )
 @click.option('-n', '--name', default=None, help='a local name for `ssh`, `extend`, `rm`')
 @click.option('--box', 'box_uid', type=int, default=None, help='pin a box by uid (re-rent the same one)')
+@click.option('--country', default=None, help='place only on a box in this country (ISO 3166-1 alpha-2, e.g. US)')
 @click.option('--queue', is_flag=True, help='order even when nothing is free now (waits up to the placement grace)')
 @click.option('--no-wait', is_flag=True, help='print the id and return; `gitt rent ps` to follow')
 @_json_flag
-def up_command(gpu_type, count, hours, image, ports, envs, key_paths, name, box_uid, queue, no_wait, json_mode):
+def up_command(
+    gpu_type, count, hours, image, ports, envs, key_paths, name, box_uid, country, queue, no_wait, json_mode
+):
     """Rent a box: order, wait until it is active, print the ssh line.
 
     A failed start is retried once. Refuses up front when no box of that size is free (``--queue`` to wait anyway).
@@ -251,6 +292,11 @@ def up_command(gpu_type, count, hours, image, ports, envs, key_paths, name, box_
             body['env'] = env
         if box_uid is not None:
             body['box_uid'] = box_uid
+        if country:
+            code = country.strip().upper()
+            if len(code) != 2 or not code.isalpha():
+                raise ApiError(f'--country {country!r}: a two-letter country code, e.g. US (`gitt rent ls` Where)', 'usage')  # fmt: skip
+            body['country'] = code
         r = _order_and_wait(api, cfg, body, name, no_wait, json_mode)
     except ApiError as e:
         _fail(e, json_mode)

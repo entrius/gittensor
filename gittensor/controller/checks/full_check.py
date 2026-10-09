@@ -39,6 +39,9 @@ class FullCheckConfig:
     proof_image_amd: str = field(default_factory=lambda: image_ref(AMD))  # the HIP image (30 §7)
     proof_timeout_s: float = cfg.PROOF_JOB_TIMEOUT_S
     ssh_timeout_s: float = cfg.SSH_COMMAND_TIMEOUT_S
+    # The narrowest rent range a rentable box may offer (``check_host_spec``); a dev box (admitted by image ID, its
+    # pods under runc on a Lium host) is held to `gitt up`'s dev minimum instead.
+    ports_min: int = cfg.PORTS_MIN
 
     def proof_image_for(self, vendor: str) -> str:
         return self.proof_image_amd if vendor == AMD else self.proof_image
@@ -54,12 +57,14 @@ def run_full_check(
     box_id: str = '',
     fleet_uuids: Optional[Mapping[str, Iterable[str]]] = None,
     ours: Collection[str] = (),
+    host_history: Optional[Mapping[str, object]] = None,
 ) -> CheckVerdict:
     """``pinned_uuids`` is what ADMIT pinned (None for a box at ADMIT). ``proof`` is the provider in the slot; the
     default admits nobody. ``fleet_uuids`` (every other box's UUIDs) adds the fleet-wide uniqueness check; ``ours``
-    (our instances' container IDs on this box) is what ``check_card_free`` judges its device holders against."""
+    (our instances' container IDs on this box) is what ``check_card_free`` judges its device holders against;
+    ``host_history`` is the box's host record from the last round (``check_host_spec``)."""
     scrape = scrape_box(runner, config)
-    checks = judge_identity(scrape, allowlist, pinned_uuids, config, box_id, fleet_uuids, ours)
+    checks = judge_identity(scrape, allowlist, pinned_uuids, config, box_id, fleet_uuids, ours, host_history)
     if identity_passed(checks):
         image = config.proof_image_for(scrape.vendor)
         checks.append(check_gpu_proof(runner, scrape.gpus, proof, image, config.proof_timeout_s))
@@ -72,13 +77,16 @@ def run_full_check(
 # UUID uniqueness across boxes, then stage everywhere, then fire everywhere).
 
 
-def scrape_box(runner: HostRunner, config: FullCheckConfig) -> HostScrape:
+def scrape_box(runner: HostRunner, config: FullCheckConfig, download: bool = True) -> HostScrape:
+    """``download``: run the bandwidth probe this visit (one per box per round: the round always does, the one-box
+    re-prove only when the box's last sample is a round old)."""
     return scrape_host(
         runner,
         agent_container=config.agent_container,
         disk_path=config.disk_path,
         network_targets=config.network_targets,
         timeout=config.ssh_timeout_s,
+        download=download,
     )
 
 
@@ -90,6 +98,7 @@ def judge_identity(
     box_id: str = '',
     fleet_uuids: Optional[Mapping[str, Iterable[str]]] = None,
     ours: Collection[str] = (),
+    host_history: Optional[Mapping[str, object]] = None,
 ) -> List[CheckResult]:
     """Every check except the GPU proof, from one scrape."""
     return identity_checks(
@@ -106,6 +115,8 @@ def judge_identity(
         box_id,
         fleet_uuids,
         ours,
+        host_history,
+        config.ports_min,
     )
 
 

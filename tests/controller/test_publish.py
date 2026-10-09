@@ -154,7 +154,7 @@ def test_the_contract(tmp_path):
         'hotkey', 'uid', 'status', 'standing', 'gpu_type', 'vendor', 'gfx_target', 'card_count', 'rentable',
         'rentable_why', 'last_check_at',
         'last_failed', 'last_failed_why', 'bench_until', 'benched_reason', 'ladder_rung', 'strikes', 'pay',
-        'last_event', 'cards',
+        'last_event', 'cards', 'host',
     }  # fmt: skip
     assert (a['rentable'], b['rentable'], c['rentable']) == (False, False, False) and doc['offers'] == {}
     # why a --rent box is off the market: the probe's phrase, ours alone; None for a box that is rentable or never
@@ -206,11 +206,12 @@ def test_a_box_is_offered_when_it_is_rentable_and_wholly_idle(tmp_path):
     assert row['standing'] == 'standard' and row['rentable'] is True
     assert doc['offers'] == {}  # one card leased, one draining: rentable, not on offer
     a.cards = {UUID_A: CardState(IDLE, '', NOW), UUID_B: CardState(IDLE, '', NOW)}
-    assert build_fleet(tmp_path, boxes, {}, {}, True, NOW)['offers'] == {'RTX5090': {'2': 1}}
+    offered = build_fleet(tmp_path, boxes, {}, {}, True, NOW)['offers']
+    assert list(offered) == ['RTX5090'] and list(offered['RTX5090']) == ['2'] and offered['RTX5090']['2']['boxes'] == 1
     a.standing_events = []  # back on probation: still on offer (#1818: the pay holdback is what it has at stake)
     doc = build_fleet(tmp_path, boxes, {}, {}, True, NOW)
     row = next(x for x in doc['boxes'] if x['hotkey'] == HK_A)
-    assert row['standing'] == 'probation' and row['rentable'] is True and doc['offers'] == {'RTX5090': {'2': 1}}
+    assert row['standing'] == 'probation' and row['rentable'] is True and doc['offers']['RTX5090']['2']['boxes'] == 1
     gated = build_fleet(tmp_path, boxes, {}, {}, True, NOW, rentable_min_standing=STANDARD)  # the gate raised
     assert not next(x for x in gated['boxes'] if x['hotkey'] == HK_A)['rentable'] and gated['offers'] == {}
     assert '31000' not in json.dumps(doc)  # the range is the miner's business and the pod's, never the page's

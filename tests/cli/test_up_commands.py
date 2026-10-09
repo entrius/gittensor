@@ -64,6 +64,9 @@ class FakeProbe:
         self.modules = 'nvidia\n'  # the GPU kernel modules loaded (the controller's vendor detect command)
         self.amd_sysfs_out = ''  # the controller's sysfs pass on an AMD box (fixtures/amd)
         self.device_modes: dict = {}  # path -> mode bits; a node not listed is 0o666 (sysbox-setup.sh ran)
+        self.meminfo_text = 'MemTotal:       131913220 kB\nMemFree:        98215044 kB\n'  # 135 GB
+        self.cpus: int | None = 32
+        self.download_out = '28412482.000 29754290 200'  # the probe's line: ~227 Mbps
 
     def nvml_allowlist(self, url=''):
         return self.allowlist
@@ -128,6 +131,15 @@ class FakeProbe:
 
     def device_mode(self, path):
         return self.device_modes.get(path, 0o666)
+
+    def meminfo(self):
+        return self.meminfo_text
+
+    def cpu_threads(self):
+        return self.cpus
+
+    def download_probe(self, timeout=20.0):
+        return self.download_out
 
     def kernel_release(self):
         return HostProbe.kernel_release(self)  # type: ignore[arg-type]
@@ -201,11 +213,48 @@ class TestPrereqs:
     def test_all_pass(self, probe):
         report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
         assert report.ok and report.hotkey_ss58 == probe.ss58 and not report.already_up
-        assert [r.status for r in report.results] == ['pass'] * 11
+        assert [r.status for r in report.results] == ['pass'] * 8 + ['skip'] + ['pass'] * 6  # skip: Upload
         assert [r.name for r in report.results][:3] == ['GPU vendor', 'NVIDIA driver', 'Driver vetted']
-        assert [r.name for r in report.results][6:9] == ['Workload ports', 'Public IP', 'SSH port reachable']
+        assert [r.name for r in report.results][5:9] == ['Host RAM', 'CPU threads', 'Download', 'Upload']
+        assert [r.name for r in report.results][10:13] == ['Workload ports', 'Public IP', 'SSH port reachable']
         assert report.vendor == 'nvidia'
         assert report.public_ip == probe.ip and probe.chain_calls == 1  # the registration lookup only
+
+    def test_the_host_rows_name_the_floor_and_whether_it_is_refused(self, probe):
+        """Vault 34: the controller's host_spec check said here first, from its own config constants. A shortfall is
+        a warning that names the fix per card and for this box, and the box still starts; the download row runs the
+        round's own probe once and reads as the round will read it."""
+        from gittensor.controller.checks import config as ccfg
+
+        def rows():
+            report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
+            return report.ok, {r.name: r for r in report.results}
+
+        ok, by = rows()
+        assert ok and by['Host RAM'].detail.startswith('135 GB (floor 16 GB for 1 card)')
+        assert by['CPU threads'].detail.startswith('32 threads (floor 4 threads for 1 card)')
+        assert by['Download'].detail.startswith('227 Mbps on a 30 MB pull from Docker Hub (floor 100 Mbps')
+        probe.smi = subprocess.CompletedProcess([], 0, SMI_OK * 2, '')  # two cards: the floors double
+        probe.meminfo_text, probe.cpus, probe.download_out = 'MemTotal: 16000000 kB\n', 4, '6000000 29754290 200'
+        ok, by = rows()
+        assert ok, 'a host shortfall never blocks `gitt up`'
+        assert by['Host RAM'].status == 'warn' and by['CPU threads'].status == 'warn' and by['Download'].status == 'warn'  # fmt: skip
+        assert by['Host RAM'].detail == (
+            f'16 GB; a box of this type needs {ccfg.RAM_MIN_GB_PER_GPU:.0f} GB per card, '
+            f'{2 * ccfg.RAM_MIN_GB_PER_GPU:.0f} GB for 2: advertised to customers, not refused'
+        )
+        assert '4 threads per card, 8 threads for 2' in by['CPU threads'].detail
+        assert by['Download'].detail.startswith('48 Mbps; the floor is 100 Mbps: refused once the average over rounds')
+        assert f'for {ccfg.BANDWIDTH_FAIL_AFTER} rounds in a row' in by['Download'].detail
+        probe.download_out = ''  # Hub did not answer: no number, no warning, the round measures again
+        probe.meminfo_text = ''
+        ok, by = rows()
+        assert ok and by['Download'].status == 'skip' and by['Host RAM'].status == 'skip'
+        assert by['Upload'].status == 'skip' and 'measured by the controller' in by['Upload'].detail
+        with patch.object(ccfg, 'HOST_SPEC_HARD', True):  # the one flip: the words change, the box still starts
+            probe.meminfo_text = 'MemTotal: 16000000 kB\n'
+            ok, by = rows()
+            assert ok and by['Host RAM'].detail.endswith('the controller refuses this box (host_spec)')
 
     def test_no_driver_fails(self, probe):
         probe.smi = subprocess.CompletedProcess([], 127, '', 'nvidia-smi: command not found')

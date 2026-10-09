@@ -14,6 +14,7 @@ from typing import Callable, Dict, Optional
 
 import pytest
 
+from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.amd_scrape import AMD_SYSFS_COMMAND
 from gittensor.controller.checks.catalog import QUALIFIED, load_catalog
 from gittensor.controller.checks.full_check import FullCheckConfig
@@ -21,9 +22,17 @@ from gittensor.controller.checks.nvml_allowlist import NvmlAllowlist
 from gittensor.controller.checks.runner import CommandResult, FakeRunner, HostRunner, regex
 from gittensor.controller.checks.scrape import (
     AMD_DEVICE_HOLDERS_COMMAND,
+    AMD_TOPO_COMMAND,
+    CPU_MODEL_COMMAND,
+    CPU_THREADS_COMMAND,
     DEVICE_HOLDERS_COMMAND,
+    DOWNLOAD_PROBE_COMMAND,
     KERNEL_DRIVER_COMMAND,
+    MEMINFO_COMMAND,
+    NVIDIA_TOPO_COMMAND,
     NVML_MD5_COMMAND,
+    RTT_COMMAND,
+    UPLOAD_PROBE_COMMAND,
     agent_image_command,
     agent_image_id_command,
     disk_free_command,
@@ -60,6 +69,7 @@ PROOF_IMAGE = 'entrius/gt-proof:test'
 # DEVICE_HOLDERS_COMMAND on a box nothing holds a GPU node on: the `find` matched nothing, so `printf` prints one
 # empty line and no holder block follows.
 NO_DEVICE_HOLDERS = '\n'
+UPLOAD_PROBE_OUT = 'a' * cfg.UPLOAD_PROBE_BYTES  # what the box streams back; one object shared by every fake run
 CONFIG = FullCheckConfig(agent_image_digests=(AGENT_DIGEST,), network_targets=NETWORK_TARGETS, proof_image=PROOF_IMAGE)
 FAKE_BINARY = b'\x7fELF-fake-sealed-proof'
 # The AMD box (vault 30 §3, 31 step 3): the MI325X fixtures (fixtures/amd/README.md: the 1-card file is a real capture
@@ -239,6 +249,10 @@ def passing_runner(
     network_targets=NETWORK_TARGETS,
     job=None,
     rent_ports: str = '\n',  # the agent's rent label; '' or a bare newline = not started with --rent
+    meminfo: str = fixture('proc_meminfo.txt'),
+    nproc: str = fixture('nproc.txt'),
+    download: str = fixture('curl_download_probe.txt'),
+    topo: str = fixture('nvidia_smi_topo_1x5090.txt'),
 ) -> FakeRunner:
     """A box that passes everything. Tests override one command with ``runner.on(...)`` to make one check fail."""
     runner = FakeRunner(
@@ -252,6 +266,13 @@ def passing_runner(
             rent_ports_command(): rent_ports,
             disk_free_command(): df,
             DEVICE_HOLDERS_COMMAND: device_holders,
+            MEMINFO_COMMAND: meminfo,
+            CPU_THREADS_COMMAND: nproc,
+            CPU_MODEL_COMMAND: fixture('cpu_model.txt'),
+            DOWNLOAD_PROBE_COMMAND: download,
+            UPLOAD_PROBE_COMMAND: UPLOAD_PROBE_OUT,
+            RTT_COMMAND: '',
+            NVIDIA_TOPO_COMMAND: topo,
         }
     )
     for url in network_targets:
@@ -270,6 +291,7 @@ def passing_amd_runner(
     network_targets=NETWORK_TARGETS,
     job=None,
     rent_ports: str = '\n',
+    topo: str = fixture('amd/kfd_io_links_1.txt'),
 ) -> FakeRunner:
     """An MI325X box (the droplet's capture) that passes everything: the amdgpu module loaded, the sysfs pass answered from the fixture, no
     nvidia-smi anywhere, the proof answered from a container attached by device nodes."""
@@ -282,6 +304,14 @@ def passing_amd_runner(
             rent_ports_command(): rent_ports,
             disk_free_command(): df,
             AMD_DEVICE_HOLDERS_COMMAND: device_holders,
+            # the host steps are vendor-neutral: the same commands, the same fixtures (host specs, 10/9)
+            MEMINFO_COMMAND: fixture('proc_meminfo.txt'),
+            CPU_THREADS_COMMAND: fixture('nproc.txt'),
+            CPU_MODEL_COMMAND: fixture('cpu_model.txt'),
+            DOWNLOAD_PROBE_COMMAND: fixture('curl_download_probe.txt'),
+            UPLOAD_PROBE_COMMAND: UPLOAD_PROBE_OUT,
+            RTT_COMMAND: '',
+            AMD_TOPO_COMMAND: topo,
         }
     )
     for url in network_targets:

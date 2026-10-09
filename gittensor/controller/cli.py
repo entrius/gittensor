@@ -62,7 +62,7 @@ import yaml
 from rich.markup import escape
 from rich.table import Table
 
-from gittensor.agent.config import AGENT_SSH_PORT, WORKLOAD_PORT_RANGE
+from gittensor.agent.config import AGENT_SSH_PORT, RENT_PORTS_MIN_DEV, WORKLOAD_PORT_RANGE
 from gittensor.cli.help import StyledGroup
 from gittensor.cli.helpers import NETWORK_CHOICE, console, err_console
 from gittensor.cli.json_output import emit_error_json, emit_json
@@ -100,6 +100,7 @@ from gittensor.controller.checks.state import (
     StateStore,
     apply_unreachable,
     apply_verdict,
+    download_due,
     mark_unanswered,
     not_run_retry_at,
     provable_uuids,
@@ -498,11 +499,13 @@ def check_box(
         runner.run(PREFLIGHT_COMMAND, timeout=config.ssh_timeout_s)
     except (SshTransportError, CertificateError) as e:
         return CheckOutcome(None, f'{type(e).__name__}: {e}'[:500])
-    scrape = scrape_box(runner, config)
+    scrape = scrape_box(runner, config, download=download_due(box, now))
     lost = transport_failure(scrape)
     if lost:
         return CheckOutcome(None, lost)
-    checks = judge_identity(scrape, allowlist, box.pinned_uuids or None, config, box.box_id, fleet_uuids, ours)
+    checks = judge_identity(
+        scrape, allowlist, box.pinned_uuids or None, config, box.box_id, fleet_uuids, ours, box.host_specs
+    )
     proved: list[str] = []
     if identity_passed(checks):
         gpus = _provable_gpus(box, scrape.gpus)
@@ -721,6 +724,7 @@ def run_round(
                         r.box.box_id,
                         fleet,
                         r.ours,
+                        r.box.host_specs,
                     )
             _each([r for r in rows if r.scrape is not None and identity_passed(r.checks)], stage)
             marks['staged'] = clock()
@@ -1052,6 +1056,8 @@ def _setup(
         proof_image_amd=proof_image_amd,
         network_targets=tuple(network_targets) or tuple(cfg.NETWORK_TARGETS),
         disk_min_free_gb=disk_min_gb,
+        # dev boxes (admitted by image ID: a Lium pod maps a handful of ports) keep `gitt up`'s dev range minimum
+        ports_min=RENT_PORTS_MIN_DEV if image_ids else cfg.PORTS_MIN,
     )
     return CheckSetup(
         state,

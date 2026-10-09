@@ -65,6 +65,50 @@ HOST_ROOT = '/proc/1/root'
 # pull fails its start, which has its own path (FAILED_STARTS_BENCH_AFTER).
 NETWORK_TARGETS = ('https://registry-1.docker.io/v2/', 'https://huggingface.co/api/models/Qwen')
 NETWORK_TIMEOUT_S = 10.0
+
+# The host around the cards (host specs, 10/9): measured every round, floored where a floor is safe, shown to the customer.
+# Lium sets host floors (8 GB RAM, 100 GB free disk, 100 Mbps download as an EMA of its own probe, disk >= 1.5x total
+# VRAM for idle pay); ours scale per card. These are KIMBO'S NUMBERS, changed here and nowhere else: the check, the
+# published offers, `gitt up` and the docs all read them from this block.
+RAM_MIN_GB_PER_GPU = 16.0
+CPU_THREADS_MIN_PER_GPU = 4
+DOWNLOAD_MIN_MBPS = 100.0
+UPLOAD_MIN_MBPS = 50.0
+DISK_TOTAL_MIN_X_VRAM = 1.5  # Lium's idle-pay rule
+PORTS_MIN = 100  # the rent range a rentable box offers: `gitt up`'s RENT_PORTS_MIN, judged by the controller too
+BANDWIDTH_EMA_ALPHA = 0.3  # per box and direction, across rounds: new = alpha x sample + (1 - alpha) x old
+BANDWIDTH_FAIL_AFTER = 3  # consecutive sampled rounds with the EMA below the floor before the check fails
+# RAM, CPU threads and the disk ratio are advertised minimums only (the offer shows what free boxes have) until this
+# is flipped; then a shortfall fails the check like any other. Download, upload and the port range are hard from
+# the start.
+HOST_SPEC_HARD = False
+# The download probe (``scrape.DOWNLOAD_PROBE_COMMAND``): one real transfer per box per round of a fixed public object
+# we pull anyway, the 29.8 MB Ubuntu base layer of the pinned proof image (``PROOF_IMAGE_DIGEST``, amd64 manifest). It
+# stays on Docker Hub for as long as the image we admit boxes with does, every miner box pulls it before its first
+# proof, and it leaves Hub's CDN at the speed a real pull would. The 0.5 KB registry ping the network check makes says
+# nothing about bandwidth. A miss (no token, a non-200, a zero-byte answer) is "no sample", never a failure (9/19).
+DOWNLOAD_PROBE_REPO = 'entrius/gt-proof'
+DOWNLOAD_PROBE_BLOB = 'sha256:5a7813e071bfadf18aaa6ca8318be4824a9b6297b3240f2cc84c1db6f4113040'
+DOWNLOAD_PROBE_BYTES = 29_754_290
+DOWNLOAD_PROBE_TIMEOUT_S = 20.0  # 12 Mbps still finishes; slower, curl's partial count at the cut-off is the sample
+# The upload probe: the box streams this many bytes to the controller over the SSH session the scrape already holds
+# (`head -c N /dev/zero`, ``scrape.UPLOAD_PROBE_COMMAND``), timed on our clock less the session's own round trip. No
+# third party sees it, and there is no endpoint to go down. 20 MB is 3 s at the floor.
+UPLOAD_PROBE_BYTES = 20 * 1024 * 1024
+UPLOAD_PROBE_TIMEOUT_S = 60.0
+# Where a box is (controller side, ``controller/geo.py``): a free, keyless lookup of the box's public address, once
+# per box, cached on the box record and refreshed weekly; a miss is 'unknown' and is tried again after a day. Never
+# on the round's path. ip-api.com's free tier allows 45 lookups a minute; a pass looks up at most GEO_PER_PASS.
+GEO_URL = 'http://ip-api.com/json/{ip}?fields=status,countryCode,regionName,city'
+GEO_TIMEOUT_S = 5.0
+GEO_REFRESH_S = 7 * 86_400.0
+GEO_RETRY_S = 86_400.0
+GEO_PER_PASS = 3
+# Uptime and deploy time (controller side, from the ledger rollups and the rental records): the window the uptime
+# percentage covers, and the last N rentals the median time-to-sshd is taken over (None until MIN of them).
+UPTIME_WINDOW_S = 30 * 86_400.0
+DEPLOY_SAMPLE_N = 10
+DEPLOY_MIN_N = 3
 # "Is anything else using this GPU?" in the round (``checks.check_card_free``), not only under a lease (``heartbeat``).
 NVIDIA_SMI_TIMEOUT_S = 15.0
 SSH_COMMAND_TIMEOUT_S = 30.0

@@ -44,7 +44,7 @@ SYSFS_1 = fixture('amd/sysfs_mi325x_1.txt')
 SYSFS_8 = fixture('amd/sysfs_mi325x_8.txt')
 AMD_CHECKS = [
     ck.VENDOR, ck.GPU_SPEC, ck.GPU_UUID_PIN, ck.AMD_STACK, ck.POWER_LIMIT, ck.AGENT_IMAGE, ck.DISK_FREE,
-    ck.CARD_FREE, ck.NETWORK, ck.GPU_PROOF,
+    ck.CARD_FREE, ck.NETWORK, ck.HOST_SPEC, ck.GPU_PROOF,
 ]  # fmt: skip
 
 

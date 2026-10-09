@@ -23,3 +23,8 @@ join (id -> KFD node -> render minor -> node); the first real 8x capture replace
 `device_holders_kfd_desktop.txt` is synthetic: `AMD_DEVICE_HOLDERS_COMMAND` on a box where a desktop session and a
 foreign container hold `/dev/kfd` and the card's render node (the holder scan at rest on the droplet was empty, as
 the heartbeat expects).
+
+`kfd_io_links_8.txt` and `kfd_io_links_2_pcie.txt` are synthetic: `AMD_TOPO_COMMAND` (`checks/scrape.py`, the
+interconnect sibling of `nvidia-smi topo -m`) on an 8-card box whose cards are all on XGMI (link type 11) and on a
+2-card box joined through the host only (type 2, PCIe). Node 0 is the CPU in both. The first real multi-card capture
+replaces them.

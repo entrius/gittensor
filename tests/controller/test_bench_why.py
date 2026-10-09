@@ -112,11 +112,11 @@ def test_every_check_name_has_something_to_say():
     under is in ``why.BY_NAME``, so the worst case is a general phrase, never a bare check name."""
     names = {
         ck.VENDOR, ck.GPU_SPEC, ck.GPU_UUID_PIN, ck.FLEET_UUID_UNIQUE, ck.AMD_STACK, ck.NVML_DIGEST, ck.POWER_LIMIT,
-        ck.AGENT_IMAGE, ck.DISK_FREE, ck.NETWORK, ck.CARD_FREE, ck.GPU_PROOF,
+        ck.AGENT_IMAGE, ck.DISK_FREE, ck.NETWORK, ck.CARD_FREE, ck.HOST_SPEC, ck.GPU_PROOF,
     }  # fmt: skip
     assert names <= set(w.BY_NAME)
     assert {UNREACHABLE, DEREGISTERED, 'failed_starts', 'external_use'} <= set(w.BY_NAME)
-    ours = {'n': 1, 'low': 1, 'high': 2, 'missing': 1, 'extra': 1, 'floor_gb': 50, 'pct': 90, 'kmaj': 6, 'kmin': 8, 'dmaj': 6, 'dmin': 2}  # fmt: skip
+    ours = {'n': 1, 'low': 1, 'high': 2, 'missing': 1, 'extra': 1, 'floor_gb': 50, 'pct': 90, 'kmaj': 6, 'kmin': 8, 'dmaj': 6, 'dmin': 2, 'ram_gb': 16, 'count': 2, 'threads': 4, 'floor': 8, 'disk_gb': 40, 'mbps': 50}  # fmt: skip
     assert all(w.render({'code': code, **ours}) for code in w.PHRASES)
 
 

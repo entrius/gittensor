@@ -24,7 +24,13 @@ OFFERS = {
             'gpu_type': 'RTX5090',
             'usd_per_card_hr': 0.65,
             'boxes': [
-                {'gpu_count': 1, 'usd_per_hr': 0.65, 'available': 1},
+                {
+                    'gpu_count': 1,
+                    'usd_per_hr': 0.65,
+                    'available': 1,
+                    'guaranteed': {'ram_gb': None, 'cpu_threads': None, 'down_mbps': 100},
+                    'observed_min': {'ram_gb': 125.4, 'cpu_threads': 32, 'down_mbps': 227.3},
+                },
                 {'gpu_count': 2, 'usd_per_hr': 1.3, 'available': 0},
             ],
         },
@@ -161,8 +167,14 @@ def test_ls_shows_only_free_sizes_with_runway_and_the_balance(product):
     assert r.exit_code == 0, r.output
     assert 'RTX5090' in r.output and '0.65' in r.output and '15.1 h' in r.output  # $9.84 / $0.65
     assert 'H100' not in r.output and 'balance $9.84' in r.output
-    assert 'H100' in invoke('ls', '--all').output
-    assert json.loads(invoke('ls', '--json').output)['balance']['balance_cents'] == 984
+    # the host columns (host specs, 10/9): ≥ is the pool's floor, a plain number the least a free box has right now
+    assert 'RAM' in r.output and 'CPUs' in r.output and 'Mbps' in r.output
+    assert '125' in r.output and '32' in r.output and '≥100' in r.output and '≥ is guaranteed' in r.output
+    everything = invoke('ls', '--all').output
+    assert 'H100' in everything and '—' in everything  # a row with no host facts yet shows a dash, not a guess
+    payload = json.loads(invoke('ls', '--json').output)
+    assert payload['balance']['balance_cents'] == 984
+    assert payload['offers']['offers'][0]['boxes'][0]['observed_min']['cpu_threads'] == 32  # passed through as is
 
 
 def test_up_orders_with_the_keys_under_ssh_waits_for_active_and_prints_the_ssh_line(product):

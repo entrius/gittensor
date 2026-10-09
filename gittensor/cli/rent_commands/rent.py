@@ -79,6 +79,16 @@ def _api(cfg: RentConfig) -> RentApi:
     return RentApi(cfg.url, cfg.key)
 
 
+def _host_cell(box: dict, key: str) -> str:
+    """One host column of `gitt rent ls`: the guaranteed floor (``≥``) when the pool guarantees it, else the least the
+    free boxes of that size have right now, else ``—``."""
+    for source, mark in (('guaranteed', '≥'), ('observed_min', '')):
+        value = (box.get(source) or {}).get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return f'{mark}{value:.0f}'
+    return '—'
+
+
 def _usd(cents: int | float | None) -> str:
     return f'${(cents or 0) / 100:.2f}'
 
@@ -158,9 +168,10 @@ def ls_command(show_all, json_mode):
         return
     cents = bal.get('balance_cents') or 0
     table = Table(title='boxes for rent', show_lines=False)
-    for col in ('GPU', 'Box', '$/hr', 'Free', 'Runway'):
-        table.add_column(col, justify='right' if col in ('$/hr', 'Free', 'Runway') else 'left')
+    for col in ('GPU', 'Box', '$/hr', 'Free', 'RAM', 'CPUs', 'Mbps', 'Runway'):
+        table.add_column(col, justify='left' if col in ('GPU', 'Box') else 'right')
     rows = 0
+    guaranteed_any = False
     for o in offers.get('offers') or []:
         for b in o.get('boxes') or []:
             free = int(b.get('available') or 0)
@@ -168,10 +179,17 @@ def ls_command(show_all, json_mode):
                 continue
             per_hr = float(b.get('usd_per_hr') or 0)
             runway = f'{cents / 100 / per_hr:.1f} h' if per_hr and cents > 0 else '—'
-            table.add_row(str(o['gpu_type']), f'{b["gpu_count"]}×', f'{per_hr:.2f}', str(free), runway)
+            host = [_host_cell(b, key) for key in ('ram_gb', 'cpu_threads', 'down_mbps')]
+            guaranteed_any = guaranteed_any or any(c.startswith('≥') for c in host)
+            table.add_row(str(o['gpu_type']), f'{b["gpu_count"]}×', f'{per_hr:.2f}', str(free), *host, runway)
             rows += 1
     if rows:
         console.print(table)
+        console.print(
+            '[dim]RAM GB, CPU threads, download Mbps: '
+            + ('≥ is guaranteed by the pool floor; ' if guaranteed_any else '')
+            + 'a plain number is the least a free box of that size has right now[/dim]'
+        )
     else:
         console.print('Nothing is free right now; `gitt rent ls --all` shows the catalog.')
     images = offers.get('images') or []

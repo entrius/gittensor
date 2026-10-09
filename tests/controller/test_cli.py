@@ -159,6 +159,7 @@ def test_check_admits_the_passing_box_and_pins_it(state):
         ck.DISK_FREE,
         ck.CARD_FREE,
         ck.NETWORK,
+        ck.HOST_SPEC,
         ck.GPU_PROOF,
     ]
     assert {'connect', 'scrape', 'stage', 'fire', 'cleanup', 'total'} <= set(payload['timings_ms'])

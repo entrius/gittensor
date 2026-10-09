@@ -21,8 +21,11 @@ from gittensor.controller.checks.nvml_allowlist import NvmlAllowlist
 from gittensor.controller.checks.runner import CommandResult, FakeRunner, HostRunner, regex
 from gittensor.controller.checks.scrape import (
     AMD_DEVICE_HOLDERS_COMMAND,
+    CPU_THREADS_COMMAND,
     DEVICE_HOLDERS_COMMAND,
+    DOWNLOAD_PROBE_COMMAND,
     KERNEL_DRIVER_COMMAND,
+    MEMINFO_COMMAND,
     NVML_MD5_COMMAND,
     agent_image_command,
     agent_image_id_command,
@@ -239,6 +242,9 @@ def passing_runner(
     network_targets=NETWORK_TARGETS,
     job=None,
     rent_ports: str = '\n',  # the agent's rent label; '' or a bare newline = not started with --rent
+    meminfo: str = fixture('proc_meminfo.txt'),
+    nproc: str = fixture('nproc.txt'),
+    download: str = fixture('curl_download_probe.txt'),
 ) -> FakeRunner:
     """A box that passes everything. Tests override one command with ``runner.on(...)`` to make one check fail."""
     runner = FakeRunner(
@@ -252,6 +258,9 @@ def passing_runner(
             rent_ports_command(): rent_ports,
             disk_free_command(): df,
             DEVICE_HOLDERS_COMMAND: device_holders,
+            MEMINFO_COMMAND: meminfo,
+            CPU_THREADS_COMMAND: nproc,
+            DOWNLOAD_PROBE_COMMAND: download,
         }
     )
     for url in network_targets:
@@ -282,6 +291,10 @@ def passing_amd_runner(
             rent_ports_command(): rent_ports,
             disk_free_command(): df,
             AMD_DEVICE_HOLDERS_COMMAND: device_holders,
+            # the host steps are vendor-neutral: the same commands, the same fixtures (host specs, 10/9)
+            MEMINFO_COMMAND: fixture('proc_meminfo.txt'),
+            CPU_THREADS_COMMAND: fixture('nproc.txt'),
+            DOWNLOAD_PROBE_COMMAND: fixture('curl_download_probe.txt'),
         }
     )
     for url in network_targets:

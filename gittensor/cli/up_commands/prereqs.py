@@ -42,12 +42,15 @@ from gittensor.agent.config import (
 from gittensor.agent.launch import Workload, parse_workloads, workload_list_command
 from gittensor.controller.checks import config as ccfg
 from gittensor.controller.checks.amd_scrape import AMD_SYSFS_COMMAND, AmdCard, AmdStack, parse_amd_sysfs, version_tuple
-from gittensor.controller.checks.catalog import load_catalog, spec_for_name, spec_for_pci_id
+from gittensor.controller.checks.catalog import CardSpec, load_catalog, spec_for_name, spec_for_pci_id
 from gittensor.controller.checks.scrape import (
+    DOWNLOAD_PROBE_COMMAND,
     KERNEL_DRIVER_COMMAND,
     NVML_MD5_COMMAND,
+    parse_download_probe,
     parse_kernel_driver,
     parse_md5,
+    parse_meminfo_total_gb,
 )
 from gittensor.controller.checks.vendor import (
     AMD,
@@ -74,6 +77,9 @@ SYSBOX_CHECK = 'Sysbox runtime'
 VENDOR_CHECK = 'GPU vendor'
 TOOLKIT_CHECK = 'NVIDIA container toolkit'
 RENT_PORTS_CHECK = 'Rent ports'
+HOST_RAM_CHECK = 'Host RAM'
+CPU_THREADS_CHECK = 'CPU threads'
+DOWNLOAD_CHECK = 'Download'
 SYSBOX_SETUP_URL = 'https://raw.githubusercontent.com/entrius/gittensor/main/docker/agent/sysbox-setup.sh'
 MINER_DOCS_URL = 'https://docs.gittensor.io/compute-mining.html'  # every row of the table, explained for the miner
 SYSBOX_KERNEL_MIN = (5, 19)  # overlayfs over ID-mapped mounts; older kernels fall back to shiftfs (Lium's check)
@@ -254,6 +260,22 @@ class HostProbe:
         proc = self.run(['uname', '-r'])
         return proc.stdout.strip() if proc.returncode == 0 else ''
 
+    def meminfo(self) -> str:
+        """/proc/meminfo as text ('' when unreadable): the controller's ``meminfo`` step, read here on the host itself."""
+        try:
+            return Path('/proc/meminfo').read_text()
+        except OSError:
+            return ''
+
+    def cpu_threads(self) -> int | None:
+        return os.cpu_count()
+
+    def download_probe(self, timeout: float = ccfg.DOWNLOAD_PROBE_TIMEOUT_S + 15) -> str:
+        """The controller's download probe (one real transfer, ``scrape.DOWNLOAD_PROBE_COMMAND``), run once here so
+        the miner sees the number the round will see; '' when it did not run to the end."""
+        proc = self.run(['sh', '-c', DOWNLOAD_PROBE_COMMAND], timeout=timeout)
+        return proc.stdout if proc.returncode == 0 else ''
+
     def rental_ports(self) -> set[int]:
         """The host ports our customer pods (``RENTAL_LABEL``) hold on this box, from ``docker ps``."""
         proc = self.run(['docker', 'ps', '--filter', f'label={RENTAL_LABEL}', '--format', '{{.Ports}}'])
@@ -272,16 +294,18 @@ class HostProbe:
 # --- individual checks -------------------------------------------------------------------------------------------
 
 
-def check_driver(probe: HostProbe) -> list[CheckResult]:
+def check_driver(probe: HostProbe) -> tuple[list[CheckResult], list[CardSpec | None]]:
+    """The driver rows and, beside them, the catalog row of each card (None for a card the catalog does not know):
+    what the host rows (``check_host``) scale their floors by."""
     proc = probe.run(['nvidia-smi', '--query-gpu=name,driver_version,uuid', '--format=csv,noheader'])
     if proc.returncode != 0:
         err = (proc.stderr or proc.stdout).strip()[:120] or 'nvidia-smi failed'
-        return [CheckResult('NVIDIA driver', False, f'{err}: install the NVIDIA driver (nvidia-smi must work), reboot, re-run')]  # fmt: skip
+        return [CheckResult('NVIDIA driver', False, f'{err}: install the NVIDIA driver (nvidia-smi must work), reboot, re-run')], []  # fmt: skip
     rows = [[c.strip() for c in line.split(',')] for line in proc.stdout.splitlines() if line.strip()]
     if not rows:
         return [
             CheckResult('NVIDIA driver', False, 'nvidia-smi reports no GPUs: no card the pool can admit on this box')
-        ]
+        ], []
     names = [r[0] for r in rows]
     driver = rows[0][1] if len(rows[0]) > 1 else '?'
     results = [CheckResult('NVIDIA driver', True, f'{driver}; {len(rows)} GPU(s): {", ".join(names)}')]
@@ -289,7 +313,7 @@ def check_driver(probe: HostProbe) -> list[CheckResult]:
     model = check_gpu_model(names)
     if model is not None:
         results.append(model)
-    return results
+    return results, [spec_for_name(n) for n in names]
 
 
 def check_vendor(detected: str) -> CheckResult:
@@ -310,17 +334,19 @@ AMD_UDEV_RULE = '/etc/udev/rules.d/99-gittensor-amd.rules'
 AMD_NODE_MODE = 0o666
 
 
-def check_amd_driver(probe: HostProbe) -> list[CheckResult]:
+def check_amd_driver(probe: HostProbe) -> tuple[list[CheckResult], list[CardSpec | None]]:
     """The AMD box's driver rows, the controller's ``gpu_spec`` and ``amd_stack`` rules said here first (vault 31
     step 4): every card with a usable serial and whole (SPX / NPS1), its type by PCI id, and the kernel or DKMS
-    driver at the pool floor."""
+    driver at the pool floor. Beside the rows, the catalog row of each card, as ``check_driver`` returns it."""
     cards, stack = probe.amd_sysfs()
     if not cards:
-        return [CheckResult(AMD_DRIVER_CHECK, False, 'amdgpu is loaded but sysfs lists no AMD card: no card is usable')]
+        return [CheckResult(AMD_DRIVER_CHECK, False, 'amdgpu is loaded but sysfs lists no AMD card: no card is usable')], []  # fmt: skip
     problems = []
     names = []
+    specs: list[CardSpec | None] = []
     for c in cards:
         spec = spec_for_pci_id(c.device_id)
+        specs.append(spec)
         names.append(spec.gpu_type if spec is not None else f'{c.device_id} (not in the GPU catalog)')
         if spec is None:  # the controller's gpu_spec check refuses it; the miner hears it here first
             problems.append(
@@ -331,7 +357,7 @@ def check_amd_driver(probe: HostProbe) -> list[CheckResult]:
         if not c.whole:
             problems.append(f'{c.render_node} is partitioned ({c.partition}): the pool admits SPX / NPS1 only')
     if problems:
-        return [CheckResult(AMD_DRIVER_CHECK, False, '; '.join(problems)[:200])]
+        return [CheckResult(AMD_DRIVER_CHECK, False, '; '.join(problems)[:200])], specs
     detail = f'amdgpu; {len(cards)} card(s): {", ".join(sorted(set(names)))}; {", ".join(c.render_node for c in cards)}'
     rows = [CheckResult(AMD_DRIVER_CHECK, True, detail)]
     # Measured 10/9 (vault 33): under Sysbox the nodes appear as nobody:nogroup inside the pod, so no group bit can
@@ -362,6 +388,58 @@ def check_amd_driver(probe: HostProbe) -> list[CheckResult]:
                 False,
                 f'kernel {stack.kernel} is below {kmin[0]}.{kmin[1]} and no amdgpu DKMS driver at or above '
                 f'{dmin[0]}.{dmin[1]} is loaded: update the kernel or install the ROCm driver',
+            )
+        )
+    return rows, specs
+
+
+def check_host(probe: HostProbe, specs: Sequence[CardSpec | None]) -> list[CheckResult]:
+    """The controller's ``host_spec`` check (host specs, 10/9), said here first: host RAM and CPU threads against the
+    per-card floors x this box's card count, and one run of the same download probe the round makes. The numbers
+    are the controller's config, read from it, never copied. A shortfall is a warning that names the fix and says
+    whether the pool advertises it (the customer sees what the box has) or refuses it (``HOST_SPEC_HARD``; the
+    download floor is always refused, after ``DOWNLOAD_FAIL_AFTER`` rounds under it). The box still starts."""
+    count = max(1, len(specs))
+    hard = ccfg.HOST_SPEC_HARD
+    fate = 'the controller refuses this box (host_spec)' if hard else 'advertised to customers, not refused'
+    rows: list[CheckResult] = []
+
+    def row(name: str, value: float | None, per_card: float, unit: str, what: str) -> CheckResult:
+        floor = per_card * count
+        need = f'{per_card:.0f} {unit} per card, {floor:.0f} {unit} for {count}'
+        if value is None:
+            return CheckResult(name, None, f'could not read the host {what}')
+        if value >= floor:
+            return CheckResult(name, True, f'{value:.0f} {unit} (floor {floor:.0f} {unit} for {count} card{"s" if count > 1 else ""})')  # fmt: skip
+        return CheckResult(name, False, f'{value:.0f} {unit}; a box of this type needs {need}: {fate}', required=False)
+
+    rows.append(row(HOST_RAM_CHECK, parse_meminfo_total_gb(probe.meminfo()), ccfg.RAM_MIN_GB_PER_GPU, 'GB', 'RAM'))
+    rows.append(row(CPU_THREADS_CHECK, probe.cpu_threads(), ccfg.CPU_THREADS_MIN_PER_GPU, 'threads', 'CPU count'))
+    mbps = parse_download_probe(probe.download_probe()).mbps
+    floor, after = ccfg.DOWNLOAD_MIN_MBPS, ccfg.DOWNLOAD_FAIL_AFTER
+    if mbps is None:
+        rows.append(
+            CheckResult(
+                DOWNLOAD_CHECK,
+                None,
+                'could not measure (Docker Hub did not answer); the controller measures every round',
+            )  # fmt: skip
+        )
+    elif mbps >= floor:
+        pull = f'{ccfg.DOWNLOAD_PROBE_BYTES / 1e6:.0f} MB pull from Docker Hub'
+        rows.append(
+            CheckResult(
+                DOWNLOAD_CHECK, True, f'{mbps:.0f} Mbps on a {pull} (floor {floor:.0f} Mbps, measured every round)'
+            )  # fmt: skip
+        )
+    else:
+        rows.append(
+            CheckResult(
+                DOWNLOAD_CHECK,
+                False,
+                f'{mbps:.0f} Mbps; the floor is {floor:.0f} Mbps: refused once the average over rounds is under it '
+                f'for {after} rounds in a row',
+                required=False,
             )
         )
     return rows
@@ -655,13 +733,15 @@ def run_prereqs(
     detected = probe.vendor_detected()
     report.vendor = vendor_or_default(detected)
     report.results.append(check_vendor(detected))
-    report.results.extend(check_amd_driver(probe) if report.vendor == AMD else check_driver(probe))
+    driver_rows, card_specs = check_amd_driver(probe) if report.vendor == AMD else check_driver(probe)
+    report.results.extend(driver_rows)
     docker = check_docker(probe)
     report.results.append(docker)
     if report.vendor == AMD:
         report.results.append(CheckResult(TOOLKIT_CHECK, None, 'skipped (AMD box: cards attach as device nodes)'))
     else:
         report.results.append(check_toolkit(probe))
+    report.results.extend(check_host(probe, card_specs))
     if docker.ok:
         report.agent_state = probe.container_state(AGENT_CONTAINER_NAME)
         report.runner_state = probe.container_state(RUNNER_CONTAINER_NAME)

@@ -180,6 +180,46 @@ def _num(value: Any) -> float | None:
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
+HOST_FIELDS = ('ram_gb', 'cpu_threads', 'down_mbps')  # what an offer guarantees or observes, in this order
+
+
+def _host(box: BoxState) -> dict:
+    """The host around the cards as the last check measured it (host specs, 10/9): numbers and shortfall codes from our own
+    vocabulary alone (``why.HOST_SHORTFALLS``), nothing a box typed."""
+    record = box.host_specs or {}
+    codes = record.get('shortfalls')
+    return {
+        'ram_gb': _num(record.get('ram_gb')),
+        'cpu_threads': _num(record.get('cpu_threads')),
+        'disk_total_gb': _num(record.get('disk_total_gb')),
+        'down_mbps': _num(record.get('down_mbps')),  # the EMA across rounds, not one sample
+        'up_mbps': _num(record.get('up_mbps')),
+        'shortfalls': [c for c in (codes if isinstance(codes, list) else []) if c in w.HOST_SHORTFALLS],
+    }
+
+
+def guaranteed_host(size: int, hard: bool | None = None) -> dict:
+    """What a box of this size is guaranteed to have: the configured floors x the size for every floor that is hard.
+    Download is hard from the start; RAM and CPU threads only once ``HOST_SPEC_HARD`` is flipped. A floor that is not
+    hard is None here, and the customer is shown what free boxes currently have instead."""
+    hard = cfg.HOST_SPEC_HARD if hard is None else hard
+    return {
+        'ram_gb': cfg.RAM_MIN_GB_PER_GPU * size if hard else None,
+        'cpu_threads': cfg.CPU_THREADS_MIN_PER_GPU * size if hard else None,
+        'down_mbps': cfg.DOWNLOAD_MIN_MBPS,
+    }
+
+
+def observed_min_host(hosts: Sequence[Mapping[str, Any]]) -> dict:
+    """The least of each host field over the free boxes of one offer row (None where no box reported it): the
+    weakest box a customer could land on right now. A minimum over a row names no box."""
+    out: dict[str, float | None] = {}
+    for key in HOST_FIELDS:
+        values = [v for v in (_num(h.get(key)) for h in hosts) if v is not None]
+        out[key] = min(values) if values else None
+    return out
+
+
 def _last_event(events: list[dict], kinds: frozenset[str] | None = None) -> dict | None:
     for event in reversed(events or []):
         kind, at = event.get('kind'), _num(event.get('at'))
@@ -262,8 +302,10 @@ def build_fleet(
     live = live_pay(root, boxes, view, now)
     by_state: dict[str, int] = {}
     # Boxes a customer could rent right now, by GPU type and box size (29 §7: the app's offers come from here). A
-    # box counts when it is rentable and every card on it is idle; the size is its card count, the whole box.
-    offers: dict[str, dict[str, int]] = {}
+    # box counts when it is rentable and every card on it is idle; the size is its card count, the whole box. Each
+    # row also carries what a box of that size is guaranteed to have and the least the free boxes have (host specs, 10/9).
+    offers: dict[str, dict[str, dict]] = {}
+    offered_hosts: dict[tuple[str, str], list[dict]] = {}
     rows = []
     for box in sorted(boxes.values(), key=lambda b: b.box_id):
         if not _HOTKEY.match(box.box_id):
@@ -293,9 +335,12 @@ def build_fleet(
         failed = _names(box.last_failed, _CHECK_NAME)
         gpu_type = gpu_type_of(box.card_name) if box.card_name else None
         rentable = box_rentable(box, now, min_level=rentable_min_standing)
+        host = _host(box)
         if rentable and gpu_type and cards and all(c['state'] == IDLE for c in cards):
             sizes = offers.setdefault(gpu_type, {})
-            sizes[str(len(cards))] = sizes.get(str(len(cards)), 0) + 1
+            row = sizes.setdefault(str(len(cards)), {'boxes': 0, 'guaranteed': guaranteed_host(len(cards))})
+            row['boxes'] += 1
+            offered_hosts.setdefault((gpu_type, str(len(cards))), []).append(host)
         rows.append(
             {
                 'hotkey': box.box_id,
@@ -323,8 +368,13 @@ def build_fleet(
                 'pay': pay,
                 'last_event': _last_event(box.standing_events),
                 'cards': cards,
+                # The host around the cards (host specs, 10/9): measured every round; the shortfalls are advertised here
+                # and in the offer, and refused only where the floor is hard.
+                'host': host,
             }
         )
+    for (gpu_type, size), hosts in offered_hosts.items():
+        offers[gpu_type][size]['observed_min'] = observed_min_host(hosts)
     last_round = status.get('round') or {}
     intervals = status.get('intervals') or {}
     oracle = doc.get('oracle') or {}
@@ -358,7 +408,8 @@ def build_fleet(
         if oracle
         else None,
         'totals': {'boxes': len(rows), 'cards': sum(r['card_count'] for r in rows), 'cards_by_state': by_state},
-        # gpu_type -> {box size: boxes rentable and wholly idle right now}; what the rent page sells (29 §7).
+        # gpu_type -> {box size: {boxes: rentable and wholly idle right now, guaranteed: the hard floors x size,
+        # observed_min: the least the free boxes have}}; what the rent page sells (29 §7, host specs, 10/9).
         'offers': offers,
         'boxes': rows,
     }

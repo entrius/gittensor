@@ -45,6 +45,7 @@ POWER_LIMIT = 'power_limit'
 AGENT_IMAGE = 'agent_image'
 DISK_FREE = 'disk_free'
 NETWORK = 'network'
+HOST_SPEC = 'host_spec'
 CARD_FREE = 'card_free'
 GPU_PROOF = 'gpu_proof'
 
@@ -466,6 +467,134 @@ def check_network(results: Dict[str, Tuple[int, float]], targets: Sequence[str])
     return CheckResult(NETWORK, True, {'targets': evidence, 'unreachable': unreachable})
 
 
+def _ema(old: Optional[float], sample: float, alpha: float) -> float:
+    return sample if old is None else alpha * sample + (1.0 - alpha) * old
+
+
+def _number(value: object) -> Optional[float]:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def check_host_spec(
+    scrape: HostScrape,
+    spec: Optional[cfg.CardSpec],
+    card_count: int,
+    history: Optional[Mapping[str, object]] = None,
+    hard: Optional[bool] = None,  # None: ``cfg.HOST_SPEC_HARD`` as it stands when the check runs (the one flip)
+    ram_min_gb_per_gpu: float = cfg.RAM_MIN_GB_PER_GPU,
+    cpu_threads_min_per_gpu: int = cfg.CPU_THREADS_MIN_PER_GPU,
+    disk_x_vram: float = cfg.DISK_TOTAL_MIN_X_VRAM,
+    download_min_mbps: float = cfg.DOWNLOAD_MIN_MBPS,
+    ema_alpha: float = cfg.DOWNLOAD_EMA_ALPHA,
+    fail_after: int = cfg.DOWNLOAD_FAIL_AFTER,
+) -> CheckResult:
+    """The host around the cards (host specs, 10/9): RAM and CPU threads scale per card (``card_count`` x the floor), the
+    disk must hold ``disk_x_vram`` x the cards' VRAM (Lium's idle-pay rule; the VRAM is OUR spec's, never the box's),
+    and the download link must carry ``download_min_mbps``. ``history`` is the box's ``BoxState.host`` record from
+    the last round; the evidence's ``host`` is the new one, which ``state.apply_verdict`` writes back.
+
+    RAM, CPU and the disk ratio are advertised minimums until ``hard`` is flipped: the check passes and every
+    shortfall is listed with its measured value and the floor (published as the box's ``shortfalls``); with ``hard``
+    a shortfall fails, and a field the scrape could not read fails closed like ``disk_free`` does.
+
+    Download is the one hard floor at launch, and it must not repeat 9/19 (``check_network``: one Hugging Face miss
+    benched a healthy box and took the fleet to zero for 4 h). So: an HTTP failure or a zero-byte transfer is no
+    sample, never a fail, and leaves the EMA where it was; the EMA per box runs across rounds; and only
+    ``fail_after`` consecutive *sampled* rounds with the EMA under the floor fail the check. The failure then goes
+    through the normal failed-check path (a bench on the ladder), not a path of its own."""
+    history = history or {}
+    hard = cfg.HOST_SPEC_HARD if hard is None else hard
+    ram_floor = ram_min_gb_per_gpu * card_count
+    cpu_floor = cpu_threads_min_per_gpu * card_count
+    vram_gb: Optional[float] = None
+    disk_floor: Optional[float] = None
+    if spec is not None and card_count:
+        vram_gb = spec.vram_total_mib_max * 1024 * 1024 / 1e9 * card_count
+        disk_floor = disk_x_vram * vram_gb
+    floors: Dict[str, Optional[float]] = {
+        'ram_gb': ram_floor,
+        'cpu_threads': cpu_floor,
+        'disk_total_gb': disk_floor,
+        'down_mbps': download_min_mbps,
+    }
+    # The download EMA (per box, across rounds); a round with no sample changes nothing.
+    old_ema = _number(history.get('down_mbps'))
+    below_rounds = int(_number(history.get('down_below_rounds')) or 0)
+    sample = scrape.down_mbps
+    ema = old_ema
+    if sample is not None:
+        ema = _ema(old_ema, sample, ema_alpha)
+        below_rounds = below_rounds + 1 if ema < download_min_mbps else 0
+    shortfalls: List[str] = []
+    details: List[str] = []
+    public: Dict[str, Dict[str, object]] = {}
+    ram, cpu, disk = scrape.ram_total_gb, scrape.cpu_threads, scrape.disk_total_gb
+    if ram is not None and ram < ram_floor:
+        shortfalls.append(w.RAM_BELOW_FLOOR)
+        details.append(f'RAM {ram:.0f} GB < {ram_floor:.0f} GB')
+        public[w.RAM_BELOW_FLOOR] = {'ram_gb': int(ram), 'count': card_count, 'floor_gb': int(ram_floor)}
+    if cpu is not None and cpu < cpu_floor:
+        shortfalls.append(w.CPU_BELOW_FLOOR)
+        details.append(f'CPU threads {cpu} < {cpu_floor:.0f}')
+        public[w.CPU_BELOW_FLOOR] = {'threads': cpu, 'count': card_count, 'floor': int(cpu_floor)}
+    if disk is not None and disk_floor is not None and vram_gb is not None and disk < disk_floor:
+        shortfalls.append(w.DISK_RATIO_BELOW_FLOOR)
+        details.append(f'disk {disk:.0f} GB < {disk_floor:.0f} GB ({disk_x_vram:g}x {vram_gb:.0f} GB VRAM)')
+        public[w.DISK_RATIO_BELOW_FLOOR] = {'disk_gb': int(disk), 'floor_gb': int(disk_floor)}
+    if ema is not None and ema < download_min_mbps:
+        shortfalls.append(w.DOWNLOAD_BELOW_FLOOR)
+        details.append(f'download EMA {ema:.0f} Mbps < {download_min_mbps:.0f} Mbps ({below_rounds} round(s) under)')
+        public[w.DOWNLOAD_BELOW_FLOOR] = {'mbps': int(ema), 'floor': int(download_min_mbps)}
+    unreadable = [k for k, v in (('meminfo', ram), ('cpu_threads', cpu), ('disk_free', disk)) if v is None]
+    host = {
+        'ram_gb': None if ram is None else round(ram, 1),
+        'cpu_threads': cpu,
+        'disk_total_gb': None if disk is None else round(disk, 1),
+        'down_mbps': None if ema is None else round(ema, 1),
+        'down_sample_mbps': None if sample is None else round(sample, 1),
+        'down_at': history.get('down_at'),
+        'down_below_rounds': below_rounds,
+        'up_mbps': None,  # no honest way to measure it without a receiver of our own (host specs, 10/9); left out on purpose
+        'shortfalls': shortfalls,
+    }
+    if sample is not None:
+        host['down_at'] = time.time()
+    evidence: Dict[str, object] = {
+        'host': host,
+        'floors': {k: (None if v is None else round(v, 1)) for k, v in floors.items()},
+        'card_count': card_count,
+        'hard': hard,
+        'unreadable': unreadable,
+        'download_probe': scrape.down_probe.as_dict() if scrape.down_probe is not None else None,
+        'download_error': scrape.errors.get('download', ''),
+    }
+    if below_rounds >= fail_after:
+        return CheckResult(
+            HOST_SPEC,
+            False,
+            {
+                **evidence,
+                'reason': '; '.join(details),
+                w.PUBLIC: {'code': w.DOWNLOAD_BELOW_FLOOR, **public[w.DOWNLOAD_BELOW_FLOOR]},
+            },  # noqa: E501
+        )
+    if hard:
+        if unreadable:
+            return CheckResult(
+                HOST_SPEC,
+                False,
+                {**evidence, 'reason': 'unreadable: ' + ', '.join(unreadable), w.PUBLIC: {'code': w.HOST_UNREADABLE}},
+            )
+        refused = [c for c in shortfalls if c != w.DOWNLOAD_BELOW_FLOOR]
+        if refused:
+            return CheckResult(
+                HOST_SPEC,
+                False,
+                {**evidence, 'reason': '; '.join(details), w.PUBLIC: {'code': refused[0], **public[refused[0]]}},  # noqa: E501
+            )
+    return CheckResult(HOST_SPEC, True, {**evidence, 'reason': '; '.join(details) or 'at or above every floor'})
+
+
 def foreign_holders(
     holders: Mapping[int, DeviceHolder], ours: Collection[str]
 ) -> Tuple[List[str], List[int], List[str]]:
@@ -623,10 +752,12 @@ def identity_checks(
     box_id: str = '',
     fleet_uuids: Optional[Mapping[str, Iterable[str]]] = None,
     ours: Collection[str] = (),
+    host_history: Optional[Mapping[str, object]] = None,
 ) -> List[CheckResult]:
     """Everything except the GPU proof, from one scrape. ``fleet_uuids`` (``{box_id: uuids}`` of every other box)
     adds the fleet-wide uniqueness check; without it the box is judged alone. ``ours`` (our instances' container IDs
-    on this box) is what ``check_card_free`` judges the box's device holders against."""
+    on this box) is what ``check_card_free`` judges the box's device holders against. ``host_history`` is the box's
+    ``BoxState.host`` record (the download EMA and its rounds under the floor) for ``check_host_spec``."""
     amd = scrape.vendor == AMD  # the vendor switch (30 §3): the spec and the stack have an AMD sibling each
     checks = [
         check_vendor(scrape.vendor_detected),
@@ -653,4 +784,14 @@ def identity_checks(
         check_disk_free(scrape.disk_free_gb, disk_min_free_gb, disk_path),
         check_card_free(scrape.device_holders, ours, scrape.errors.get('device_holders', ''), scrape.vendor),
         check_network(scrape.network, network_targets),
+        check_host_spec(scrape, spec or claimed_spec(scrape), len(scrape.gpus), host_history),
     ]
+
+
+def claimed_spec(scrape: HostScrape) -> Optional[cfg.CardSpec]:
+    """The catalog row the box's first card claims (what ``check_gpu_spec`` / ``check_amd_spec`` resolve when no spec
+    is given), for the checks that need the type's numbers; None when there is no card or the catalog does not know
+    it."""
+    if scrape.vendor == AMD:
+        return spec_for_pci_id(scrape.amd_cards[0].device_id) if scrape.amd_cards else None
+    return spec_for_name(scrape.gpus[0].name.strip()) if scrape.gpus else None

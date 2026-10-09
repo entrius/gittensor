@@ -88,6 +88,38 @@ def network_command(url: str, timeout_s: float = cfg.NETWORK_TIMEOUT_S) -> str:
     return f"curl -sS -o /dev/null -m {int(timeout_s)} -w '%{{http_code}} %{{speed_download}}' {shlex.quote(url)}"
 
 
+# The host around the cards (host specs, 10/9), vendor-neutral and read through PID 1's root like ``disk_free_command``: the
+# agent runs with --pid host, so /proc/1/root is the host's filesystem and its /proc is the host's procfs.
+MEMINFO_COMMAND = f'cat {cfg.HOST_ROOT}/proc/meminfo'
+# `nproc --all` counts every CPU the host has (no cpuset narrows the agent); a box without coreutils' nproc is read
+# from the host's cpuinfo instead.
+CPU_THREADS_COMMAND = f'nproc --all 2>/dev/null || grep -c ^processor {cfg.HOST_ROOT}/proc/cpuinfo'
+
+
+def download_probe_command(
+    repo: str = cfg.DOWNLOAD_PROBE_REPO,
+    blob: str = cfg.DOWNLOAD_PROBE_BLOB,
+    timeout_s: float = cfg.DOWNLOAD_PROBE_TIMEOUT_S,
+) -> str:
+    """One real transfer: a pinned layer of the proof image, pulled from Docker Hub the way `docker pull` pulls it (an
+    anonymous pull token, then the blob, which Hub answers with a redirect to its CDN). Prints curl's average
+    bytes/s, the bytes that arrived and the final HTTP code; ``parse_download_probe`` turns a 200 with bytes on the
+    wire into Mbps and anything else into no sample. A link so slow the timeout cuts the pull short (curl exit 28)
+    still prints its partial count, and that is its sample: a slow box must not escape the floor by being slow.
+    Exit 3 with nothing printed when no token came back (Hub down, no DNS)."""
+    token_url = f'https://auth.docker.io/token?service=registry.docker.io&scope=repository:{repo}:pull'
+    blob_url = f'https://registry-1.docker.io/v2/{repo}/blobs/{blob}'
+    return (
+        f'T=$(curl -sS -m 10 {shlex.quote(token_url)} | sed -n \'s/.*"token":"\\([^"]*\\)".*/\\1/p\'); '
+        '[ -n "$T" ] || { echo "no pull token" >&2; exit 3; }; '
+        f'curl -sS -L -m {int(timeout_s)} -o /dev/null -H "Authorization: Bearer $T" '
+        f"-w '%{{speed_download}} %{{size_download}} %{{http_code}}' {shlex.quote(blob_url)} || [ $? -eq 28 ]"
+    )
+
+
+DOWNLOAD_PROBE_COMMAND = download_probe_command()
+
+
 # Every host process with an NVIDIA device node open (one `find` over the host's /proc/*/fd), then each holder's comm
 # and cgroup. Exit 3 when the host procfs is not where we look; a holder that exits mid-scan prints MISSING.
 DEVICE_HOLDERS_COMMAND = (
@@ -234,6 +266,70 @@ def parse_curl(stdout: str) -> Tuple[int, float]:
     return code, speed
 
 
+def parse_df_total_gb(stdout: str) -> Optional[float]:
+    """Size KiB (2nd column of ``df -kP``, the same line ``parse_df_available_gb`` reads) in GB (1e9)."""
+    line = stdout.strip().splitlines()[-1] if stdout.strip() else ''
+    cols = line.split()
+    if len(cols) < 4:
+        return None
+    try:
+        return int(cols[1]) * 1024 / 1e9
+    except ValueError:
+        return None
+
+
+_MEMTOTAL = re.compile(r'^MemTotal:\s+(\d+)\s*kB', re.M)
+
+
+def parse_meminfo_total_gb(stdout: str) -> Optional[float]:
+    """``MemTotal`` of /proc/meminfo in GB (1e9); None when the line is missing."""
+    m = _MEMTOTAL.search(stdout)
+    return int(m.group(1)) * 1024 / 1e9 if m else None
+
+
+def parse_cpu_threads(stdout: str) -> Optional[int]:
+    """``nproc --all`` (or a cpuinfo line count): a positive integer, else None."""
+    value = stdout.strip().split()[-1] if stdout.strip() else ''
+    try:
+        n = int(value)
+    except ValueError:
+        return None
+    return n if n > 0 else None
+
+
+@dataclass
+class DownloadProbe:
+    """What one run of ``DOWNLOAD_PROBE_COMMAND`` printed. ``mbps`` is a sample only for a complete 200 with bytes
+    on the wire; anything else (a miss, a redirect that went nowhere, an empty body) is ``None``: no sample, never a
+    failure, so a Hub hiccup can never bench a box (9/19)."""
+
+    http_code: int = 0
+    bytes: int = 0
+    bytes_per_s: float = 0.0
+
+    @property
+    def mbps(self) -> Optional[float]:
+        if self.http_code != 200 or self.bytes <= 0 or self.bytes_per_s <= 0:
+            return None
+        return self.bytes_per_s * 8 / 1e6
+
+    def as_dict(self) -> dict:
+        return {'http_code': self.http_code, 'bytes': self.bytes, 'bytes_per_s': self.bytes_per_s, 'mbps': self.mbps}
+
+
+def parse_download_probe(stdout: str) -> DownloadProbe:
+    """``-w '%{speed_download} %{size_download} %{http_code}'`` to a ``DownloadProbe``; a line that does not parse is
+    a probe with nothing in it."""
+    parts = stdout.strip().split()
+    try:
+        speed = float(parts[0]) if parts else 0.0
+        size = int(float(parts[1])) if len(parts) > 1 else 0
+        code = int(parts[2]) if len(parts) > 2 else 0
+    except ValueError:
+        return DownloadProbe()
+    return DownloadProbe(code, size, speed)
+
+
 @dataclass
 class DeviceHolder:
     pid: int
@@ -283,6 +379,13 @@ class HostScrape:
     agent_image_id: str = ''
     rent_ports: List[int] = field(default_factory=list)  # [low, high] from the agent's label; [] = not for rent
     disk_free_gb: Optional[float] = None
+    # The host around the cards (host specs, 10/9): None where the step failed (``errors`` names it) or, for the download,
+    # where the probe did not run this visit or got no sample (``down_probe`` says which).
+    ram_total_gb: Optional[float] = None
+    cpu_threads: Optional[int] = None
+    disk_total_gb: Optional[float] = None
+    down_mbps: Optional[float] = None
+    down_probe: Optional[DownloadProbe] = None  # None: the probe was not run this visit
     network: Dict[str, Tuple[int, float]] = field(default_factory=dict)
     device_holders: str = ''  # DEVICE_HOLDERS_COMMAND's raw stdout; ``checks.check_card_free`` parses and judges it
     errors: Dict[str, str] = field(default_factory=dict)  # scrape step -> what went wrong (fails that check)
@@ -373,9 +476,11 @@ def scrape_host(
     disk_path: str = cfg.DISK_PATH,
     network_targets: Sequence[str] = cfg.NETWORK_TARGETS,
     timeout: float = cfg.SSH_COMMAND_TIMEOUT_S,
+    download: bool = True,
 ) -> HostScrape:
     """Every identity and resource fact the sub-checks judge, in one pass. A step that fails records its error and
-    leaves its field empty; the judge for that field then fails closed."""
+    leaves its field empty; the judge for that field then fails closed. ``download``: run the bandwidth probe (one
+    real transfer, ``DOWNLOAD_PROBE_COMMAND``); the caller caps it at one per box per round."""
     scrape = HostScrape()
     out = _run(runner, scrape, 'vendor', VENDOR_DETECT_COMMAND, timeout)
     if out is not None:
@@ -397,6 +502,17 @@ def scrape_host(
     out = _run(runner, scrape, 'disk_free', disk_free_command(disk_path), timeout)
     if out is not None:
         scrape.disk_free_gb = parse_df_available_gb(out)
+        scrape.disk_total_gb = parse_df_total_gb(out)  # the same df call, its size column
+    out = _run(runner, scrape, 'meminfo', MEMINFO_COMMAND, timeout)
+    if out is not None:
+        scrape.ram_total_gb = parse_meminfo_total_gb(out)
+    out = _run(runner, scrape, 'cpu_threads', CPU_THREADS_COMMAND, timeout)
+    if out is not None:
+        scrape.cpu_threads = parse_cpu_threads(out)
+    if download:
+        out = _run(runner, scrape, 'download', DOWNLOAD_PROBE_COMMAND, cfg.DOWNLOAD_PROBE_TIMEOUT_S + 15)
+        scrape.down_probe = parse_download_probe(out) if out is not None else DownloadProbe()
+        scrape.down_mbps = scrape.down_probe.mbps
     out = _run(runner, scrape, 'device_holders', device_holders_command(scrape.vendor), timeout)
     if out is not None:
         scrape.device_holders = out

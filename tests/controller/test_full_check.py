@@ -46,6 +46,7 @@ ALL_CHECKS = [
     ck.DISK_FREE,
     ck.CARD_FREE,
     ck.NETWORK,
+    ck.HOST_SPEC,
     ck.GPU_PROOF,
 ]
 

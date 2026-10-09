@@ -103,7 +103,6 @@ def test_the_host_steps_are_vendor_neutral():
     nvidia = passing_runner_calls(scrape_host, network_targets=())
     for command in (MEMINFO_COMMAND, CPU_THREADS_COMMAND, DOWNLOAD_PROBE_COMMAND, disk_free_command()):
         assert command in nvidia
-    amd = passing_runner()  # noqa: F841  (the AMD runner is checked through the scrape above)
 
 
 # ---------------------------------------------------------------- the check ------------------------------------------
@@ -274,7 +273,7 @@ def test_guaranteed_is_the_hard_floors_times_the_size_and_observed_min_the_least
 
 def test_the_document_carries_the_host_per_box_and_the_two_objects_per_offer_row(tmp_path):
     boxes, instances = fleet()
-    a, b = boxes[HK_A], boxes[HK_B]
+    a = boxes[HK_A]
     a.rent_ports = [31000, 31099]
     a.cards = {UUID_A: CardState(IDLE, '', NOW), UUID_B: CardState(IDLE, '', NOW)}
     a.host_specs = {

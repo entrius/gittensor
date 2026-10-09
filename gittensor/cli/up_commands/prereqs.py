@@ -80,6 +80,7 @@ RENT_PORTS_CHECK = 'Rent ports'
 HOST_RAM_CHECK = 'Host RAM'
 CPU_THREADS_CHECK = 'CPU threads'
 DOWNLOAD_CHECK = 'Download'
+UPLOAD_CHECK = 'Upload'
 SYSBOX_SETUP_URL = 'https://raw.githubusercontent.com/entrius/gittensor/main/docker/agent/sysbox-setup.sh'
 MINER_DOCS_URL = 'https://docs.gittensor.io/compute-mining.html'  # every row of the table, explained for the miner
 SYSBOX_KERNEL_MIN = (5, 19)  # overlayfs over ID-mapped mounts; older kernels fall back to shiftfs (Lium's check)
@@ -398,7 +399,7 @@ def check_host(probe: HostProbe, specs: Sequence[CardSpec | None]) -> list[Check
     per-card floors x this box's card count, and one run of the same download probe the round makes. The numbers
     are the controller's config, read from it, never copied. A shortfall is a warning that names the fix and says
     whether the pool advertises it (the customer sees what the box has) or refuses it (``HOST_SPEC_HARD``; the
-    download floor is always refused, after ``DOWNLOAD_FAIL_AFTER`` rounds under it). The box still starts."""
+    download floor is always refused, after ``BANDWIDTH_FAIL_AFTER`` rounds under it). The box still starts."""
     count = max(1, len(specs))
     hard = ccfg.HOST_SPEC_HARD
     fate = 'the controller refuses this box (host_spec)' if hard else 'advertised to customers, not refused'
@@ -416,7 +417,7 @@ def check_host(probe: HostProbe, specs: Sequence[CardSpec | None]) -> list[Check
     rows.append(row(HOST_RAM_CHECK, parse_meminfo_total_gb(probe.meminfo()), ccfg.RAM_MIN_GB_PER_GPU, 'GB', 'RAM'))
     rows.append(row(CPU_THREADS_CHECK, probe.cpu_threads(), ccfg.CPU_THREADS_MIN_PER_GPU, 'threads', 'CPU count'))
     mbps = parse_download_probe(probe.download_probe()).mbps
-    floor, after = ccfg.DOWNLOAD_MIN_MBPS, ccfg.DOWNLOAD_FAIL_AFTER
+    floor, after = ccfg.DOWNLOAD_MIN_MBPS, ccfg.BANDWIDTH_FAIL_AFTER
     if mbps is None:
         rows.append(
             CheckResult(
@@ -442,6 +443,16 @@ def check_host(probe: HostProbe, specs: Sequence[CardSpec | None]) -> list[Check
                 required=False,
             )
         )
+    # Upload is box -> controller over the controller's own SSH session: there is no honest way to measure it from
+    # here, so the row says who measures it and the floor it is held to.
+    rows.append(
+        CheckResult(
+            UPLOAD_CHECK,
+            None,
+            f'measured by the controller from its side every round (box to controller, floor {ccfg.UPLOAD_MIN_MBPS:.0f} Mbps, '
+            f'refused after {ccfg.BANDWIDTH_FAIL_AFTER} rounds under it)',
+        )
+    )
     return rows
 
 

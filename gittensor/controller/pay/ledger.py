@@ -269,6 +269,48 @@ class Ledger:
         return out
 
 
+def box_uptime(
+    root: str | Path, boxes: Mapping[str, Any], now: float, window_s: float = cfg.UPTIME_WINDOW_S
+) -> dict[str, float | None]:
+    """Per hotkey, the share of the last ``window_s`` the box was up (IDLE or LEASED: any card accruing), from the
+    daily rollups, over the time since it was first admitted (capped at the window); None for a box with nothing on
+    record yet. Host specs, 10/9: Lium's uptime column. A day's rollup is whole-day, so the window's first day
+    counts in full; the share is clamped at 100."""
+    root = Path(root)
+    start = now - window_s
+    up: dict[str, float] = {}
+    first_day: dict[str, float] = {}
+    day = math.floor(start / DAY_S) * DAY_S
+    while day <= now:
+        path = root / f'{utc_day(day)}.rollup.json'
+        if path.exists():
+            try:
+                doc = json.loads(path.read_text())
+            except (OSError, ValueError):
+                doc = {}
+            for hotkey, cards in (doc.get('hotkeys') or {}).items():
+                if not isinstance(cards, dict) or not cards:
+                    continue
+                seconds = max(
+                    float(c.get('idle_s', 0)) + float(c.get('leased_s', 0)) + float(c.get('withheld_s', 0))
+                    for c in cards.values()
+                    if isinstance(c, dict)
+                )
+                up[hotkey] = up.get(hotkey, 0.0) + seconds
+                first_day.setdefault(hotkey, day)
+        day += DAY_S
+    out: dict[str, float | None] = {}
+    for hotkey, box in boxes.items():
+        admitted = getattr(box, 'admitted_at', None)
+        since = [t for t in (admitted, first_day.get(hotkey)) if isinstance(t, (int, float))]
+        if not since:
+            out[hotkey] = None
+            continue
+        span = min(window_s, max(0.0, now - min(since)))
+        out[hotkey] = None if span <= 0 else round(min(100.0, 100.0 * up.get(hotkey, 0.0) / span), 1)
+    return out
+
+
 # ---------------------------------------------------------------- the window ----------------------------------------
 
 

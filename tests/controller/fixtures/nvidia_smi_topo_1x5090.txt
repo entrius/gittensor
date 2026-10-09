@@ -1,0 +1,6 @@
+	GPU0	CPU Affinity	NUMA Affinity	GPU NUMA ID
+GPU0	 X 	0-15	0		N/A
+
+Legend:
+
+  X    = Self

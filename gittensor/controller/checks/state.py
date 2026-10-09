@@ -144,6 +144,9 @@ class BoxState:
     # (the public codes). Written by every verdict, kept across a bench: it is the box's history, not its standing.
     # (``host`` above is the sshd address; this is the machine.)
     host_specs: Dict[str, object] = field(default_factory=dict)
+    # Where the box is (``controller/geo.py``): {'country': ISO-3166 alpha-2 or 'unknown', 'region', 'city', 'at',
+    # 'ip'}, looked up from ``host`` once and refreshed weekly. The country is what a `--country` order is placed by.
+    location: Dict[str, object] = field(default_factory=dict)
     # Dated events WS-E folds into standing: {'at', 'kind', ...}. Kept across a bench.
     standing_events: List[dict] = field(default_factory=list)
     # When a hard in-lease failure (a heartbeat) stopped this box's pay; WS-F withholds the leased accrual from it.
@@ -253,8 +256,8 @@ def _bench(
     new.not_run_at = None
     new.clean_paused_at = None
     new.clean_paused_s = 0.0
-    if new.host_specs:  # the download count starts over with the bench; the EMA is history and stays
-        new.host_specs = {**new.host_specs, 'down_below_rounds': 0}
+    if new.host_specs:  # the bandwidth counts start over with the bench; the EMAs are history and stay
+        new.host_specs = {**new.host_specs, 'down_below_rounds': 0, 'up_below_rounds': 0}
     return new
 
 

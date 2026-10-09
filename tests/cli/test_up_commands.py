@@ -213,10 +213,10 @@ class TestPrereqs:
     def test_all_pass(self, probe):
         report = run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200)
         assert report.ok and report.hotkey_ss58 == probe.ss58 and not report.already_up
-        assert [r.status for r in report.results] == ['pass'] * 14
+        assert [r.status for r in report.results] == ['pass'] * 8 + ['skip'] + ['pass'] * 6  # skip: Upload
         assert [r.name for r in report.results][:3] == ['GPU vendor', 'NVIDIA driver', 'Driver vetted']
-        assert [r.name for r in report.results][5:8] == ['Host RAM', 'CPU threads', 'Download']
-        assert [r.name for r in report.results][9:12] == ['Workload ports', 'Public IP', 'SSH port reachable']
+        assert [r.name for r in report.results][5:9] == ['Host RAM', 'CPU threads', 'Download', 'Upload']
+        assert [r.name for r in report.results][10:13] == ['Workload ports', 'Public IP', 'SSH port reachable']
         assert report.vendor == 'nvidia'
         assert report.public_ip == probe.ip and probe.chain_calls == 1  # the registration lookup only
 
@@ -245,11 +245,12 @@ class TestPrereqs:
         )
         assert '4 threads per card, 8 threads for 2' in by['CPU threads'].detail
         assert by['Download'].detail.startswith('48 Mbps; the floor is 100 Mbps: refused once the average over rounds')
-        assert f'for {ccfg.DOWNLOAD_FAIL_AFTER} rounds in a row' in by['Download'].detail
+        assert f'for {ccfg.BANDWIDTH_FAIL_AFTER} rounds in a row' in by['Download'].detail
         probe.download_out = ''  # Hub did not answer: no number, no warning, the round measures again
         probe.meminfo_text = ''
         ok, by = rows()
         assert ok and by['Download'].status == 'skip' and by['Host RAM'].status == 'skip'
+        assert by['Upload'].status == 'skip' and 'measured by the controller' in by['Upload'].detail
         with patch.object(ccfg, 'HOST_SPEC_HARD', True):  # the one flip: the words change, the box still starts
             probe.meminfo_text = 'MemTotal: 16000000 kB\n'
             ok, by = rows()

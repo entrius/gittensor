@@ -10,8 +10,9 @@ against the pinned spec; the GPU proof is the only thing the box cannot simply t
 
 import re
 import shlex
+import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from gittensor.agent.config import DRAIN_MARKER, RENT_PORTS_LABEL, parse_rent_ports
 from gittensor.controller.checks import config as cfg
@@ -118,6 +119,27 @@ def download_probe_command(
 
 
 DOWNLOAD_PROBE_COMMAND = download_probe_command()
+# The first `model name` line of the host's cpuinfo, for display only (``publish`` holds it to a pattern).
+CPU_MODEL_COMMAND = f"sed -n 's/^model name[[:space:]]*: //p' {cfg.HOST_ROOT}/proc/cpuinfo | head -n 1"
+# The upload probe: the box streams bytes to us over the session we hold (box -> controller); ``_timed_run`` times
+# it on our clock. `tr` makes them printable so no transport or decoder can drop them.
+UPLOAD_PROBE_COMMAND = f"head -c {cfg.UPLOAD_PROBE_BYTES} /dev/zero | tr '\\0' a"
+# The session's own round trip (exec, nothing, exit): what one command costs before any byte moves. Subtracted from
+# the upload timing, published as ``rtt_ms`` (evidence only).
+RTT_COMMAND = 'true'
+# The interconnect between the cards (NVIDIA): the link class of every GPU pair; the AMD sibling reads the KFD
+# topology's io_links from sysfs (type 11 = XGMI, type 2 = PCIe), opening nothing on the card (30 §3).
+NVIDIA_TOPO_COMMAND = 'nvidia-smi topo -m'
+AMD_TOPO_COMMAND = (
+    'for d in /sys/class/kfd/kfd/topology/nodes/*; do n=$(basename "$d"); '
+    'r=$(grep -E \'^drm_render_minor \' "$d/properties" 2>/dev/null | cut -d" " -f2); echo "== $n render=${r:-0}"; '
+    'for l in "$d"/io_links/*/properties; do [ -f "$l" ] || continue; '
+    "echo \"-- $(grep -E '^(type|node_to) ' \"$l\" | tr '\\n' ' ')\"; done; done; true"
+)
+
+
+def topo_command(vendor: str = NVIDIA) -> str:
+    return AMD_TOPO_COMMAND if vendor == AMD else NVIDIA_TOPO_COMMAND
 
 
 # Every host process with an NVIDIA device node open (one `find` over the host's /proc/*/fd), then each holder's comm
@@ -317,6 +339,117 @@ class DownloadProbe:
         return {'http_code': self.http_code, 'bytes': self.bytes, 'bytes_per_s': self.bytes_per_s, 'mbps': self.mbps}
 
 
+# Interconnect classes, published as one word: a bonded NVLink set (NVIDIA) or XGMI (AMD) is the fast class, anything
+# through PCIe (a switch, the host bridge, or across sockets) is ``pcie``; a one-card box has no link to classify.
+NVLINK, XGMI, PCIE, SINGLE = 'nvlink', 'xgmi', 'pcie', 'single'
+# nvidia-smi's link classes, best first; the worst pair on the box is what the customer is promised.
+_NVIDIA_LINK_ORDER = ('NV', 'PIX', 'PXB', 'PHB', 'NODE', 'SYS')
+
+
+@dataclass
+class Interconnect:
+    cls: str = ''  # NVLINK / XGMI / PCIE / SINGLE; '' when it could not be read
+    raw: str = ''  # the worst link as the tool names it: 'NV18', 'PHB', 'XGMI', 'PCIE'
+
+    def as_dict(self) -> dict:
+        return {'interconnect': self.cls or None, 'interconnect_raw': self.raw or None}
+
+
+def _link_rank(raw: str) -> int:
+    for i, prefix in enumerate(_NVIDIA_LINK_ORDER):
+        if raw.startswith(prefix):
+            return i
+    return len(_NVIDIA_LINK_ORDER)  # a class we do not know is treated as the worst
+
+
+def parse_nvidia_topo(stdout: str) -> Interconnect:
+    """``nvidia-smi topo -m``: the matrix header names the columns (GPUs, then NICs and affinities, which are
+    skipped), one row per GPU. The worst link between any two GPUs decides; one GPU is ``single``."""
+    lines = [line.rstrip() for line in stdout.splitlines()]
+    header = next((line for line in lines if line.lstrip().startswith('GPU0')), None)
+    if header is None:
+        return Interconnect()
+    columns = header.split()
+    gpu_cols = [i for i, name in enumerate(columns) if re.fullmatch(r'GPU\d+', name)]
+    worst: Optional[str] = None
+    rows = 0
+    for line in lines:
+        cells = line.split()
+        if line is header or not cells or not re.fullmatch(r'GPU\d+', cells[0]):
+            continue
+        rows += 1
+        for i in gpu_cols:
+            if i + 1 >= len(cells) or columns[i] == cells[0]:
+                continue
+            raw = cells[i + 1]
+            if raw == 'X':
+                continue
+            if worst is None or _link_rank(raw) > _link_rank(worst):
+                worst = raw
+    if rows == 0:
+        return Interconnect()
+    if rows == 1 or worst is None:
+        return Interconnect(SINGLE, 'X')
+    return Interconnect(NVLINK if worst.startswith('NV') else PCIE, worst)
+
+
+_KFD_XGMI, _KFD_PCIE = 11, 2  # CRAT io_link types
+
+
+def parse_amd_topo(stdout: str) -> Interconnect:
+    """``AMD_TOPO_COMMAND``: the KFD nodes (a GPU has a render minor) and each node's io_links. Every GPU pair joined
+    by an XGMI link is the fast class; any pair without one goes through PCIe."""
+    gpus: set[str] = set()
+    links: Dict[str, Dict[str, int]] = {}
+    node = ''
+    for raw in stdout.splitlines():
+        line = raw.strip()
+        if line.startswith('== '):
+            node, _, render = line[3:].partition(' ')
+            minor = render.partition('=')[2].strip()
+            if minor.isdigit() and int(minor) > 0:
+                gpus.add(node)
+        elif line.startswith('-- ') and node:
+            m = re.search(r'type (\d+) node_to (\d+)', line)
+            if m:
+                links.setdefault(node, {})[m.group(2)] = int(m.group(1))
+    if not gpus:
+        return Interconnect()
+    if len(gpus) == 1:
+        return Interconnect(SINGLE, 'X')
+    for a in gpus:
+        for b in gpus:
+            if a != b and links.get(a, {}).get(b) != _KFD_XGMI:
+                return Interconnect(PCIE, 'PCIE')
+    return Interconnect(XGMI, 'XGMI')
+
+
+def parse_cpu_model(stdout: str) -> str:
+    """The model name, whitespace collapsed, at most 64 characters; '' when there is none."""
+    line = stdout.strip().splitlines()[0] if stdout.strip() else ''
+    return ' '.join(line.split())[:64]
+
+
+@dataclass
+class UploadProbe:
+    """One run of ``UPLOAD_PROBE_COMMAND`` on our clock: the bytes that arrived and the seconds they took, less the
+    session's own round trip. A short read or no time is no sample."""
+
+    bytes: int = 0
+    seconds: float = 0.0
+    rtt_s: Optional[float] = None
+
+    @property
+    def mbps(self) -> Optional[float]:
+        if self.bytes < cfg.UPLOAD_PROBE_BYTES:
+            return None
+        wire = self.seconds - (self.rtt_s or 0.0)
+        return self.bytes * 8 / 1e6 / wire if wire > 0 else None
+
+    def as_dict(self) -> dict:
+        return {'bytes': self.bytes, 'seconds': round(self.seconds, 4), 'rtt_s': self.rtt_s, 'mbps': self.mbps}
+
+
 def parse_download_probe(stdout: str) -> DownloadProbe:
     """``-w '%{speed_download} %{size_download} %{http_code}'`` to a ``DownloadProbe``; a line that does not parse is
     a probe with nothing in it."""
@@ -383,9 +516,14 @@ class HostScrape:
     # where the probe did not run this visit or got no sample (``down_probe`` says which).
     ram_total_gb: Optional[float] = None
     cpu_threads: Optional[int] = None
+    cpu_model: str = ''
     disk_total_gb: Optional[float] = None
     down_mbps: Optional[float] = None
     down_probe: Optional[DownloadProbe] = None  # None: the probe was not run this visit
+    up_mbps: Optional[float] = None
+    up_probe: Optional[UploadProbe] = None  # None: the probe was not run this visit
+    rtt_ms: Optional[float] = None  # the session's round trip on our clock (evidence only)
+    interconnect: Optional[Interconnect] = None  # None: the topology step failed
     network: Dict[str, Tuple[int, float]] = field(default_factory=dict)
     device_holders: str = ''  # DEVICE_HOLDERS_COMMAND's raw stdout; ``checks.check_card_free`` parses and judges it
     errors: Dict[str, str] = field(default_factory=dict)  # scrape step -> what went wrong (fails that check)
@@ -406,6 +544,15 @@ class HostScrape:
     @property
     def uuids(self) -> List[str]:
         return [g.uuid for g in self.gpus]
+
+
+def _timed_run(
+    runner: HostRunner, scrape: HostScrape, step: str, command: str, timeout: float, clock: Callable[[], float]
+) -> Tuple[Optional[str], float]:
+    """``_run`` with the seconds the command took on our clock (what the bandwidth probes are judged by)."""
+    t0 = clock()
+    out = _run(runner, scrape, step, command, timeout)
+    return out, max(0.0, clock() - t0)
 
 
 def _run(runner: HostRunner, scrape: HostScrape, step: str, command: str, timeout: float) -> Optional[str]:
@@ -477,10 +624,12 @@ def scrape_host(
     network_targets: Sequence[str] = cfg.NETWORK_TARGETS,
     timeout: float = cfg.SSH_COMMAND_TIMEOUT_S,
     download: bool = True,
+    clock: Callable[[], float] = time.monotonic,
 ) -> HostScrape:
     """Every identity and resource fact the sub-checks judge, in one pass. A step that fails records its error and
-    leaves its field empty; the judge for that field then fails closed. ``download``: run the bandwidth probe (one
-    real transfer, ``DOWNLOAD_PROBE_COMMAND``); the caller caps it at one per box per round."""
+    leaves its field empty; the judge for that field then fails closed. ``download``: run the bandwidth probes (one
+    real transfer each way, ``DOWNLOAD_PROBE_COMMAND`` and ``UPLOAD_PROBE_COMMAND``); the caller caps them at one
+    per box per round. ``clock`` times the upload and the round trip."""
     scrape = HostScrape()
     out = _run(runner, scrape, 'vendor', VENDOR_DETECT_COMMAND, timeout)
     if out is not None:
@@ -509,10 +658,23 @@ def scrape_host(
     out = _run(runner, scrape, 'cpu_threads', CPU_THREADS_COMMAND, timeout)
     if out is not None:
         scrape.cpu_threads = parse_cpu_threads(out)
+    out = _run(runner, scrape, 'cpu_model', CPU_MODEL_COMMAND, timeout)
+    if out is not None:
+        scrape.cpu_model = parse_cpu_model(out)
+    out = _run(runner, scrape, 'topo', topo_command(scrape.vendor), timeout)
+    if out is not None:
+        scrape.interconnect = parse_amd_topo(out) if scrape.vendor == AMD else parse_nvidia_topo(out)
+    out, rtt_s = _timed_run(runner, scrape, 'rtt', RTT_COMMAND, timeout, clock)
+    if out is not None:
+        scrape.rtt_ms = round(rtt_s * 1000.0, 1)
     if download:
         out = _run(runner, scrape, 'download', DOWNLOAD_PROBE_COMMAND, cfg.DOWNLOAD_PROBE_TIMEOUT_S + 15)
         scrape.down_probe = parse_download_probe(out) if out is not None else DownloadProbe()
         scrape.down_mbps = scrape.down_probe.mbps
+        out, seconds = _timed_run(runner, scrape, 'upload', UPLOAD_PROBE_COMMAND, cfg.UPLOAD_PROBE_TIMEOUT_S, clock)
+        rtt = rtt_s if scrape.rtt_ms is not None else None
+        scrape.up_probe = UploadProbe(len(out), seconds, rtt) if out is not None else UploadProbe()
+        scrape.up_mbps = scrape.up_probe.mbps
     out = _run(runner, scrape, 'device_holders', device_holders_command(scrape.vendor), timeout)
     if out is not None:
         scrape.device_holders = out

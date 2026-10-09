@@ -101,14 +101,23 @@ STACK_UNREADABLE = 'stack_unreadable'
 STACK_BELOW_FLOOR = 'stack_below_floor'
 
 # host_spec (host specs, 10/9): the host around the cards. RAM, CPU and the disk ratio are advertised until HOST_SPEC_HARD;
-# the download floor is hard from the start, after DOWNLOAD_FAIL_AFTER sampled rounds under it. The measured value
+# the download floor is hard from the start, after BANDWIDTH_FAIL_AFTER sampled rounds under it. The measured value
 # is in the phrase on purpose: the miner is told what we saw and what the floor is, so the fix is one number away.
 RAM_BELOW_FLOOR = 'ram_below_floor'
 CPU_BELOW_FLOOR = 'cpu_below_floor'
 DISK_RATIO_BELOW_FLOOR = 'disk_ratio_below_floor'
 DOWNLOAD_BELOW_FLOOR = 'download_below_floor'
+UPLOAD_BELOW_FLOOR = 'upload_below_floor'
+PORTS_BELOW_FLOOR = 'ports_below_floor'
 HOST_UNREADABLE = 'host_unreadable'
-HOST_SHORTFALLS = (RAM_BELOW_FLOOR, CPU_BELOW_FLOOR, DISK_RATIO_BELOW_FLOOR, DOWNLOAD_BELOW_FLOOR)
+HOST_SHORTFALLS = (
+    RAM_BELOW_FLOOR,
+    CPU_BELOW_FLOOR,
+    DISK_RATIO_BELOW_FLOOR,
+    DOWNLOAD_BELOW_FLOOR,
+    UPLOAD_BELOW_FLOOR,
+    PORTS_BELOW_FLOOR,
+)
 
 # The rent-range probe (29 §5, ``rent_probe.py``). Not a failed check (the box is admitted idle-only), so these never
 # reach ``last_failed_why``: ``BoxState.rent_probe`` carries the code and the page renders it as ``rentable_why``.
@@ -175,7 +184,9 @@ PHRASES: Dict[str, str] = {
     RAM_BELOW_FLOOR: 'host RAM is {ram_gb} GB, and a {count}-card box of this type needs at least {floor_gb} GB',
     CPU_BELOW_FLOOR: 'the host has {threads} CPU threads, and a {count}-card box of this type needs at least {floor} threads',  # noqa: E501
     DISK_RATIO_BELOW_FLOOR: f"total disk is {{disk_gb}} GB, and idle pay needs {cfg.DISK_TOTAL_MIN_X_VRAM:g}x the cards' VRAM, {{floor_gb}} GB",  # noqa: E501
-    DOWNLOAD_BELOW_FLOOR: f'download measured {{mbps}} Mbps over the last {cfg.DOWNLOAD_FAIL_AFTER} rounds, and the floor is {{floor}} Mbps',  # noqa: E501
+    DOWNLOAD_BELOW_FLOOR: f'download measured {{mbps}} Mbps over the last {cfg.BANDWIDTH_FAIL_AFTER} rounds, and the floor is {{floor}} Mbps',  # noqa: E501
+    UPLOAD_BELOW_FLOOR: f'upload measured {{mbps}} Mbps over the last {cfg.BANDWIDTH_FAIL_AFTER} rounds, and the floor is {{floor}} Mbps',  # noqa: E501
+    PORTS_BELOW_FLOOR: 'the rent port range is {n} ports wide, and a rentable box opens at least {floor} (gitt up --rent-ports LOW-HIGH)',  # noqa: E501
     HOST_UNREADABLE: "we could not read this box's host RAM, CPU count or disk size",
     # the rent-range probe: no number, the range is the miner's business (publish never prints it)
     RENT_PORT_UNREACHABLE: 'the rent port range could not be reached from the controller (a firewall or NAT in the way), so this box is proved and paid idle only',  # noqa: E501

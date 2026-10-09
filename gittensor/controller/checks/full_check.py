@@ -39,6 +39,9 @@ class FullCheckConfig:
     proof_image_amd: str = field(default_factory=lambda: image_ref(AMD))  # the HIP image (30 §7)
     proof_timeout_s: float = cfg.PROOF_JOB_TIMEOUT_S
     ssh_timeout_s: float = cfg.SSH_COMMAND_TIMEOUT_S
+    # The narrowest rent range a rentable box may offer (``check_host_spec``); a dev box (admitted by image ID, its
+    # pods under runc on a Lium host) is held to `gitt up`'s dev minimum instead.
+    ports_min: int = cfg.PORTS_MIN
 
     def proof_image_for(self, vendor: str) -> str:
         return self.proof_image_amd if vendor == AMD else self.proof_image
@@ -113,6 +116,7 @@ def judge_identity(
         fleet_uuids,
         ours,
         host_history,
+        config.ports_min,
     )
 
 

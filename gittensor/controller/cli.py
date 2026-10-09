@@ -62,7 +62,7 @@ import yaml
 from rich.markup import escape
 from rich.table import Table
 
-from gittensor.agent.config import AGENT_SSH_PORT, WORKLOAD_PORT_RANGE
+from gittensor.agent.config import AGENT_SSH_PORT, RENT_PORTS_MIN_DEV, WORKLOAD_PORT_RANGE
 from gittensor.cli.help import StyledGroup
 from gittensor.cli.helpers import NETWORK_CHOICE, console, err_console
 from gittensor.cli.json_output import emit_error_json, emit_json
@@ -1056,6 +1056,8 @@ def _setup(
         proof_image_amd=proof_image_amd,
         network_targets=tuple(network_targets) or tuple(cfg.NETWORK_TARGETS),
         disk_min_free_gb=disk_min_gb,
+        # dev boxes (admitted by image ID: a Lium pod maps a handful of ports) keep `gitt up`'s dev range minimum
+        ports_min=RENT_PORTS_MIN_DEV if image_ids else cfg.PORTS_MIN,
     )
     return CheckSetup(
         state,

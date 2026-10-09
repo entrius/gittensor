@@ -149,7 +149,9 @@ class RentalRecord:
     env: dict[str, str] = field(default_factory=dict)
     ends_at: float = 0.0
     want_box_uid: int | None = None  # the order pinned a box (re-rent the same one); None: our pick
+    country: str = ''  # ISO-3166 alpha-2: place only on a box there (``BoxState.location``); '' = anywhere
     created_at: float = 0.0
+    placed_at: float | None = None  # when a box was picked; ``started_at - placed_at`` is the deploy time published
     # the placement
     box: str = ''  # hotkey
     box_uid: int | None = None
@@ -644,7 +646,7 @@ class RentalReconciler:
                 report.actions.append(RentalAction('failed', r.id, box.box_id, str(e)))
                 continue
             r.public_map = {inside: box.public_port(host_port) for inside, host_port in r.port_map.items()}
-            r.box, r.box_uid, r.state = box.box_id, box.uid, STARTING_R
+            r.box, r.box_uid, r.state, r.placed_at = box.box_id, box.uid, STARTING_R, now
             r.uuids = sorted(box.cards)
             r.uuid = r.uuids[0]
             r.vendor = box.vendor
@@ -670,6 +672,8 @@ class RentalReconciler:
                 continue
             if r.want_box_uid is not None and box.uid != r.want_box_uid:
                 continue
+            if r.country and str(box.location.get('country') or '').upper() != r.country:
+                continue  # the order named a country; a box whose location is unknown is not there
             if gpu_type_of(box.card_name) != r.gpu_type or len(box.cards) != r.gpu_count:
                 continue
             if any(c.state != IDLE or c.instance_id for c in box.cards.values()):
@@ -865,8 +869,10 @@ def place_order(
     rental_id: str | None = None,
     box_uid: int | None = None,
     now: float | None = None,
+    country: str = '',
 ) -> RentalRecord:
-    """A new order into the store. ``rental_id`` is the app's id when the poller brings one; the CLI mints one."""
+    """A new order into the store. ``rental_id`` is the app's id when the poller brings one; the CLI mints one.
+    ``country`` (ISO-3166 alpha-2, any case) places only on a box the geo lookup put there."""
     now = time.time() if now is None else now
     if gpu_count < 1 or hours <= 0 or not image or not ssh_pubkeys:
         raise RentalError('an order needs a GPU count, hours, an image and at least one SSH key')
@@ -880,6 +886,7 @@ def place_order(
         env=dict(env or {}),
         ends_at=now + hours * 3600.0,
         want_box_uid=box_uid,
+        country=country.strip().upper()[:2],
         created_at=now,
     )
     store.put(r)

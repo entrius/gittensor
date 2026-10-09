@@ -23,6 +23,7 @@ import hashlib
 import json
 import os
 import re
+import statistics
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -30,10 +31,11 @@ from typing import Any
 
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks import why as w
-from gittensor.controller.checks.catalog import spec_for_name
+from gittensor.controller.checks.catalog import load_catalog, spec_for_name
+from gittensor.controller.checks.scrape import NVLINK, PCIE, SINGLE, XGMI
 from gittensor.controller.checks.state import BENCHED, IDLE, BoxState, ladder_rung
 from gittensor.controller.manifest import gpu_type_of
-from gittensor.controller.pay.ledger import Ledger, is_withheld
+from gittensor.controller.pay.ledger import Ledger, box_uptime, is_withheld
 from gittensor.controller.pay.rates import RatesError, load_rates
 from gittensor.controller.pay.scorecard import LATEST, ScorecardError, read_scorecard
 from gittensor.controller.standing import HARD, PROBATION, RELEASED, SOFT, box_rentable, standing
@@ -180,44 +182,129 @@ def _num(value: Any) -> float | None:
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
-HOST_FIELDS = ('ram_gb', 'cpu_threads', 'down_mbps')  # what an offer guarantees or observes, in this order
+# The host around the cards (host specs, 10/9). What an offer row observes (the least over its free boxes, in
+# Lium's order; ``rtt_ms`` is the worst, not the least); what it guarantees is ``guaranteed_host``.
+HOST_OBSERVED_MIN = (
+    'ram_gb',
+    'cpu_threads',
+    'disk_total_gb',
+    'disk_free_gb',
+    'vram_gb',
+    'down_mbps',
+    'up_mbps',
+    'port_count',
+    'power_w',
+)
+INTERCONNECTS = (SINGLE, NVLINK, XGMI, PCIE)  # best first: the worst over a row is what a customer is promised
+_CPU_MODEL = re.compile(r'^[A-Za-z0-9 ().,+/@-]{1,64}$')  # a model name the box typed: held to this or dropped
+_PLACE = re.compile(r"^[A-Za-z0-9 .'()/-]{1,64}$")  # a region or city the geo provider typed
+_COUNTRY = re.compile(r'^[A-Z]{2}$')
 
 
-def _host(box: BoxState) -> dict:
-    """The host around the cards as the last check measured it (host specs, 10/9): numbers and shortfall codes from our own
-    vocabulary alone (``why.HOST_SHORTFALLS``), nothing a box typed."""
+def _location(box: BoxState) -> dict | None:
+    """``{country, region, city}`` as the geo lookup recorded it, every field held to a pattern; None until a lookup
+    found the box (an unknown or private address shows no location rather than a guess)."""
+    record = box.location or {}
+    country = record.get('country')
+    if not isinstance(country, str) or not _COUNTRY.match(country):
+        return None
+    region, city = record.get('region'), record.get('city')
+    return {
+        'country': country,
+        'region': region if isinstance(region, str) and _PLACE.match(region) else None,
+        'city': city if isinstance(city, str) and _PLACE.match(city) else None,
+    }
+
+
+def deploy_seconds(box_id: str, rentals: Mapping[str, Any]) -> float | None:
+    """The median seconds from a box being picked to its pod's sshd answering, over the box's last
+    ``DEPLOY_SAMPLE_N`` rentals that got that far; None until ``DEPLOY_MIN_N`` of them."""
+    done = [
+        r
+        for r in rentals.values()
+        if getattr(r, 'box', '') == box_id
+        and _num(getattr(r, 'started_at', None)) is not None
+        and _num(getattr(r, 'placed_at', None)) is not None
+    ]
+    done.sort(key=lambda r: float(getattr(r, 'created_at', 0.0) or 0.0))
+    samples = [max(0.0, float(r.started_at) - float(r.placed_at)) for r in done[-cfg.DEPLOY_SAMPLE_N :]]
+    return round(statistics.median(samples), 1) if len(samples) >= cfg.DEPLOY_MIN_N else None
+
+
+def _host(box: BoxState, uptime_pct: float | None, deploy_s: float | None) -> dict:
+    """The host around the cards as the last check measured it, plus what the controller knows from its own side
+    (where it is, how often it was up, how fast its pods came up): numbers, our own codes, and two strings held to a
+    pattern. Nothing else a box typed."""
     record = box.host_specs or {}
     codes = record.get('shortfalls')
+    model = record.get('cpu_model')
+    link = record.get('interconnect')
     return {
-        'ram_gb': _num(record.get('ram_gb')),
         'cpu_threads': _num(record.get('cpu_threads')),
+        'cpu_model': model if isinstance(model, str) and _CPU_MODEL.match(model) else None,
+        'ram_gb': _num(record.get('ram_gb')),
         'disk_total_gb': _num(record.get('disk_total_gb')),
-        'down_mbps': _num(record.get('down_mbps')),  # the EMA across rounds, not one sample
+        'disk_free_gb': _num(record.get('disk_free_gb')),
+        'vram_gb': _num(record.get('vram_gb')),
+        'down_mbps': _num(record.get('down_mbps')),  # the EMAs across rounds, not one sample
         'up_mbps': _num(record.get('up_mbps')),
+        'rtt_ms': _num(record.get('rtt_ms')),
+        'interconnect': link if link in INTERCONNECTS else None,
+        'power_w': _num(record.get('power_w')),
+        'power_limited': bool(record.get('power_limited')),
+        'port_count': _num(record.get('port_count')),
+        'location': _location(box),
+        'uptime_30d_pct': uptime_pct,
+        'admitted_at': _num(box.admitted_at),
+        'deploy_s': deploy_s,
         'shortfalls': [c for c in (codes if isinstance(codes, list) else []) if c in w.HOST_SHORTFALLS],
     }
 
 
-def guaranteed_host(size: int, hard: bool | None = None) -> dict:
+def guaranteed_host(size: int, gpu_type: str = '', hard: bool | None = None) -> dict:
     """What a box of this size is guaranteed to have: the configured floors x the size for every floor that is hard.
-    Download is hard from the start; RAM and CPU threads only once ``HOST_SPEC_HARD`` is flipped. A floor that is not
-    hard is None here, and the customer is shown what free boxes currently have instead."""
+    Download, upload and the port range are hard from the start; RAM, CPU threads and the disk ratio (OUR catalog
+    row's VRAM x the size) only once ``HOST_SPEC_HARD`` is flipped. A floor that is not hard is None here, and the
+    customer is shown what free boxes currently have instead."""
     hard = cfg.HOST_SPEC_HARD if hard is None else hard
+    spec = load_catalog().get(gpu_type) if gpu_type else None
+    vram_gb = spec.vram_total_mib_max * 1024 * 1024 / 1e9 * size if spec is not None else None
     return {
         'ram_gb': cfg.RAM_MIN_GB_PER_GPU * size if hard else None,
         'cpu_threads': cfg.CPU_THREADS_MIN_PER_GPU * size if hard else None,
+        'disk_total_gb': round(cfg.DISK_TOTAL_MIN_X_VRAM * vram_gb, 1) if hard and vram_gb is not None else None,
         'down_mbps': cfg.DOWNLOAD_MIN_MBPS,
+        'up_mbps': cfg.UPLOAD_MIN_MBPS,
+        'port_count': cfg.PORTS_MIN,
     }
 
 
 def observed_min_host(hosts: Sequence[Mapping[str, Any]]) -> dict:
-    """The least of each host field over the free boxes of one offer row (None where no box reported it): the
-    weakest box a customer could land on right now. A minimum over a row names no box."""
-    out: dict[str, float | None] = {}
-    for key in HOST_FIELDS:
+    """The least of each host field over the free boxes of one offer row (None where no box reported it), the
+    worst round trip, and the worst interconnect: the weakest box a customer could land on right now. A minimum
+    over a row names no box."""
+    out: dict[str, Any] = {}
+    for key in HOST_OBSERVED_MIN:
         values = [v for v in (_num(h.get(key)) for h in hosts) if v is not None]
         out[key] = min(values) if values else None
+    rtts = [v for v in (_num(h.get('rtt_ms')) for h in hosts) if v is not None]
+    out['rtt_ms'] = max(rtts) if rtts else None
+    links = [h.get('interconnect') for h in hosts if h.get('interconnect') in INTERCONNECTS]
+    out['interconnect'] = max(links, key=INTERCONNECTS.index) if links else None
     return out
+
+
+def available_host(hosts: Sequence[Mapping[str, Any]]) -> dict:
+    """What the row's free boxes have in common to pick by: the countries they are in, and the median deploy time
+    and 30-day uptime over them."""
+    countries = sorted({h['location']['country'] for h in hosts if isinstance(h.get('location'), dict)})
+    deploys = [v for v in (_num(h.get('deploy_s')) for h in hosts) if v is not None]
+    uptimes = [v for v in (_num(h.get('uptime_30d_pct')) for h in hosts) if v is not None]
+    return {
+        'countries': countries,
+        'deploy_s': round(statistics.median(deploys), 1) if deploys else None,
+        'uptime_30d_pct': round(statistics.median(uptimes), 1) if uptimes else None,
+    }
 
 
 def _last_event(events: list[dict], kinds: frozenset[str] | None = None) -> dict | None:
@@ -300,6 +387,7 @@ def build_fleet(
     issued_at = _num(doc.get('issued_at'))
     age_s = round(now - issued_at, 1) if issued_at is not None else None
     live = live_pay(root, boxes, view, now)
+    uptime = box_uptime(root / 'ledger', boxes, now)
     by_state: dict[str, int] = {}
     # Boxes a customer could rent right now, by GPU type and box size (29 §7: the app's offers come from here). A
     # box counts when it is rentable and every card on it is idle; the size is its card count, the whole box. Each
@@ -335,10 +423,10 @@ def build_fleet(
         failed = _names(box.last_failed, _CHECK_NAME)
         gpu_type = gpu_type_of(box.card_name) if box.card_name else None
         rentable = box_rentable(box, now, min_level=rentable_min_standing)
-        host = _host(box)
+        host = _host(box, uptime.get(box.box_id), deploy_seconds(box.box_id, rentals))
         if rentable and gpu_type and cards and all(c['state'] == IDLE for c in cards):
             sizes = offers.setdefault(gpu_type, {})
-            row = sizes.setdefault(str(len(cards)), {'boxes': 0, 'guaranteed': guaranteed_host(len(cards))})
+            row = sizes.setdefault(str(len(cards)), {'boxes': 0, 'guaranteed': guaranteed_host(len(cards), gpu_type)})
             row['boxes'] += 1
             offered_hosts.setdefault((gpu_type, str(len(cards))), []).append(host)
         rows.append(
@@ -375,6 +463,7 @@ def build_fleet(
         )
     for (gpu_type, size), hosts in offered_hosts.items():
         offers[gpu_type][size]['observed_min'] = observed_min_host(hosts)
+        offers[gpu_type][size]['available'] = available_host(hosts)
     last_round = status.get('round') or {}
     intervals = status.get('intervals') or {}
     oracle = doc.get('oracle') or {}
@@ -409,7 +498,8 @@ def build_fleet(
         else None,
         'totals': {'boxes': len(rows), 'cards': sum(r['card_count'] for r in rows), 'cards_by_state': by_state},
         # gpu_type -> {box size: {boxes: rentable and wholly idle right now, guaranteed: the hard floors x size,
-        # observed_min: the least the free boxes have}}; what the rent page sells (29 §7, host specs, 10/9).
+        # observed_min: the least the free boxes have, available: their countries and median deploy time and
+        # uptime}}; what the rent page sells (29 §7, host specs, 10/9).
         'offers': offers,
         'boxes': rows,
     }

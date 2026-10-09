@@ -63,6 +63,7 @@ class FakeProbe:
         self.pod_ports: str = ''  # `docker ps --format {{.Ports}}` for our rental pods
         self.modules = 'nvidia\n'  # the GPU kernel modules loaded (the controller's vendor detect command)
         self.amd_sysfs_out = ''  # the controller's sysfs pass on an AMD box (fixtures/amd)
+        self.device_modes: dict = {}  # path -> mode bits; a node not listed is 0o666 (sysbox-setup.sh ran)
 
     def nvml_allowlist(self, url=''):
         return self.allowlist
@@ -124,6 +125,9 @@ class FakeProbe:
 
     def amd_sysfs(self):
         return HostProbe.amd_sysfs(self)  # type: ignore[arg-type]
+
+    def device_mode(self, path):
+        return self.device_modes.get(path, 0o666)
 
     def kernel_release(self):
         return HostProbe.kernel_release(self)  # type: ignore[arg-type]
@@ -225,6 +229,12 @@ class TestPrereqs:
             rows['AMD driver floor'].status == 'pass' and rows['AMD driver floor'].detail == 'kernel 6.8.0-137-generic'
         )
         assert rows['NVIDIA container toolkit'].status == 'skip' and 'NVIDIA driver' not in rows
+        assert rows['AMD device nodes'].status == 'pass' and rows['AMD device nodes'].detail == '/dev/kfd, /dev/dri/renderD129 are 0666'  # fmt: skip
+        # a stock box (0660 root:render, the droplet before sysbox-setup.sh): the row fails with the fix
+        probe.device_modes = {'/dev/dri/renderD129': 0o660}
+        stock = {r.name: r for r in run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200).results}['AMD device nodes']  # fmt: skip
+        assert stock.status == 'fail' and stock.detail.startswith('/dev/dri/renderD129 not 0666') and 'chmod 0666 /dev/kfd /dev/dri/renderD129' in stock.detail  # fmt: skip
+        probe.device_modes = {}
 
         def rows_for(sysfs: str) -> dict:
             probe.amd_sysfs_out = sysfs

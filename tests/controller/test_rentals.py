@@ -62,6 +62,9 @@ def pod_runner(running: str = 'true') -> FakeRunner:
     runner.on(regex(r'^docker pull'), 'sha256:abc\n')
     runner.on(regex(r'^docker run -d'), CID + '\n')
     runner.on(regex(r'^docker exec -i'), '')
+    runner.on(
+        regex(r'^docker exec -u 0 \w+ sh -c \'mount --bind /host-kfd'), ''
+    )  # a Sysbox AMD pod's KFD topology bind
     runner.on(regex(r"^docker inspect --format '\{\{\.State\.Running\}\}'"), running + '\n')
     runner.on(regex(r'^docker stop'), '')
     return runner

@@ -10,10 +10,10 @@ import pytest
 
 import gittensor.cli.main  # noqa: F401  (the CLI package must load before gittensor.controller.cli)
 import gittensor.controller.rentals as rt
+from gittensor.controller.checks.state import StateStore
 from gittensor.controller.checks.verdict import CheckResult, CheckVerdict
 from gittensor.controller.cli import _DaemonPrinter
 from gittensor.controller.daemon import _where
-from gittensor.controller.checks.state import StateStore
 from tests.controller.test_rentals import HK, Clock, order, pod_runner, reconciler, rentable_box
 
 NOW = 1_791_500_000.0

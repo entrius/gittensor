@@ -75,6 +75,7 @@ VENDOR_CHECK = 'GPU vendor'
 TOOLKIT_CHECK = 'NVIDIA container toolkit'
 RENT_PORTS_CHECK = 'Rent ports'
 SYSBOX_SETUP_URL = 'https://raw.githubusercontent.com/entrius/gittensor/main/docker/agent/sysbox-setup.sh'
+MINER_DOCS_URL = 'https://docs.gittensor.io/compute-mining.html'  # every row of the table, explained for the miner
 SYSBOX_KERNEL_MIN = (5, 19)  # overlayfs over ID-mapped mounts; older kernels fall back to shiftfs (Lium's check)
 
 
@@ -274,10 +275,13 @@ class HostProbe:
 def check_driver(probe: HostProbe) -> list[CheckResult]:
     proc = probe.run(['nvidia-smi', '--query-gpu=name,driver_version,uuid', '--format=csv,noheader'])
     if proc.returncode != 0:
-        return [CheckResult('NVIDIA driver', False, (proc.stderr or proc.stdout).strip()[:120] or 'nvidia-smi failed')]
+        err = (proc.stderr or proc.stdout).strip()[:120] or 'nvidia-smi failed'
+        return [CheckResult('NVIDIA driver', False, f'{err}: install the NVIDIA driver (nvidia-smi must work), reboot, re-run')]  # fmt: skip
     rows = [[c.strip() for c in line.split(',')] for line in proc.stdout.splitlines() if line.strip()]
     if not rows:
-        return [CheckResult('NVIDIA driver', False, 'nvidia-smi reports no GPUs')]
+        return [
+            CheckResult('NVIDIA driver', False, 'nvidia-smi reports no GPUs: no card the pool can admit on this box')
+        ]
     names = [r[0] for r in rows]
     driver = rows[0][1] if len(rows[0]) > 1 else '?'
     results = [CheckResult('NVIDIA driver', True, f'{driver}; {len(rows)} GPU(s): {", ".join(names)}')]
@@ -370,7 +374,9 @@ def check_gpu_model(names: Sequence[str]) -> CheckResult | None:
     admitted = ', '.join(sorted(t for t, s in load_catalog().items() if s.qualified))
     found = ', '.join(names)
     if any(s is None or not s.qualified for s in specs):
-        return CheckResult('GPU model', False, f'pool admits {admitted} only; found {found}', required=False)
+        return CheckResult(
+            'GPU model', False, f'pool admits {admitted} only; found {found}: the controller will refuse this box (gpu_spec)', required=False
+        )  # fmt: skip
     if len({s.gpu_type for s in specs if s is not None}) > 1:
         return CheckResult('GPU model', False, f'every card on a box must be one type; found {found}', required=False)
     spec = specs[0]
@@ -424,7 +430,8 @@ def _version_key(version: str) -> list[int]:
 def check_docker(probe: HostProbe) -> CheckResult:
     proc = probe.run(['docker', 'info', '--format', '{{.ServerVersion}}'])
     if proc.returncode != 0:
-        return CheckResult('Docker daemon', False, (proc.stderr or proc.stdout).strip()[:120] or 'docker info failed')
+        err = (proc.stderr or proc.stdout).strip()[:120] or 'docker info failed'
+        return CheckResult('Docker daemon', False, f'{err}: install Docker (docs.docker.com/engine/install) and run as a user in the docker group, or with sudo')  # fmt: skip
     return CheckResult('Docker daemon', True, f'server {proc.stdout.strip()}')
 
 
@@ -435,7 +442,12 @@ def check_toolkit(probe: HostProbe) -> CheckResult:
     proc = probe.run(['docker', 'info', '--format', '{{json .Runtimes}}'])
     if proc.returncode == 0 and '"nvidia"' in proc.stdout:
         return CheckResult(TOOLKIT_CHECK, True, 'nvidia runtime registered with docker')
-    return CheckResult(TOOLKIT_CHECK, False, 'nvidia-ctk / nvidia-container-cli not found and no nvidia docker runtime')
+    return CheckResult(
+        TOOLKIT_CHECK,
+        False,
+        'nvidia-ctk / nvidia-container-cli not found and no nvidia docker runtime: install the NVIDIA Container Toolkit '
+        '(sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker)',
+    )
 
 
 def check_sysbox(probe: HostProbe) -> CheckResult:
@@ -513,7 +525,9 @@ def check_ports(probe: HostProbe, ports: Sequence[int], report: PrereqReport) ->
         )
     busy = [p for p in ports if not probe.port_free(p)]
     if busy:
-        return CheckResult('Ports free', False, f'in use: {", ".join(map(str, busy))} (pick --ssh-port)')
+        return CheckResult(
+            'Ports free', False, f'in use: {", ".join(map(str, busy))} (pick another --ssh-port, or free it: ss -ltnp | grep :{busy[0]})'
+        )  # fmt: skip
     return CheckResult('Ports free', True, ', '.join(map(str, ports)))
 
 
@@ -557,7 +571,7 @@ def check_public_ip(probe: HostProbe, given: str | None) -> tuple[CheckResult, s
         if not ip:
             return CheckResult(name, False, "could not detect this box's public IP (pass --ip)"), None
     if not ipaddress.ip_address(ip).is_global:
-        return CheckResult(name, False, f'{ip} ({source}) is not public: the controller only dials public addresses'), None  # fmt: skip
+        return CheckResult(name, False, f'{ip} ({source}) is not public: the controller only dials public addresses (behind a NAT, forward the sshd port and pass --ip <public address>)'), None  # fmt: skip
     return CheckResult(name, True, f'{ip} ({source})'), ip
 
 
@@ -599,7 +613,12 @@ def check_registered(probe: HostProbe, ss58: str | None, netuid: int, endpoint: 
     except Exception as e:  # network / RPC trouble: report, do not crash the table
         return CheckResult(name, False, f'lookup failed against {endpoint}: {e}'[:160])
     if not registered:
-        return CheckResult(name, False, f'hotkey not registered on netuid {netuid} ({endpoint})')
+        return CheckResult(
+            name,
+            False,
+            f'hotkey not registered on netuid {netuid} ({endpoint}): register it (btcli subnet register --netuid {netuid}) '
+            'or pass the registered --wallet / --hotkey',
+        )
     return CheckResult(name, True, endpoint)
 
 

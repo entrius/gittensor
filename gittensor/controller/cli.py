@@ -2354,11 +2354,14 @@ class _DaemonPrinter:
         self._lock = threading.Lock()
         self._last_errors: list[str] = []
         self._last_ignored: list[str] = []
+        self._last_unreachable: dict[str, str] = {}
 
     def _emit(self, event: str, payload: dict, line: str) -> None:
         with self._lock:
             if self.json_mode:
-                print(json.dumps({'event': event, 'at': time.time(), **payload}, default=str), flush=True)
+                now = time.time()  # `at` for arithmetic, `at_iso` for a human reading the file
+                at_iso = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(now)) + f'.{int((now % 1) * 1000):03d}Z'
+                print(json.dumps({'event': event, 'at': now, 'at_iso': at_iso, **payload}, default=str), flush=True)
             else:
                 err_console.print(f'[dim]{time.strftime("%H:%M:%S", time.gmtime())}[/dim] {line}')
 
@@ -2404,6 +2407,15 @@ class _DaemonPrinter:
                     'why': {c.name: clip(check_detail(c)) for c in r.verdict.checks if not c.passed and not c.skipped}
                     if r.verdict
                     else {},
+                    # what the box said, per failed check (clipped): the log is the only place it is kept
+                    'evidence': {
+                        c.name: clip(json.dumps(c.evidence, default=str, sort_keys=True))
+                        for c in r.verdict.checks
+                        if not c.passed and not c.skipped
+                    }
+                    if r.verdict
+                    else {},
+                    'stage_error': getattr(r, 'stage_error', '') or '',
                 }
             )
         payload = {**head, 'provider': report.provider, 'exit_code': report.exit_code, 'boxes': rows}
@@ -2429,7 +2441,11 @@ class _DaemonPrinter:
         self._actions('reconcile', report.actions)
         errors = [] if report.errors == self._last_errors else report.errors  # "N short" every 30 s is noise
         self._last_errors = list(report.errors)
-        self._problems('reconcile', errors, report.unreachable)
+        # a box that stays dark is said once per change of its reason, not every 10 s pass (it is in the status
+        # file and `gitt controller status` meanwhile; the bench itself is a round event)
+        unreachable = {b: why for b, why in report.unreachable.items() if self._last_unreachable.get(b) != why}
+        self._last_unreachable = dict(report.unreachable)
+        self._problems('reconcile', errors, unreachable)
         if report.launched:
             boxes = ', '.join(b[:16] for b in report.launched)
             self._emit('reconcile_launched', {'pass': n, 'boxes': report.launched}, f'[dim]reconcile {n}: working on {escape(boxes)}[/dim]')  # fmt: skip
@@ -2465,6 +2481,14 @@ class _DaemonPrinter:
 
     def error(self, loop: str, message: str) -> None:
         self._emit('error', {'loop': loop, 'message': message}, f'[red]{loop} error:[/red] {escape(message)}')
+
+    def rental(self, action: Any) -> None:
+        """One typed line per rental action (place, active, alive, failed, ending, ended, lost, miss): grep the
+        rental id and the whole story is there, including what the box's docker said on a failed start."""
+        bad = action.kind in ('failed', 'lost', 'miss')
+        mark = '[red]✗[/red]' if bad else ('[dim]·[/dim]' if action.kind == 'alive' else '[green]✓[/green]')
+        line = f'{mark} rental {action.kind} {escape(action.rental)} {escape(action.box[:16])} {escape(action.detail)}'
+        self._emit('rental', {**asdict(action), 'ok': not bad}, line)
 
 
 @controller_group.command('run')

@@ -41,8 +41,10 @@ import signal
 import subprocess
 import threading
 import time
+import traceback
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 from gittensor.controller.checks import config as cfg
@@ -67,7 +69,7 @@ from gittensor.controller.publish import Publisher, build_fleet
 from gittensor.controller.reconcile import InstanceStore, Reconciler, ReconcileReport
 from gittensor.controller.registry import DeploymentStore, Registry
 from gittensor.controller.rental_seam import RentalPoller, SeamClient
-from gittensor.controller.rentals import RentalReconciler, RentalReport, RentalStore
+from gittensor.controller.rentals import RentalAction, RentalReconciler, RentalReport, RentalStore
 from gittensor.controller.runspec import BIND_PRIVATE, BoxHttp, HttpClient, PullToken
 from gittensor.controller.ssh import write_host_key
 
@@ -76,6 +78,14 @@ STATUS_FILE = 'controller.json'
 
 def _no_scan(host: str, port: int) -> str:
     raise RuntimeError('no host-key scanner configured')
+
+
+def _where(e: BaseException) -> str:
+    """``Type: message (file.py:123 in func)``: the innermost frame of ours, so a crashed pass names its line."""
+    frames = traceback.extract_tb(e.__traceback__)
+    ours = [f for f in frames if 'gittensor' in (f.filename or '')] or frames
+    at = f' ({Path(ours[-1].filename).name}:{ours[-1].lineno} in {ours[-1].name})' if ours else ''
+    return f'{type(e).__name__}: {e}'[:400] + at
 
 
 class Reporter(Protocol):
@@ -87,6 +97,7 @@ class Reporter(Protocol):
     def reprove(self, report: Any) -> None: ...
     def discover(self, report: DiscoverReport) -> None: ...
     def note(self, loop: str, message: str) -> None: ...
+    def rental(self, action: RentalAction) -> None: ...
 
 
 class SilentReporter:
@@ -112,6 +123,9 @@ class SilentReporter:
         pass
 
     def error(self, loop, message):
+        pass
+
+    def rental(self, action):
         pass
 
 
@@ -227,6 +241,7 @@ class Controller:
             sleep=sleep,
             pull_token=pull_token,
             background=True,
+            alive_interval_s=self.intervals.heartbeat_s,
             **(rental_options or {}),
         )
         self.poller = RentalPoller(self.rentals, rental_seam, wall) if rental_seam is not None else None
@@ -347,7 +362,7 @@ class Controller:
         try:
             self.proof = self._load_proof()
         except Exception as e:
-            self.reporter.error('round', f'built, but the provider did not load: {e}; keeping the previous proof')
+            self.reporter.error('round', f'built, but the provider did not load: {type(e).__name__}: {e}; keeping the previous proof')  # fmt: skip
         return True
 
     def reconcile_once(self) -> ReconcileReport:
@@ -398,12 +413,12 @@ class Controller:
             },
         )
         for error in [*(orders or {}).get('errors', []), *(sent or {}).get('errors', [])]:
-            self.reporter.note('rentals', f'seam: {error}')
+            self.reporter.error('rentals', f'seam: {error}')  # the app cannot place or hear about rentals: an error
+        for error in report.errors:
+            self.reporter.error('rentals', error)
         for action in report.actions:
             if action.kind != 'prepull':
-                self.reporter.note(
-                    'rentals', f'{action.rental or action.box[:16]}: {action.kind} {action.detail}'[:300]
-                )
+                self.reporter.rental(action)  # includes what the start / stop threads finished since the last pass
         return report
 
     def _leases(self) -> dict[str, Any]:
@@ -701,12 +716,12 @@ class Controller:
             try:
                 once()
             except Exception as e:  # one bad pass never ends a loop; state is saved write by write
-                self.reporter.note(name, f'{type(e).__name__}: {e}')
+                self.reporter.error(name, f'pass crashed: {_where(e)}')
             if after is not None and not self.stop.is_set():
                 try:
                     after()
                 except Exception as e:
-                    self.reporter.note(name, f'{type(e).__name__}: {e}')
+                    self.reporter.error(name, f'pass crashed: {_where(e)}')
             self.stop.wait(max(0.0, interval_s - (time.monotonic() - started)))
 
     def start(self) -> None:

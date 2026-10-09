@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import math
 import secrets
 import shlex
 import socket
@@ -428,6 +429,7 @@ class RentalReconciler:
         runtime: str = SYSBOX_RUNTIME,
         firewall: bool = True,
         min_standing: str = PROBATION,
+        alive_interval_s: float | None = None,
     ):
         """``runtime`` / ``firewall`` are the dev overrides (`gitt controller run --rental-runtime runc
         --no-rental-firewall`): our own test boxes, never a miner's. ``min_standing`` is the rental gate: probation
@@ -447,6 +449,13 @@ class RentalReconciler:
         )
         self._threads: dict[str, threading.Thread] = {}  # rental id -> its start / stop thread
         self._prepulling: dict[str, threading.Thread] = {}  # box id -> its pull thread
+        # What a start / stop thread decided after its pass had been reported: handed to the next pass's report, so
+        # `active`, `failed` (with docker's words) and `ended` reach the operator's log and the status file.
+        self._late: list[RentalAction] = []
+        # A running pod is confirmed every pass and said nothing about; with an interval, one `alive` line per rental
+        # per interval (the daemon passes the heartbeat interval) so a grep of the id shows the lease was watched.
+        self.alive_interval_s = alive_interval_s
+        self._alive_said: dict[str, float] = {}
 
     # -- state writes (every change saved before the next step) ----------------------------------------------------
 
@@ -502,6 +511,8 @@ class RentalReconciler:
         now = self.wall()
         with self._lock:
             busy = {rid for rid, t in self._threads.items() if t.is_alive()}
+            report.actions.extend(self._late)
+            self._late = []
         runners: dict[str, HostRunner] = {}
         try:
             self._confirm(report, busy, runners, now)
@@ -562,6 +573,9 @@ class RentalReconciler:
                     r.pay_through = now
                 r.misses, r.last_seen_at = 0, now
                 self._put(r)
+                if self.alive_interval_s is not None and now - self._alive_said.get(r.id, -math.inf) >= self.alive_interval_s:  # fmt: skip
+                    self._alive_said[r.id] = now
+                    report.actions.append(RentalAction('alive', r.id, r.box, f'pod {r.container_id[:12]} running on {r.host}; pay open'))  # fmt: skip
                 continue
             self._lost(r, box, answered=True, report=report)
 
@@ -693,12 +707,15 @@ class RentalReconciler:
                 for image in self.prepull_images:
                     if runner.run(image_present_command(image), timeout=cfg.SSH_COMMAND_TIMEOUT_S).ok:
                         continue
-                    runner.run(pull_command(image), timeout=PULL_TIMEOUT_S)
+                    result = runner.run(pull_command(image), timeout=PULL_TIMEOUT_S)
+                    if not result.ok:  # said once per pass in the log: a box whose docker cannot pull is worth knowing
+                        detail = f'{image}: exit {result.exit_code}: {(result.stderr or result.stdout).strip()[-200:]}'
+                        self._act(RentalReport(), RentalAction('prepull_failed', '', box.box_id, detail))
                     return  # one per pass
             finally:
                 getattr(runner, 'close', lambda: None)()
-        except Exception:
-            return  # a pre-pull that fails costs nothing; the rental's own pull is the one that counts
+        except Exception as e:  # a pre-pull that fails costs nothing; the rental's own pull is the one that counts
+            self._act(RentalReport(), RentalAction('prepull_failed', '', box.box_id, f'{type(e).__name__}: {e}'[:200]))
         finally:
             self.box_locks.release(box.box_id)
 
@@ -709,6 +726,14 @@ class RentalReconciler:
             self._threads[rental_id] = self._thread(f'rental-{rental_id}', fn)
         else:
             fn()
+
+    def _act(self, report: RentalReport, action: RentalAction) -> None:
+        """Record an action from a start / stop: in this pass's report, and (in the background) for the next pass,
+        since the one that launched the thread has already been reported."""
+        report.actions.append(action)
+        if self.background:
+            with self._lock:
+                self._late.append(action)
 
     def _thread(self, name: str, fn: Callable[[], None]) -> threading.Thread:
         t = threading.Thread(target=fn, name=name, daemon=True)
@@ -766,7 +791,7 @@ class RentalReconciler:
             self._put(r)
             self._move_cards(r, LEASED)
             self._put_box(record_start(self._box(r.box), True, now, rental=r.id))
-            report.actions.append(RentalAction('active', r.id, r.box, f'ssh {r.host}:{public}'))
+            self._act(report, RentalAction('active', r.id, r.box, f'ssh {r.host}:{public}'))
         except Exception as e:  # any failure: undeploy what may run, fail the rental, free the cards
             reason = PULL_FAILED if str(e).startswith(PULL_FAILED) else START_FAILED
             if runner is not None and r.container_id:
@@ -783,7 +808,7 @@ class RentalReconciler:
                     else:
                         b = record_start(b, False, self.wall(), rental=r.id, reason=detail)
                     self._put_box(b)
-            report.actions.append(RentalAction('failed', r.id, r.box, f'{reason}: {e}'[:300]))
+            self._act(report, RentalAction('failed', r.id, r.box, f'{reason}: {e}'[:300]))
         finally:
             if runner is not None:
                 getattr(runner, 'close', lambda: None)()
@@ -803,9 +828,10 @@ class RentalReconciler:
                     if r.box in self.boxes.boxes and self._box(r.box).status == IDLE:
                         leased_s = round(max(0.0, now - r.started_at), 1)
                         self._put_box(add_event(self._box(r.box), CLEAN_LEASE, now, rental=r.id, leased_s=leased_s))
-            report.actions.append(RentalAction('ended', r.id, r.box, r.reason))
+            self._act(report, RentalAction('ended', r.id, r.box, r.reason))
         except Exception as e:
             report.errors.append(f'{r.id}: stop: {type(e).__name__}: {e}'[:300])
+            self._act(report, RentalAction('failed', r.id, r.box, f'stop: {type(e).__name__}: {e}'[:300]))
         finally:
             if runner is not None:
                 getattr(runner, 'close', lambda: None)()

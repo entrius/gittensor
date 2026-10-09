@@ -106,14 +106,17 @@ NO_FIT_GRACE_S = 120.0
 LOST_AFTER_MISSES = 3
 # Images the rent page promises run sshd on :22 (gittensor-app rental-images.ts: keep the lists equal). Pre-pulled on
 # idle rentable boxes.
-QUICK_PICK_IMAGES = ('daturaai/pytorch:2.12.0-py3.12-cuda12.8-devel-ubuntu24.04-dind',)
+QUICK_PICK_IMAGES = (
+    'daturaai/pytorch:2.7.0-py3.12-cuda12.8.0-devel-ubuntu24.04',  # the app's default (gittensor-app #21)
+    'daturaai/pytorch:2.12.0-py3.12-cuda12.8-devel-ubuntu24.04-dind',
+)
 # The AMD quick-picks (31 step 4: an SSH-ready ROCm PyTorch, a ROCm terminal, vLLM) are not published yet, so an AMD
 # box pre-pulls nothing: the CUDA images above would be dead weight on it, and a customer's own image is pulled at
 # order time as on any box.
 QUICK_PICK_IMAGES_AMD: tuple[str, ...] = ()
 # What a runc dev box can run: the same image family without docker-in-docker (its entrypoint starts dockerd first and
 # exits without privileges). The production quick-pick stays the dind image, under Sysbox.
-QUICK_PICK_NO_DIND = 'daturaai/pytorch:2.6.0-py3.12-cuda12.6.3-devel-ubuntu24.04'
+QUICK_PICK_NO_DIND = QUICK_PICK_IMAGES[0]  # a runc dev box pre-pulls the app's default; it runs sshd without dockerd
 # What a pod must not reach from a miner's box: the miner's LAN and the host itself (29 §4). Link-local covers the
 # cloud metadata address; 100.64/10 is carrier NAT.
 PRIVATE_NETS = ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '169.254.0.0/16', '100.64.0.0/10')

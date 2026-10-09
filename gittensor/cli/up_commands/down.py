@@ -8,6 +8,7 @@ forfeiting it: the only thing that costs standing is a customer's pod dying unde
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from typing import Any
 
 import click
@@ -27,6 +28,13 @@ from gittensor.cli.json_output import emit_json
 from . import docker_exec
 
 WAIT_POLL_S = 30.0
+# The controller's proof container (proof/slot.py labels it): after a customer's pod ends the controller re-proves the
+# card within seconds. Removing the agent under that re-proof costs the box a strike (check_not_run) and leaves the
+# staged container behind (seen 10/9), so a leave waits until no proof container has been seen for REPROVE_QUIET_S.
+PROOF_LABEL = 'io.gittensor.proof.uuid'
+REPROVE_QUIET_S = 45.0
+REPROVE_CAP_S = 180.0
+REPROVE_POLL_S = 5.0
 
 
 def list_workloads() -> tuple[list[Workload], list[Workload], str]:
@@ -44,6 +52,36 @@ def running_pods() -> list[Workload]:
     """Customers' pods still running on this box (a listing that fails counts as none: the leave goes on)."""
     proc = docker_exec.run_docker(workload_list_command(RENTAL_LABEL))
     return [w for w in parse_workloads(proc.stdout) if w.running] if proc.returncode == 0 else []
+
+
+def proof_containers() -> list[str]:
+    """Ids of the controller's proof containers on this box (a listing that fails counts as none)."""
+    proc = docker_exec.run_docker(['docker', 'ps', '-a', '-q', '--filter', f'label={PROOF_LABEL}'])
+    return proc.stdout.split() if proc.returncode == 0 else []
+
+
+def wait_for_reprove(
+    quiet_s: float = REPROVE_QUIET_S,
+    cap_s: float = REPROVE_CAP_S,
+    poll_s: float = REPROVE_POLL_S,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+    containers: Callable[[], list[str]] | None = None,
+) -> bool:
+    """Wait for the controller's post-lease re-proof: True once no proof container has been seen for ``quiet_s``
+    (counted from the start when none ever appears), False at ``cap_s`` (a stale container: the leave goes on)."""
+    containers = containers or proof_containers
+    start = clock()
+    last_seen: float | None = None
+    while True:
+        now = clock()
+        if containers():
+            last_seen = now
+        if now - (start if last_seen is None else last_seen) >= quiet_s:
+            return True
+        if now - start >= cap_s:
+            return False
+        sleep(poll_s)
 
 
 def _until(ends_at: float | None) -> str:
@@ -125,6 +163,11 @@ def down_command(now, dry_run, json_mode):
             else:
                 err_console.print('[yellow]left the box up and off the market; run `gitt down` again later[/yellow]')
             raise SystemExit(1)
+        if pods:
+            err_console.print(
+                '[dim]the controller re-proves the card after a lease; waiting for it (up to 3 min)[/dim]'
+            )
+            wait_for_reprove()
         instances, pods, list_error = list_workloads()  # the pod is gone: the plan no longer drains it
         workloads = instances + pods
         plan = down_commands(workloads=workloads, now=now)

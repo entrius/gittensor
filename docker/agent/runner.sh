@@ -53,7 +53,8 @@ start_agent() {
     # The NVIDIA container runtime attaches the cards; an AMD box has none, and --privileged already exposes
     # /dev/kfd and /dev/dri (vault 30 §1 #5).
     gpu_flags="--gpus all"
-    [ "$VENDOR" = "amd" ] && gpu_flags=""
+    vendor_env="NVIDIA_DRIVER_CAPABILITIES=all"
+    [ "$VENDOR" = "amd" ] && { gpu_flags=""; vendor_env="GT_AGENT_VENDOR=amd"; }
     # shellcheck disable=SC2086  # $gpu_flags and $rent_label are fixed flag pairs or empty, never user text with spaces
     docker run -d --name "$NAME" --restart unless-stopped --privileged --pid host $gpu_flags $rent_label \
         -v /var/run/docker.sock:/var/run/docker.sock \
@@ -63,7 +64,7 @@ start_agent() {
         -e "GT_AGENT_MINER_HOTKEY=$MINER_HOTKEY" \
         -e "GT_AGENT_IMAGE=$image" \
         -e "GT_AGENT_IMAGE_DIGEST=$digest" \
-        -e NVIDIA_DRIVER_CAPABILITIES=all \
+        -e "$vendor_env" \
         "$image"
 }
 

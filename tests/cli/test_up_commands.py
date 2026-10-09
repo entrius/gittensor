@@ -21,7 +21,7 @@ from gittensor.controller.checks.amd_scrape import AMD_SYSFS_COMMAND
 from gittensor.controller.checks.vendor import VENDOR_DETECT_COMMAND
 
 AMD_SYSFS_1 = (
-    Path(__file__).resolve().parents[1] / 'controller' / 'fixtures' / 'amd' / 'sysfs_mi300x_1.txt'
+    Path(__file__).resolve().parents[1] / 'controller' / 'fixtures' / 'amd' / 'sysfs_mi325x_1.txt'
 ).read_text()
 
 SMI_OK = 'NVIDIA GeForce RTX 5090, 580.65.06, GPU-1111\n'
@@ -220,9 +220,9 @@ class TestPrereqs:
         assert report.ok and report.vendor == 'amd'
         rows = {r.name: r for r in report.results}
         assert rows['GPU vendor'].status == 'pass' and 'amdgpu' in rows['GPU vendor'].detail
-        assert rows['AMD driver'].status == 'pass' and rows['AMD driver'].detail == 'amdgpu; 1 card(s): MI300X; renderD128'  # fmt: skip
+        assert rows['AMD driver'].status == 'pass' and rows['AMD driver'].detail == 'amdgpu; 1 card(s): MI325X; renderD129'  # fmt: skip
         assert (
-            rows['AMD driver floor'].status == 'pass' and rows['AMD driver floor'].detail == 'kernel 6.8.0-45-generic'
+            rows['AMD driver floor'].status == 'pass' and rows['AMD driver floor'].detail == 'kernel 6.8.0-137-generic'
         )
         assert rows['NVIDIA container toolkit'].status == 'skip' and 'NVIDIA driver' not in rows
 
@@ -231,12 +231,17 @@ class TestPrereqs:
             return {r.name: r for r in run_prereqs(probe, wallet='a', hotkey='h', netuid=74, endpoint='ws://x', ssh_port=2200).results}  # fmt: skip
 
         assert 'no AMD card' in rows_for('')['AMD driver'].detail
+        # a device id no catalog row lists (the 10/9 droplet before its 0x74b9 fix): the row fails, naming the id
+        unknown = rows_for(AMD_SYSFS_1.replace('device=0x74b9', 'device=0x7777'))['AMD driver']
+        assert unknown.status == 'fail' and 'device 0x7777, not a type in the GPU catalog' in unknown.detail
         assert 'partitioned (CPX/NPS4)' in rows_for(AMD_SYSFS_1.replace('=SPX', '=CPX').replace('=NPS1', '=NPS4'))['AMD driver'].detail  # fmt: skip
-        assert 'no usable serial' in rows_for(AMD_SYSFS_1.replace('unique_id=2d6e1a4f8c3b7e90', 'unique_id=0000000000000000'))['AMD driver'].detail  # fmt: skip
-        old = rows_for(AMD_SYSFS_1.replace('kernel=6.8.0-45-generic', 'kernel=5.15.0-122-generic'))
+        assert 'no usable serial' in rows_for(AMD_SYSFS_1.replace('unique_id=675bce773a2403eb', 'unique_id=0000000000000000'))['AMD driver'].detail  # fmt: skip
+        old = rows_for(AMD_SYSFS_1.replace('kernel=6.8.0-137-generic', 'kernel=5.15.0-122-generic').replace('amdgpu=6.19.14.31400000', 'amdgpu='))  # fmt: skip
         assert old['AMD driver'].status == 'pass' and old['AMD driver floor'].status == 'fail' and 'below 6.8' in old['AMD driver floor'].detail  # fmt: skip
-        dkms = rows_for(AMD_SYSFS_1.replace('kernel=6.8.0-45-generic', 'kernel=5.15.0-122-generic').replace('amdgpu=\n', 'amdgpu=6.10.5\n'))  # fmt: skip
-        assert dkms['AMD driver floor'].status == 'pass' and 'DKMS 6.10.5' in dkms['AMD driver floor'].detail
+        dkms = rows_for(
+            AMD_SYSFS_1.replace('kernel=6.8.0-137-generic', 'kernel=5.15.0-122-generic')
+        )  # the droplet's DKMS line
+        assert dkms['AMD driver floor'].status == 'pass' and 'DKMS 6.19.14.31400000' in dkms['AMD driver floor'].detail
 
     def test_a_box_with_both_vendors_is_refused_by_name(self, probe):
         probe.modules = 'nvidia\namdgpu\n'
@@ -465,6 +470,12 @@ class TestUpCommand:
         assert 'AMD driver' in out and 'NVIDIA driver' not in out and 'skipped (AMD box' in out
         assert '-e GT_AGENT_VENDOR=amd' in out and '--gpus all' not in out
         assert 'docker run -d --name gt-agent --restart unless-stopped --privileged --pid host -v' in out
+        # the proof image the box pre-pulls is the HIP one, and the direct agent line names the vendor, not NVIDIA
+        assert 'docker pull entrius/gt-proof-rocm' in out and 'gt-proof@sha256' not in out and 'NVIDIA_DRIVER_CAPABILITIES' not in out  # fmt: skip
+        direct = runner.invoke(
+            cli, [*UP, '--dry-run', '--no-update', '--image', 'entrius/gt-agent:dev', '--json']
+        ).output
+        assert '"proof_image": "entrius/gt-proof-rocm' in direct and 'GT_AGENT_VENDOR=amd' in direct and 'NVIDIA_DRIVER_CAPABILITIES' not in direct  # fmt: skip
 
     def test_unverifiable_channel_fails_and_starts_nothing(self, runner, docker_calls, probe):
         with patch('gittensor.cli.up_commands.up._load_channel', side_effect=ChannelError('signature does not verify')):

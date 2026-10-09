@@ -34,7 +34,10 @@ AMD_SYSFS_COMMAND = (
     'for p in /sys/class/kfd/kfd/topology/nodes/*/properties; do [ -f "$p" ] || continue; '
     'echo "-- $(basename "$(dirname "$p")")"; '
     'grep -E \'^(unique_id|drm_render_minor|gfx_target_version) \' "$p"; done; '
-    'echo "kernel=$(uname -r)"; echo "amdgpu=$(cat /sys/module/amdgpu/version 2>/dev/null)"; true'
+    'echo "kernel=$(uname -r)"; echo "amdgpu=$(cat /sys/module/amdgpu/version 2>/dev/null)"; '
+    # the device nodes' owning groups, as NUMBERS: docker resolves --group-add names inside the container, and a
+    # stock image has no `render` group (the 10/9 droplet: "Unable to find group render"); render's gid is dynamic
+    'for g in video render; do echo "gid_$g=$(getent group $g | cut -d: -f3)"; done; true'
 )
 
 _UNIQUE_ID = re.compile(r'^[0-9a-f]{16}$')
@@ -97,9 +100,10 @@ class AmdStack:
 
     kernel: str = ''  # uname -r
     amdgpu: str = ''  # /sys/module/amdgpu/version: the DKMS driver's version; '' for the in-tree driver
+    gids: Tuple[int, ...] = ()  # the host's video and render gids (numeric: what --group-add must say, 30 §1 #5)
 
     def as_dict(self) -> dict:
-        return {'kernel': self.kernel, 'amdgpu': self.amdgpu}
+        return {'kernel': self.kernel, 'amdgpu': self.amdgpu, 'gids': list(self.gids)}
 
 
 def version_tuple(text: str) -> Tuple[int, int]:
@@ -154,6 +158,10 @@ def parse_amd_sysfs(stdout: str) -> Tuple[List[AmdCard], AmdStack]:
             stack.kernel, card, node = line[len('kernel=') :].strip(), None, None
         elif line.startswith('amdgpu='):
             stack.amdgpu, card, node = line[len('amdgpu=') :].strip(), None, None
+        elif line.startswith('gid_'):
+            value = line.split('=', 1)[1].strip()
+            if value.isdigit():
+                stack.gids, card, node = (*stack.gids, int(value)), None, None
         elif card is not None and '=' in line:
             key, _, value = line.partition('=')
             _set_card(card, key.strip(), value.strip())

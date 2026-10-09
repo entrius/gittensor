@@ -76,7 +76,8 @@ def agent_run_command(
     sshd. ``allow_dev_keys`` lets an image built on docker/agent/keys/make-dev-keys.sh keys start (local builds).
     ``rent_ports`` (``gitt up --rent``) is carried as a label for the controller to read: the box offers itself for
     rental on that range (vault 29). ``vendor`` is the host's (``gitt up`` detects it as the controller's scrape does);
-    ``amd`` leaves ``--gpus all`` off. docker/agent/runner.sh issues the same line; keep them together."""
+    ``amd`` leaves ``--gpus all`` off and tells the agent its vendor instead of the NVIDIA capabilities env.
+    docker/agent/runner.sh issues the same line; keep them together."""
     cmd = [
         'docker',
         'run',
@@ -102,7 +103,7 @@ def agent_run_command(
         '-e',
         f'{ENV_IMAGE_DIGEST}={image_digest}',
         '-e',
-        'NVIDIA_DRIVER_CAPABILITIES=all',
+        f'{ENV_VENDOR}={AMD}' if vendor == AMD else 'NVIDIA_DRIVER_CAPABILITIES=all',
     ]
     if allow_dev_keys:
         cmd += ['-e', f'{ENV_ALLOW_DEV_KEYS}=1']

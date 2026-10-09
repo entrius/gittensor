@@ -173,6 +173,13 @@ class BoxState:
         nodes = self.identity.get('render_nodes')
         return {str(k): str(v) for k, v in nodes.items()} if isinstance(nodes, dict) else {}
 
+    @property
+    def amd_gids(self) -> List[int]:
+        """AMD only: the host's video/render gids the last passing full check recorded; [] otherwise."""
+        stack = self.identity.get('amd_stack')
+        gids = stack.get('gids') if isinstance(stack, dict) else None
+        return [int(g) for g in gids] if isinstance(gids, list) else []
+
     def public_port(self, port: int) -> int:
         return int(self.port_map.get(str(port), port))
 

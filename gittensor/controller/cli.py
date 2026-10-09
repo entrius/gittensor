@@ -683,7 +683,8 @@ def run_round(
             r.busy = PROOF_IMAGE_PULLING  # setup, not proof: no verdict this round
             return
         try:
-            r.staged = stage_box(r.runner, r.proved, proof, image, config.proof_timeout_s)
+            gids = r.scrape.amd_stack.gids if r.scrape.amd_stack is not None else ()
+            r.staged = stage_box(r.runner, r.proved, proof, image, config.proof_timeout_s, amd_gids=gids)
         except ProofUnavailable as e:
             r.stage_error = clip(str(e))
         except Exception as e:  # transport died mid-stage

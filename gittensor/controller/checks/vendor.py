@@ -27,10 +27,10 @@ _MODULE_VENDOR = {'nvidia': NVIDIA, 'amdgpu': AMD}
 # AMD cards are attached as device nodes, not through a container runtime (30 §1 #5): ``/dev/kfd`` (the compute
 # interface, one node for every card) plus the render node of each card, never the ``card*`` primary nodes and never
 # all of ``/dev/dri``. The kernel enforces the isolation: without a card's render node, KFD refuses to create a GPU VM
-# on it. The groups are the nodes' owners on a stock host.
+# on it. ``--group-add`` carries the nodes' owning gids as NUMBERS (names resolve inside the container, where a stock
+# image has no ``render`` group); a container that runs as root needs none, so an empty list adds none.
 AMD_KFD = '/dev/kfd'
 AMD_DRI = '/dev/dri'
-AMD_GROUPS = ('video', 'render')
 
 
 def parse_vendor(stdout: str) -> str:
@@ -57,11 +57,12 @@ def render_node_path(render_node: str) -> str:
     return f'{AMD_DRI}/{node}'
 
 
-def amd_attach_args(render_nodes: Sequence[str]) -> List[str]:
+def amd_attach_args(render_nodes: Sequence[str], gids: Sequence[int] = ()) -> List[str]:
     """The ``docker run`` / ``docker create`` flags that give a container the AMD cards named by their render nodes:
     one for the proof and a workload, every pinned node of the box for a rental pod (a pod takes the whole box, 29
-    §1 #3, and gets exactly the nodes the scrape saw, nothing else). Already shell-quoted."""
+    §1 #3, and gets exactly the nodes the scrape saw, nothing else), plus the host's video/render gids when the box
+    reported them. Already shell-quoted."""
     devices = [AMD_KFD, *(render_node_path(n) for n in render_nodes)]
     parts = [f'--device {shlex.quote(d)}' for d in devices]
-    parts += [f'--group-add {g}' for g in AMD_GROUPS]
+    parts += [f'--group-add {int(g)}' for g in gids]
     return parts

@@ -101,6 +101,7 @@
     ],
     "vendor": "amd",
     "pci_ids": [
+      "0x74b9",
       "0x74a5"
     ],
     "gfx_target": "gfx942",

@@ -48,6 +48,7 @@ class BoxIdentity:
     # NVIDIA.
     vendor: str = NVIDIA
     render_nodes: Tuple[str, ...] = ()
+    amd_gids: Tuple[int, ...] = ()  # the host's video/render gids, numeric (vendor.amd_attach_args)
 
 
 @dataclass
@@ -138,12 +139,18 @@ def image_ref(vendor: str = NVIDIA) -> str:
 
 
 def create_command(
-    image: str, uuid: str, name: str, args: Sequence[str] = (), vendor: str = NVIDIA, render_node: str = ''
+    image: str,
+    uuid: str,
+    name: str,
+    args: Sequence[str] = (),
+    vendor: str = NVIDIA,
+    render_node: str = '',
+    gids: Sequence[int] = (),
 ) -> str:
     """``docker create`` one proof container pinned to one card. Inside it that card is device 0. The container
     is labelled so a restarted controller can find and remove strays. An AMD card is pinned by its render node
     (``vendor.amd_attach_args``), an NVIDIA card by ``--gpus`` as always."""
-    attach = amd_attach_args([render_node]) if vendor == AMD else [f'--gpus="device={uuid}"']
+    attach = amd_attach_args([render_node], gids) if vendor == AMD else [f'--gpus="device={uuid}"']
     parts = [
         'docker',
         'create',
@@ -234,6 +241,7 @@ def stage_box(
     proof: GpuProof,
     image: str = '',
     timeout: float = cfg.PROOF_JOB_TIMEOUT_S,
+    amd_gids: Sequence[int] = (),
 ) -> StagedProof:
     """Phase 1. Raises ``ProofUnavailable`` (provider) or whatever the transport raises."""
     vendor = gpus[0].vendor if gpus else NVIDIA
@@ -243,6 +251,7 @@ def stage_box(
         gpus[0].driver if gpus else '',
         vendor,
         tuple(g.render_node for g in gpus) if vendor == AMD else (),
+        tuple(int(g) for g in amd_gids) if vendor == AMD else (),
     )
     return proof.stage(runner, identity, image or image_ref(vendor), timeout)
 

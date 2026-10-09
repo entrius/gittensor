@@ -305,6 +305,10 @@ def check_amd_driver(probe: HostProbe) -> list[CheckResult]:
     for c in cards:
         spec = spec_for_pci_id(c.device_id)
         names.append(spec.gpu_type if spec is not None else f'{c.device_id} (not in the GPU catalog)')
+        if spec is None:  # the controller's gpu_spec check refuses it; the miner hears it here first
+            problems.append(
+                f'{c.render_node} is device {c.device_id}, not a type in the GPU catalog: the pool cannot admit it'
+            )
         if not c.id_ok:
             problems.append(f'{c.render_node} reports no usable serial (unique_id): the pool cannot pin the card')
         if not c.whole:

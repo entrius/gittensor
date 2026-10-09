@@ -1,0 +1,23 @@
+== renderD129 0000:83:00.0
+unique_id=675bce773a2403eb
+vendor=0x1002
+device=0x74b9
+product_name=
+mem_info_vram_total=274542362624
+current_compute_partition=SPX
+current_memory_partition=NPS1
+vbios_version=113-M3250101-100
+power1_cap=1000000000
+power1_cap_default=1000000000
+power1_cap_max=1000000000
+-- 0
+gfx_target_version 0
+drm_render_minor 0
+-- 1
+gfx_target_version 90402
+drm_render_minor 129
+unique_id 7447773420259116011
+kernel=6.8.0-137-generic
+amdgpu=6.19.14.31400000
+gid_video=44
+gid_render=992

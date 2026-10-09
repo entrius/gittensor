@@ -34,6 +34,7 @@ from gittensor.agent.launch import (
 from gittensor.cli.helpers import NETWORK_CHOICE, console, err_console
 from gittensor.cli.json_output import emit_json
 from gittensor.cli.miner_commands.helpers import NETUID_DEFAULT, _error, _load_config_value, _resolve_endpoint
+from gittensor.controller.checks.vendor import NVIDIA
 from gittensor.controller.proof.slot import image_ref as proof_image_ref
 
 from . import docker_exec
@@ -397,7 +398,7 @@ def up_command(
                 'reclaimed': [w.name for w in report.workloads] if reclaim and not report.already_up else [],
                 'commands': [render(c) for c in plan],
                 'agent_command': render(agent_line),
-                'proof_image': proof_image_ref(),
+                'proof_image': proof_image_ref(report.vendor),
             }
         )
     else:
@@ -417,7 +418,7 @@ def up_command(
                     console.print('\n[bold]The runner then keeps this agent container running:[/bold]')
                     click.echo(f'  {render(agent_line)}')
                 console.print('\n[bold]Then pulls the GPU proof image, once (~2 GB), if it is not here yet:[/bold]')
-                click.echo(f'  docker pull {proof_image_ref()}')
+                click.echo(f'  docker pull {proof_image_ref(report.vendor)}')
             else:
                 console.print('\n[yellow]No channel: nothing to run.[/yellow]')
         return
@@ -445,7 +446,7 @@ def up_command(
         err_console.print(
             '[dim]Nothing else to do: the controller takes it from here. `gitt down` stops the agent.[/dim]'
         )
-    _prepull_proof_image(json_mode)
+    _prepull_proof_image(json_mode, report.vendor)
 
 
 up_command.help = (up_command.help or '').format(
@@ -457,11 +458,11 @@ up_command.help = (up_command.help or '').format(
 )
 
 
-def _prepull_proof_image(json_mode: bool) -> None:
+def _prepull_proof_image(json_mode: bool, vendor: str = NVIDIA) -> None:
     """Fetch the GPU proof image now, so the box's first full check finds it (~2 GB, once). The agent uses this
     host's docker, so a pull here is the pull the controller needs. Never fatal: a box without the image is not
     failed, the controller starts the pull itself and proves the box a round later."""
-    ref = proof_image_ref()
+    ref = proof_image_ref(vendor)  # the HIP image on an AMD box (vault 31 step 4)
     if docker_exec.run_docker(['docker', 'image', 'inspect', ref]).returncode == 0:
         return
     if not json_mode:

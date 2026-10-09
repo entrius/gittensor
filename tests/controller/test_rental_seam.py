@@ -81,6 +81,16 @@ def test_the_poll_asks_for_requested_ending_and_active(tmp_path):
     assert app.calls == ['GET http://app.test/internal/rentals?state=requested,ending,active']
 
 
+def test_an_order_pinned_by_hotkey_carries_the_pin(tmp_path):
+    """The rent page's RENT NOW: ``box_hotkey`` on the order is the pin (box listing, 10/9); ``box_uid`` still works."""
+    app = FakeApp([order(box_hotkey='5Box'), order(rid='rnt_app2', box_uid=45)])
+    store, p = poller(tmp_path, app)
+    assert p.take_orders().placed == ['rnt_app1', 'rnt_app2']
+    assert store.rentals['rnt_app1'].want_box_hotkey == '5Box' and store.rentals['rnt_app1'].pinned
+    assert store.rentals['rnt_app2'].want_box_uid == 45 and store.rentals['rnt_app2'].want_box_hotkey == ''
+    assert not store.rentals['rnt_app1'].want_box_uid
+
+
 def test_a_requested_order_becomes_a_record_under_the_apps_id(tmp_path):
     app = FakeApp([order()])
     store, p = poller(tmp_path, app)
@@ -137,6 +147,7 @@ def test_each_transition_is_reported_once_and_a_lost_report_is_retried(tmp_path)
     assert rid == 'rnt_app1' and body == {
         'state': 'starting',
         'box_uid': 45,
+        'box_hotkey': '5Box',
         'host': '203.0.113.7',
         'ports': {'22': 31000, '8888': 31001},
         'gpu_uuids': ['GPU-a', 'GPU-b'],
@@ -210,6 +221,7 @@ def test_report_body_is_the_section_3_shape():
     assert report_body(r) == {
         'state': 'failed',
         'box_uid': None,
+        'box_hotkey': None,
         'host': None,
         'ports': None,
         'gpu_uuids': None,

@@ -7,7 +7,7 @@ and for now the only one in use.
 A rental is an order (``RentalRecord`` in ``rentals.json``: the GPU type, the box size, the customer's image, SSH
 keys, container ports and ``ends_at``) that this reconciler carries through its states:
 
-    requested -> starting -> active -> ending -> ended       failed: no_box_fits | pull_failed | start_failed | box_lost
+    requested -> starting -> active -> ending -> ended       failed: no_box_fits | box_busy | pull_failed | start_failed | box_lost
 
 * **Place** (``requested``): the best rentable box (``standing.box_rentable``: a rent range, not benched, standing
   >= standard) of that type and size with every card IDLE, best standing first, then freshest full check. Its cards go
@@ -18,6 +18,9 @@ keys, container ports and ``ends_at``) that this reconciler carries through its 
   fails the rental (``pull_failed`` / ``start_failed``); a failed start is the ordinary ``start_failed`` standing
   event, a failed pull a neutral ``pull_failed`` one (the customer's image name, not the box's fault).
   An order nothing fits waits ``NO_FIT_GRACE_S`` (a card may be CHECKING between rounds), then fails ``no_box_fits``.
+  An order pinned to one box (``box_hotkey``, the rent page's RENT NOW; ``box_uid`` from the CLI) never falls through
+  to another box of the type: a pin on a box that is held, benched, gone or not rentable fails ``box_busy`` at once,
+  one on a box merely mid-check waits the same grace and then fails ``box_busy``.
 * **Confirm** (every pass, ``starting`` with a container / ``active`` / ``ending``): the pod is inspected. Running
   extends the pay span. Gone or stopped without our stop is ``box_lost``: with the agent answering throughout that is
   the heartbeat failure of ``23`` §4a (bench, pay withheld); after missed visits it is a stop, not a cheat (Kimbo
@@ -58,6 +61,7 @@ from gittensor.agent.config import RENTAL_ENDS_AT_LABEL, RENTAL_LABEL, SYSBOX_RU
 from gittensor.controller.checks import config as cfg
 from gittensor.controller.checks.runner import HostRunner
 from gittensor.controller.checks.state import (
+    BENCHED,
     CHECKING,
     CLEAN_LEASE,
     DRAINING,
@@ -93,6 +97,7 @@ FAILED = 'failed'
 OPEN = (REQUESTED, STARTING_R, ACTIVE, ENDING)
 # failed reasons
 NO_BOX_FITS = 'no_box_fits'
+BOX_BUSY = 'box_busy'  # the order pinned a box that is taken, off the market or gone: "pick another"
 PULL_FAILED = 'pull_failed'
 START_FAILED = 'start_failed'
 BOX_LOST = 'box_lost'
@@ -135,6 +140,10 @@ class RentalError(Exception):
     pass
 
 
+class BoxBusy(RentalError):
+    """A pinned order's box cannot take it now, and no other box may (``_pick``); the order fails ``box_busy``."""
+
+
 def new_rental_id() -> str:
     return f'rnt_{secrets.token_hex(8)}'
 
@@ -153,7 +162,8 @@ class RentalRecord:
     ports: list[int] = field(default_factory=lambda: [RENTAL_SSH_PORT])  # inside the pod, 22 first
     env: dict[str, str] = field(default_factory=dict)
     ends_at: float = 0.0
-    want_box_uid: int | None = None  # the order pinned a box (re-rent the same one); None: our pick
+    want_box_uid: int | None = None  # the order pinned a box by uid (the CLI's --box); None: our pick
+    want_box_hotkey: str = ''  # the order pinned a box by hotkey (the rent page's RENT NOW); '' : our pick
     country: str = ''  # ISO-3166 alpha-2: place only on a box there (``BoxState.location``); '' = anywhere
     created_at: float = 0.0
     placed_at: float | None = None  # when a box was picked; ``started_at - placed_at`` is the deploy time published
@@ -197,6 +207,10 @@ class RentalRecord:
     @property
     def open(self) -> bool:
         return self.state in OPEN
+
+    @property
+    def pinned(self) -> bool:
+        return bool(self.want_box_hotkey) or self.want_box_uid is not None
 
 
 class RentalStore:
@@ -680,11 +694,17 @@ class RentalReconciler:
         for r in sorted(self.rentals.rentals.values(), key=lambda x: x.created_at):
             if r.state != REQUESTED or r.id in busy:
                 continue
-            box = self._pick(r, taken_boxes, now)
+            try:
+                box = self._pick(r, taken_boxes, now)
+            except BoxBusy as e:
+                self._finish(r, FAILED, BOX_BUSY)
+                report.actions.append(RentalAction('failed', r.id, r.want_box_hotkey, f'{BOX_BUSY}: {e}'))
+                continue
             if box is None:
                 if now - r.created_at >= self.no_fit_grace_s:
-                    self._finish(r, FAILED, NO_BOX_FITS)
-                    report.actions.append(RentalAction('failed', r.id, '', NO_BOX_FITS))
+                    reason = BOX_BUSY if r.pinned else NO_BOX_FITS
+                    self._finish(r, FAILED, reason)
+                    report.actions.append(RentalAction('failed', r.id, r.want_box_hotkey, reason))
                 continue
             taken_boxes.add(box.box_id)
             try:
@@ -712,14 +732,29 @@ class RentalReconciler:
             report.launched.append(r.id)
 
     def _pick(self, r: RentalRecord, taken: set[str], now: float) -> BoxState | None:
-        """The best rentable box of the type and size, wholly idle, not already carrying an open rental."""
+        """The best rentable box of the type and size, wholly idle, not already carrying an open rental. A pinned
+        order considers its one box alone: None while that box is mid-check (wait), ``BoxBusy`` when it is held,
+        benched, gone, not rentable, or not the type and size ordered (fail now, never another box)."""
+        if r.pinned:
+            box = self._pinned(r)
+            if box is None:
+                raise BoxBusy('no such box')
+            if box.box_id in taken or any(c.instance_id or c.state in (STARTING, LEASED) for c in box.cards.values()):
+                raise BoxBusy('held by another rental')
+            if box.status == BENCHED or not box_rentable(box, now, min_level=self.min_standing):
+                raise BoxBusy('off the market')
+            if gpu_type_of(box.card_name) != r.gpu_type or len(box.cards) != r.gpu_count:
+                raise BoxBusy(f'is a {gpu_type_of(box.card_name)} x{len(box.cards)}, not a {r.gpu_type} x{r.gpu_count}')
+            if box.vendor == AMD and any(u not in box.render_nodes for u in box.cards):
+                raise BoxBusy('a card has no render node pinned')
+            if box.status != IDLE or any(c.state != IDLE for c in box.cards.values()):
+                return None  # mid-check between rounds: wait the grace like any order
+            return box
         fits: list[BoxState] = []
         for box in self.boxes.boxes.values():
             if box.box_id in taken or box.status != IDLE or not box.cards:
                 continue
             if not box_rentable(box, now, min_level=self.min_standing):
-                continue
-            if r.want_box_uid is not None and box.uid != r.want_box_uid:
                 continue
             if r.country and str(box.location.get('country') or '').upper() != r.country:
                 continue  # the order named a country; a box whose location is unknown is not there
@@ -733,6 +768,13 @@ class RentalReconciler:
         if not fits:
             return None
         return max(fits, key=lambda b: (rank(standing(b.standing_events, now)), b.last_check_at or 0.0))
+
+    def _pinned(self, r: RentalRecord) -> BoxState | None:
+        """The one box a pinned order names: by hotkey (the identity), else by uid (display only, it can change on
+        re-registration; a pin by uid is the CLI's ``--box <n>``)."""
+        if r.want_box_hotkey:
+            return self.boxes.boxes.get(r.want_box_hotkey)
+        return next((b for b in self.boxes.boxes.values() if b.uid == r.want_box_uid), None)
 
     def _prepull(self, report: RentalReport, busy: set[str], runners: dict[str, HostRunner]) -> None:
         """One missing quick-pick image per wholly idle rentable box, in the background, one pull per box at a time."""
@@ -919,9 +961,11 @@ def place_order(
     box_uid: int | None = None,
     now: float | None = None,
     country: str = '',
+    box_hotkey: str = '',
 ) -> RentalRecord:
     """A new order into the store. ``rental_id`` is the app's id when the poller brings one; the CLI mints one.
-    ``country`` (ISO-3166 alpha-2, any case) places only on a box the geo lookup put there."""
+    ``country`` (ISO-3166 alpha-2, any case) places only on a box the geo lookup put there; ``box_hotkey`` (or the
+    older ``box_uid``) pins the order to one box, which is then the only box it may land on."""
     now = time.time() if now is None else now
     if gpu_count < 1 or hours <= 0 or not image or not ssh_pubkeys:
         raise RentalError('an order needs a GPU count, hours, an image and at least one SSH key')
@@ -935,6 +979,7 @@ def place_order(
         env=dict(env or {}),
         ends_at=now + hours * 3600.0,
         want_box_uid=box_uid,
+        want_box_hotkey=box_hotkey.strip(),
         country=country.strip().upper()[:2],
         created_at=now,
     )

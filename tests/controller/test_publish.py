@@ -154,9 +154,13 @@ def test_the_contract(tmp_path):
         'hotkey', 'uid', 'status', 'standing', 'gpu_type', 'vendor', 'gfx_target', 'card_count', 'rentable',
         'rentable_why', 'last_check_at',
         'last_failed', 'last_failed_why', 'bench_until', 'benched_reason', 'ladder_rung', 'strikes', 'pay',
-        'last_event', 'cards', 'host',
+        'last_event', 'cards', 'host', 'market',
     }  # fmt: skip
     assert (a['rentable'], b['rentable'], c['rentable']) == (False, False, False) and doc['offers'] == {}
+    # the rent page (box listing, 10/9): a box up for rent (a range) but benched is listed as unavailable; one never
+    # put up for rent, or whose range never answered, is not on the page at all
+    assert a['market'] == c['market'] == {'status': None, 'rented_until': None}
+    assert b['market'] == {'status': 'unavailable', 'rented_until': None}
     # why a --rent box is off the market: the probe's phrase, ours alone; None for a box that is rentable or never
     # offered a range (or, b, is off it for a bench: that is last_failed_why's story)
     assert (a['rentable_why'], b['rentable_why']) == (None, None)
@@ -206,8 +210,16 @@ def test_a_box_is_offered_when_it_is_rentable_and_wholly_idle(tmp_path):
     assert row['standing'] == 'standard' and row['rentable'] is True
     assert doc['offers'] == {}  # one card leased, one draining: rentable, not on offer
     a.cards = {UUID_A: CardState(IDLE, '', NOW), UUID_B: CardState(IDLE, '', NOW)}
-    offered = build_fleet(tmp_path, boxes, {}, {}, True, NOW)['offers']
+    doc = build_fleet(tmp_path, boxes, {}, {}, True, NOW)
+    offered = doc['offers']
     assert list(offered) == ['RTX5090'] and list(offered['RTX5090']) == ['2'] and offered['RTX5090']['2']['boxes'] == 1
+    # the rent page's word for it is the same condition that counted it in the offer row (box listing, 10/9)
+    row = next(x for x in doc['boxes'] if x['hotkey'] == HK_A)
+    assert row['market'] == {'status': 'available', 'rented_until': None}
+    a.status = BENCHED  # up for rent (a rent range), not to be had now
+    row = next(x for x in build_fleet(tmp_path, boxes, {}, {}, True, NOW)['boxes'] if x['hotkey'] == HK_A)
+    assert row['market'] == {'status': 'unavailable', 'rented_until': None}
+    a.status = IDLE
     a.standing_events = []  # back on probation: still on offer (#1818: the pay holdback is what it has at stake)
     doc = build_fleet(tmp_path, boxes, {}, {}, True, NOW)
     row = next(x for x in doc['boxes'] if x['hotkey'] == HK_A)

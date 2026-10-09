@@ -96,6 +96,7 @@ def report_body(r: RentalRecord) -> dict:
     return {
         'state': r.state,
         'box_uid': r.box_uid,
+        'box_hotkey': r.box or None,  # the box's identity: the rent page shows it on the rental (box listing, 10/9)
         'host': r.host or None,
         'ports': {k: int(v) for k, v in (r.public_map or r.port_map).items()} or None,  # what the world dials
         'gpu_uuids': list(r.uuids) or None,
@@ -190,6 +191,7 @@ class RentalPoller:
             box_uid=int(box_uid) if isinstance(box_uid, int) else None,
             now=now,
             country=str(o.get('country') or ''),
+            box_hotkey=str(o.get('box_hotkey') or ''),
         )
         r.ends_at = ends_at  # the app's exact number, not our rounding of it
         self.store.put(r)

@@ -362,10 +362,15 @@ def _link_rank(raw: str) -> int:
     return len(_NVIDIA_LINK_ORDER)  # a class we do not know is treated as the worst
 
 
+_ANSI = re.compile(r'\x1b\[[0-9;]*m')  # nvidia-smi underlines the matrix header (ESC[4m ... ESC[0m) even off a tty
+
+
 def parse_nvidia_topo(stdout: str) -> Interconnect:
     """``nvidia-smi topo -m``: the matrix header names the columns (GPUs, then NICs and affinities, which are
-    skipped), one row per GPU. The worst link between any two GPUs decides; one GPU is ``single``."""
-    lines = [line.rstrip() for line in stdout.splitlines()]
+    skipped), one row per GPU. The worst link between any two GPUs decides; one GPU is ``single``. The header
+    arrives wrapped in terminal underline codes (a real 5090 pod, 10/9): they are stripped first, or no line
+    starts with ``GPU0`` and every box reads as no topology."""
+    lines = [line.rstrip() for line in _ANSI.sub('', stdout).splitlines()]
     header = next((line for line in lines if line.lstrip().startswith('GPU0')), None)
     if header is None:
         return Interconnect()

@@ -166,6 +166,9 @@ def test_the_interconnect_parsers_name_the_worst_link_between_any_two_cards():
     assert parse_nvidia_topo(fixture('nvidia_smi_topo_2x5090.txt')) == Interconnect(PCIE, 'PHB')
     assert parse_nvidia_topo(fixture('nvidia_smi_topo_4xh100.txt')) == Interconnect(NVLINK, 'NV18')  # NICs skipped
     assert parse_nvidia_topo(fixture('nvidia_smi_topo_1x5090.txt')) == Interconnect(SINGLE, 'X')
+    # as the agent really prints it: the header wrapped in ESC[4m ... ESC[0m (Lium 5090 pod, 10/9)
+    real = fixture('nvidia_smi_topo_1x5090_real.txt')
+    assert '\x1b[4m' in real and parse_nvidia_topo(real) == Interconnect(SINGLE, 'X')
     mixed = fixture('nvidia_smi_topo_4xh100.txt').replace('GPU3\tNV18\tNV18\tNV18', 'GPU3\tSYS\tNV18\tNV18', 1)
     assert parse_nvidia_topo(mixed) == Interconnect(PCIE, 'SYS')  # one pair across sockets: the box is PCIe-class
     assert parse_nvidia_topo('') == Interconnect() and parse_nvidia_topo('nvidia-smi: not found') == Interconnect()

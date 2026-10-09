@@ -210,7 +210,7 @@ def test_up_retries_once_on_a_failed_start_and_explains_other_failures(product):
     product.orders.clear()
     product.fail_reason = 'pull_failed'  # the image: not retried, explained
     r = invoke('up', 'RTX5090', '-i', 'nobody/nothing:latest')
-    assert r.exit_code == 1 and len(product.orders) == 1 and 'could not be pulled' in r.output
+    assert r.exit_code == 1 and len(product.orders) == 1 and 'could not pull the image' in r.output
     r = invoke('up', 'RTX5090', '--json')
     assert r.exit_code == 1 and json.loads(r.output)['reason'] == 'pull_failed'
 
@@ -282,3 +282,37 @@ def test_login_checks_the_key_and_saves_it(product, tmp_path, monkeypatch):
     saved = json.loads((tmp_path / 'rent.json').read_text())
     assert saved == {'url': 'http://api.test', 'key': 'gt_testkey', 'names': {}}
     assert oct((tmp_path / 'rent.json').stat().st_mode)[-3:] == '600'
+
+
+def test_rm_says_when_the_bill_is_the_minimum_and_a_reason_reads_as_words(product):
+    product.script = ['active']
+    invoke('up', 'RTX5090', '-n', 'dev')
+    r = invoke('rm', 'dev')
+    # the fixture's rental ran 72 s and was billed 16 cents: the API's 15-minute minimum, said so
+    assert r.exit_code == 0 and 'used 1 min' in r.output and 'billed $0.16 (the 15-minute minimum)' in r.output
+    r = invoke('ps', '--all')
+    assert 'stopped by you' in r.output  # customer_stop, as words
+
+
+def test_an_edge_403_or_a_dead_url_says_to_check_the_url(monkeypatch, tmp_path):
+    import urllib.error
+
+    from gittensor.cli.rent_commands import api as rent_api
+
+    monkeypatch.setenv('GITTENSOR_API_KEY', 'gt_testkey')
+    monkeypatch.setenv('GT_API_URL', 'https://wrong.example')
+    monkeypatch.setattr(rent_api, 'RENT_CONFIG', tmp_path / 'rent.json')
+
+    def edge(req, timeout=None):  # Cloudflare's bare 403: HTML, no API error object
+        raise urllib.error.HTTPError(req.full_url, 403, 'Forbidden', Message(), io.BytesIO(b'<html>blocked</html>'))
+
+    monkeypatch.setattr('urllib.request.urlopen', edge)
+    r = invoke('balance')
+    assert r.exit_code == 1 and 'HTTP 403 from https://wrong.example' in r.stderr and '--url' in r.stderr
+
+    def dead(req, timeout=None):
+        raise urllib.error.URLError('Name or service not known')
+
+    monkeypatch.setattr('urllib.request.urlopen', dead)
+    r = invoke('balance')
+    assert r.exit_code == 1 and 'unreachable' in r.stderr and '--url' in r.stderr

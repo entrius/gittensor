@@ -653,7 +653,7 @@ class RentalReconciler:
                     b = transition_card(b, uuid, STARTING, now, r.id)
                 self.boxes.put(b)
                 self.rentals.put(r)
-            report.actions.append(RentalAction('place', r.id, box.box_id, f'{r.gpu_type} x{r.gpu_count}'))
+            report.actions.append(RentalAction('place', r.id, box.box_id, f'{r.gpu_type} x{r.gpu_count} {r.image}'))
             self._run(r.id, lambda r=r: self._start(r, report))
             report.launched.append(r.id)
 
@@ -791,7 +791,7 @@ class RentalReconciler:
             self._put(r)
             self._move_cards(r, LEASED)
             self._put_box(record_start(self._box(r.box), True, now, rental=r.id))
-            self._act(report, RentalAction('active', r.id, r.box, f'ssh {r.host}:{public}'))
+            self._act(report, RentalAction('active', r.id, r.box, f'ssh {r.host}:{public} {r.image}'))
         except Exception as e:  # any failure: undeploy what may run, fail the rental, free the cards
             reason = PULL_FAILED if str(e).startswith(PULL_FAILED) else START_FAILED
             if runner is not None and r.container_id:
@@ -808,7 +808,7 @@ class RentalReconciler:
                     else:
                         b = record_start(b, False, self.wall(), rental=r.id, reason=detail)
                     self._put_box(b)
-            self._act(report, RentalAction('failed', r.id, r.box, f'{reason}: {e}'[:300]))
+            self._act(report, RentalAction('failed', r.id, r.box, f'{reason}: {r.image}: {e}'[:300]))
         finally:
             if runner is not None:
                 getattr(runner, 'close', lambda: None)()

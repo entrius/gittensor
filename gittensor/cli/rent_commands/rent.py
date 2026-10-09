@@ -47,14 +47,15 @@ SSH_OPTS = ('-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/nul
 
 # the failure reasons as a customer should read them (the controller's codes, 29 §3)
 REASONS = {
-    'no_box_fits': 'no box of that type and size was free in time; `gitt rent ls` and try again',
-    'pull_failed': 'the image could not be pulled: check the name and tag (`docker pull` it yourself to see)',
-    'start_failed': 'the pod started but never answered on :22 (the image has to run sshd); retrying usually works',
-    'box_lost': 'the box went dark while you were on it; you were billed only up to its last heartbeat',
+    'no_box_fits': 'no box of that type and size was free in time (nothing billed); `gitt rent ls` and try again',
+    'pull_failed': 'the box could not pull the image (nothing billed): check the name and tag are public '
+    '(`docker pull` it yourself to see), or use a quick-pick',
+    'start_failed': 'the pod started but never answered on :22 (nothing billed): the image has to run sshd '
+    '(the quick-picks do); needing docker inside? use the dind quick-pick',
+    'box_lost': "the miner's box went dark while you were on it; you were billed only up to its last heartbeat",
     'ends_at': 'the rental reached its end time',
     'customer_stop': 'stopped by you',
-    'billing_stop': 'stopped: the balance ran out',
-    'insufficient_balance': 'stopped: the balance ran out',
+    'balance': 'stopped: the balance ran out (`gitt rent balance`)',
 }
 
 
@@ -446,8 +447,10 @@ def rm_command(ref, no_wait, json_mode):
         console.print(f'{_label(cfg, r)} {r.get("state")} · `gitt rent ps` to follow')
         return
     used = (r.get('ended_at') or 0) - (r.get('started_at') or 0) if r.get('started_at') else 0
+    # the API bills every minute begun and never fewer than the minimum: say so when that is what the bill is
+    minimum = f' (the {MIN_HOURS * 60:.0f}-minute minimum)' if 0 < used < MIN_HOURS * 3600 else ''
     console.print(
-        f'{r.get("state")} {_label(cfg, r)} · used {used / 60:.0f} min · billed {_usd(r.get("billed_cents"))}'
+        f'{r.get("state")} {_label(cfg, r)} · used {used / 60:.0f} min · billed {_usd(r.get("billed_cents"))}{minimum}'
         f' · balance {_usd((bal or {}).get("balance_cents"))}'
     )
 

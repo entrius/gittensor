@@ -101,9 +101,17 @@ class RentApi:
             message = err.get('message') or (f'HTTP {e.code}: {text[:120]}' if text and not err else f'HTTP {e.code}')
             if e.code == 401 and not err:
                 message = 'not logged in: `gitt rent login <api key>` (keys: the app, /keys)'
+            elif e.code == 403 and not err:  # the edge (Cloudflare) answering, not the API: a wrong URL or agent
+                message = (
+                    f'HTTP 403 from {self.url} with no API error: is the URL the product API? `gitt rent login --url`'
+                )
+            elif e.code == 404 and not err:
+                message = f'HTTP 404 at {self.url}{path}: is the URL the product API? `gitt rent login --url`'
             raise ApiError(message, err.get('type') or f'http_{e.code}', e.code) from None
         except urllib.error.URLError as e:
-            raise ApiError(f'{self.url}: {e.reason}', 'unreachable') from None
+            raise ApiError(
+                f'{self.url}: {e.reason} (unreachable: the URL, your network? `gitt rent login --url`)', 'unreachable'
+            ) from None
         if not raw:
             return {}
         try:

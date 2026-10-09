@@ -28,7 +28,7 @@ from gittensor.controller.checks.scrape import (
     parse_meminfo_total_gb,
     scrape_host,
 )
-from gittensor.controller.checks.state import ADMIT, BENCHED, IDLE, BoxState, CardState, apply_verdict, download_due
+from gittensor.controller.checks.state import BENCHED, IDLE, BoxState, CardState, apply_verdict, download_due
 from gittensor.controller.checks.verdict import CheckResult, CheckVerdict
 from gittensor.controller.publish import build_fleet, guaranteed_host, observed_min_host
 from tests.controller.conftest import CONFIG, NETWORK_TARGETS, fixture, passing_amd_runner, passing_runner
@@ -48,7 +48,9 @@ def test_the_parsers_read_the_recorded_host():
     assert probe == DownloadProbe(200, 29754290, 28412482.0) and probe.mbps == pytest.approx(227.3, abs=0.1)
     # anything short of a 200 with bytes on the wire is no sample, never a number
     assert parse_download_probe('0.000 0 000').mbps is None  # curl could not connect
-    assert parse_download_probe('1200000.000 1800000 200').mbps == pytest.approx(9.6)  # cut off at the timeout: the sample
+    assert parse_download_probe('1200000.000 1800000 200').mbps == pytest.approx(
+        9.6
+    )  # cut off at the timeout: the sample
     assert parse_download_probe('5000000 29754290 401').mbps is None  # Hub refused the token
     assert parse_download_probe('').mbps is None and parse_download_probe('garbage').mbps is None
 
@@ -74,7 +76,9 @@ def test_the_scrape_adds_three_host_steps_and_a_failed_one_leaves_its_field_none
     # the disk size comes from the one df call the free check makes: no second df
     assert sum(c.startswith('df ') for c in passing_runner_calls(scrape_host, network_targets=())) == 1
     runner = passing_runner().on(MEMINFO_COMMAND, CommandResult(1, '', 'cat: /proc/1/root/proc/meminfo: No such file'))
-    runner.on(CPU_THREADS_COMMAND, 'nproc: invalid option\n').on(DOWNLOAD_PROBE_COMMAND, CommandResult(3, '', 'no pull token'))
+    runner.on(CPU_THREADS_COMMAND, 'nproc: invalid option\n').on(
+        DOWNLOAD_PROBE_COMMAND, CommandResult(3, '', 'no pull token')
+    )
     scrape = scrape_host(runner, network_targets=())
     assert scrape.ram_total_gb is None and 'meminfo' in scrape.errors
     assert scrape.cpu_threads is None and 'cpu_threads' not in scrape.errors  # the command answered, unparseably
@@ -142,13 +146,17 @@ def test_advertised_mode_passes_and_lists_every_shortfall_with_its_number_and_th
 def test_hard_mode_fails_a_shortfall_with_a_public_phrase_that_names_the_fix():
     result = ck.check_host_spec(host_scrape(ram=16), cfg.RTX_5090, 2, None, hard=True)
     assert not result.passed and result.evidence[w.PUBLIC] == {'code': w.RAM_BELOW_FLOOR, 'ram_gb': 16, 'count': 2, 'floor_gb': 32}  # fmt: skip
-    assert w.render(result.evidence[w.PUBLIC]) == 'host RAM is 16 GB, and a 2-card box of this type needs at least 32 GB'
+    assert (
+        w.render(result.evidence[w.PUBLIC]) == 'host RAM is 16 GB, and a 2-card box of this type needs at least 32 GB'
+    )
     cpu = ck.check_host_spec(host_scrape(cpu=2), cfg.RTX_5090, 1, None, hard=True)
     assert w.render(cpu.evidence[w.PUBLIC]) == 'the host has 2 CPU threads, and a 1-card box of this type needs at least 4 threads'  # fmt: skip
     disk = ck.check_host_spec(host_scrape(disk=40), cfg.RTX_5090, 1, None, hard=True)
     assert w.render(disk.evidence[w.PUBLIC]) == "total disk is 40 GB, and idle pay needs 1.5x the cards' VRAM, 51 GB"
     unread = ck.check_host_spec(HostScrape(down_mbps=200.0), cfg.RTX_5090, 1, None, hard=True)
-    assert not unread.passed and unread.evidence[w.PUBLIC] == {'code': w.HOST_UNREADABLE}  # fails closed, like disk_free
+    assert not unread.passed and unread.evidence[w.PUBLIC] == {
+        'code': w.HOST_UNREADABLE
+    }  # fails closed, like disk_free
     assert ck.check_host_spec(host_scrape(), cfg.RTX_5090, 1, None, hard=True).passed
     # the flip is one constant: the check's default reads it
     assert ck.check_host_spec(host_scrape(ram=16), cfg.RTX_5090, 2, None).passed  # advertised today
@@ -214,13 +222,17 @@ def test_every_verdict_keeps_the_record_on_the_box_and_a_bench_restarts_the_coun
     assert not download_due(box, NOW) and download_due(box, NOW + cfg.FULL_CHECK_INTERVAL_S)
     benched = apply_verdict(box, verdict_with({**first, 'down_below_rounds': 3}, passed=False), NOW + 1)
     assert benched.status == BENCHED and benched.last_failed == [ck.HOST_SPEC]
-    assert benched.host_specs['down_mbps'] == 50.0 and benched.host_specs['down_below_rounds'] == 0  # history stays, the count restarts
+    assert (
+        benched.host_specs['down_mbps'] == 50.0 and benched.host_specs['down_below_rounds'] == 0
+    )  # history stays, the count restarts
     # a strike (nothing judged) still moves the record on: the EMA is measurement, not judgement
     not_run = CheckVerdict.from_checks(
         [CheckResult(ck.HOST_SPEC, True, {'host': {**first, 'down_mbps': 80.0}}), CheckResult('gpu_proof', False, {}, not_run=True)],
         [UUID_A], now=NOW,
     )  # fmt: skip
-    struck = apply_verdict(BoxState(HK_A, status=IDLE, pinned_uuids=[UUID_A], cards={UUID_A: CardState()}), not_run, NOW)
+    struck = apply_verdict(
+        BoxState(HK_A, status=IDLE, pinned_uuids=[UUID_A], cards={UUID_A: CardState()}), not_run, NOW
+    )
     assert struck.not_run_count == 1 and struck.host_specs['down_mbps'] == 80.0
     # a verdict without the check (an older controller's) leaves what the box had
     bare = CheckVerdict.from_checks([CheckResult('gpu_spec', True)], [UUID_A], now=NOW)
@@ -233,7 +245,9 @@ def test_the_full_check_feeds_the_record_through_and_the_recorded_box_is_admitte
     assert verdict.admitted
     host = verdict.host
     assert host['ram_gb'] == 135.1 and host['cpu_threads'] == 32 and host['disk_total_gb'] == 1967.8
-    assert host['down_mbps'] == 138.2 and host['down_sample_mbps'] == 227.3 and host['shortfalls'] == []  # 0.3 x 227 + 0.7 x 100
+    assert (
+        host['down_mbps'] == 138.2 and host['down_sample_mbps'] == 227.3 and host['shortfalls'] == []
+    )  # 0.3 x 227 + 0.7 x 100
     assert verdict.as_dict()['host'] == host
     # three rounds under the floor on the box's record, and this one still under: the normal failed-check path
     slow = passing_runner(download='1250000 29754290 200')  # 10 Mbps

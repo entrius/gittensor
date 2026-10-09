@@ -177,13 +177,13 @@ def test_an_eight_card_box_is_one_box_and_every_card_gets_its_own_node(proof, al
 
 
 def test_a_listed_amd_type_is_not_admitted_until_the_row_flips(proof, allowlist):
-    """An AMD row is listed until its digest run flips it: an MI300X (the droplet's card with the MI300X device id) on the
+    """An AMD row is listed until its digest run flips it: an MI300A (the droplet's card with the MI300A device id) on the
     catalog as shipped benches, and the phrase names the type, not a missing marketing name."""
-    mi300x = passing_amd_runner(sysfs=SYSFS_1.replace('device=0x74b9', 'device=0x74a1'))
-    verdict = run_full_check(mi300x, allowlist, proof, pinned_uuids=None, config=CONFIG, now=1_000.0)
+    mi300a = passing_amd_runner(sysfs=SYSFS_1.replace('device=0x74b9', 'device=0x74a0'))
+    verdict = run_full_check(mi300a, allowlist, proof, pinned_uuids=None, config=CONFIG, now=1_000.0)
     assert verdict.verdict == BENCH and verdict.failed == [ck.GPU_SPEC]
     assert (
-        str(check(verdict, ck.GPU_SPEC).evidence['reason']) == 'model 0x74a1 (MI300X) is listed but not qualified yet'
+        str(check(verdict, ck.GPU_SPEC).evidence['reason']) == 'model 0x74a0 (MI300A) is listed but not qualified yet'
     )
     assert why_of(verdict, ck.GPU_SPEC) == w.render({'code': w.SPEC_MODEL, 'n': 1})
     assert check(verdict, ck.GPU_PROOF).skipped and proof.staged == []
@@ -276,8 +276,9 @@ def test_the_amd_rows_are_listed_matched_by_pci_id_and_priced():
     assert set(amd) == {'MI300X', 'MI325X', 'MI350', 'MI300A', 'R9700'}
     assert all(s.pci_ids and s.gfx_target and s.compute_cap == s.gfx_target for s in amd.values())
     # MI325X qualified 10/9: the digest reproduced on four runs on the droplet, fill and time limit met (vault 33);
-    # MI300X stays listed until Alex calls whether its gfx942 sibling qualifies it
-    assert amd['MI325X'].qualified and all(s.status == LISTED for t, s in amd.items() if t != 'MI325X')
+    # MI300X qualified with it on Alex's call: the same gfx942 silicon answers the same digest (vault 33 section 10)
+    gfx942 = {'MI300X', 'MI325X'}
+    assert all(amd[t].qualified for t in gfx942) and all(s.status == LISTED for t, s in amd.items() if t not in gfx942)
     ids = [i for s in amd.values() for i in s.pci_ids]
     assert len(ids) == len(set(ids)) and spec_for_pci_id('0x74A1') is amd['MI300X'] and spec_for_pci_id('') is None
     # the droplet's MI325X reports device 0x74b9 (0x74a5, AMD's listed id, is its subsystem id): both find the row

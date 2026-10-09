@@ -38,7 +38,15 @@ from gittensor.controller.checks.vendor import NVIDIA
 from gittensor.controller.proof.slot import image_ref as proof_image_ref
 
 from . import docker_exec
-from .prereqs import CheckResult, HostProbe, PrereqReport, render_table, run_prereqs, run_publish_prereqs
+from .prereqs import (
+    MINER_DOCS_URL,
+    CheckResult,
+    HostProbe,
+    PrereqReport,
+    render_table,
+    run_prereqs,
+    run_publish_prereqs,
+)
 
 ENDPOINT_CHECK = 'Endpoint published'
 
@@ -405,7 +413,11 @@ def up_command(
         console.print(render_table(report.results))
 
     if not report.ok and not dry_run:
-        _error('Prerequisites failed; fix the rows marked fail and run `gitt up` again.', json_mode)
+        _error(
+            'Prerequisites failed; fix the rows marked fail and run `gitt up` again '
+            f'(each row is explained at {MINER_DOCS_URL}).',
+            json_mode,
+        )
         sys.exit(1)
 
     if dry_run:
@@ -444,7 +456,9 @@ def up_command(
             f'workload ports {low}-{high} stay free on this box, nothing to open.'
         )
         err_console.print(
-            '[dim]Nothing else to do: the controller takes it from here. `gitt down` stops the agent.[/dim]'
+            '[dim]Nothing else to do: the controller takes it from here. It finds a registered box within about 5 minutes, '
+            'proves the cards every 20 minutes, and the row for this hotkey on gittensor.io/compute says why if a check '
+            'fails. `gitt down` stops the agent.[/dim]'
         )
     _prepull_proof_image(json_mode, report.vendor)
 
@@ -536,4 +550,6 @@ def _publish_only(wallet, hotkey, netuid, endpoint, ip, ssh_port, skip_reachabil
 def release_channel_result(channel, error, url):
     if channel is not None:
         return CheckResult('Release channel', True, f'{channel.version or "?"} → {channel.agent[-19:]} ({url})')
-    return CheckResult('Release channel', False, error[:160])
+    return CheckResult(
+        'Release channel', False, f'could not load the signed release channel ({error[:120]}): this box needs HTTPS to {url}'
+    )  # fmt: skip

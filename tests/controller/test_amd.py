@@ -204,7 +204,9 @@ def test_a_partitioned_card_a_zero_serial_and_an_old_stack_each_bench_with_their
     assert wrong_gfx.failed == [ck.GPU_SPEC] and why_of(wrong_gfx, ck.GPU_SPEC) == w.render({'code': w.SPEC_COMPUTE_CAP, 'n': 1})  # fmt: skip
     # an old kernel AND no DKMS driver (the droplet's 6.19 DKMS would pass the floor on any kernel)
     old = verdict_for(SYSFS_1.replace('kernel=6.8.0-137-generic', 'kernel=5.15.0-122-generic').replace('amdgpu=6.19.14.31400000', 'amdgpu='))  # fmt: skip
-    assert old.failed == [ck.AMD_STACK] and why_of(old, ck.AMD_STACK) == w.PHRASES[w.STACK_BELOW_FLOOR]
+    assert old.failed == [ck.AMD_STACK] and why_of(old, ck.AMD_STACK) == (
+        "this box's kernel and AMD driver are older than the pool floor (kernel 6.8 or amdgpu DKMS 6.2)"
+    )
     assert '5.15.0-122-generic' not in why_of(old, ck.AMD_STACK)  # the version is the box's and stays in the log
     dkms = verdict_for(
         SYSFS_1.replace('kernel=6.8.0-137-generic', 'kernel=5.15.0-122-generic')

@@ -93,9 +93,12 @@ class TestRunLines:
             'GT_AGENT_MINER_HOTKEY=$MINER_HOTKEY',
             'GT_AGENT_IMAGE=$image',
             'GT_AGENT_IMAGE_DIGEST=$digest',
-            'NVIDIA_DRIVER_CAPABILITIES=all',
+            '-e "$vendor_env"',
         ):
             assert needle in run_block, needle
+        assert (
+            'vendor_env="NVIDIA_DRIVER_CAPABILITIES=all"' in script
+        )  # the default; an AMD box names its vendor instead
         assert '8200' not in run_block and 'HTTP_PORT' not in script
         assert f'--label {config.RENT_PORTS_LABEL}=$RENT_PORTS' in script and '$rent_label' in run_block
         # every env var the runner reads is one the CLI sets on it
@@ -277,9 +280,11 @@ def test_an_amd_box_starts_the_agent_without_the_nvidia_runtime():
     amd = render(agent_run_command(image=AGENT_REF, ssh_port=2200, vendor='amd'))
     assert '--privileged --pid host --gpus all -v /var/run/docker.sock' in nvidia
     assert '--privileged --pid host -v /var/run/docker.sock' in amd and '--gpus' not in amd
-    assert amd.replace('--privileged --pid host', '--privileged --pid host --gpus all') == nvidia  # the only difference
+    assert '-e NVIDIA_DRIVER_CAPABILITIES=all' in nvidia and '-e GT_AGENT_VENDOR=amd' in amd and 'NVIDIA' not in amd
+    same = amd.replace('--privileged --pid host', '--privileged --pid host --gpus all').replace('GT_AGENT_VENDOR=amd', 'NVIDIA_DRIVER_CAPABILITIES=all')  # fmt: skip
+    assert same == nvidia  # the only two differences
     assert '-e GT_AGENT_VENDOR=amd' in render(runner_run_command(runner_image=RUNNER_REF, ssh_port=2200, vendor='amd'))
     assert 'GT_AGENT_VENDOR' not in render(runner_run_command(runner_image=RUNNER_REF, ssh_port=2200))
     script = RUNNER_SH.read_text()
     assert 'VENDOR="${GT_AGENT_VENDOR:-nvidia}"' in script
-    assert '[ "$VENDOR" = "amd" ] && gpu_flags=""' in script
+    assert '[ "$VENDOR" = "amd" ] && { gpu_flags=""; vendor_env="GT_AGENT_VENDOR=amd"; }' in script

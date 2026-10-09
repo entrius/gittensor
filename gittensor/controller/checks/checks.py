@@ -154,7 +154,7 @@ def check_amd_spec(scrape: HostScrape, spec: Optional[cfg.CardSpec] = None) -> C
         spec = spec_for_pci_id(amd[0].device_id)
         if spec is None or not spec.qualified:
             why = 'is not in the GPU catalog' if spec is None else f'({spec.gpu_type}) is listed but not qualified yet'
-            claimed = f'{amd[0].device_id} ({amd[0].product_name or "?"})'
+            claimed = amd[0].device_id + (f' ({amd[0].product_name})' if amd[0].product_name else '')
             return CheckResult(
                 GPU_SPEC,
                 False,

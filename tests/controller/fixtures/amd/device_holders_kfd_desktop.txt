@@ -1,7 +1,7 @@
-/proc/1/root/proc/1642/fd /dev/dri/renderD128
+/proc/1/root/proc/1642/fd /dev/dri/renderD129
 /proc/1/root/proc/1642/fd /dev/dri/card1
 /proc/1/root/proc/3310/fd /dev/kfd
-/proc/1/root/proc/3310/fd /dev/dri/renderD128
+/proc/1/root/proc/3310/fd /dev/dri/renderD129
 == 1642 gnome-shell
 0::/user.slice/user-1000.slice/session-2.scope
 == 3310 python3

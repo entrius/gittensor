@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 import re
 import shutil
 import socket
@@ -50,10 +51,12 @@ from gittensor.controller.checks.scrape import (
 )
 from gittensor.controller.checks.vendor import (
     AMD,
+    AMD_KFD,
     BOTH,
     NVIDIA,
     VENDOR_DETECT_COMMAND,
     parse_vendor,
+    render_node_path,
     vendor_or_default,
 )
 
@@ -239,6 +242,13 @@ class HostProbe:
         proc = self.run(['docker', 'inspect', '--format', '{{.State.Status}}', name])
         return proc.stdout.strip() or None if proc.returncode == 0 else None
 
+    def device_mode(self, path: str) -> int | None:
+        """The permission bits of a device node (``0o666``), None when it is missing."""
+        try:
+            return os.stat(path).st_mode & 0o777
+        except OSError:
+            return None
+
     def kernel_release(self) -> str:
         proc = self.run(['uname', '-r'])
         return proc.stdout.strip() if proc.returncode == 0 else ''
@@ -291,6 +301,9 @@ def check_vendor(detected: str) -> CheckResult:
 
 AMD_DRIVER_CHECK = 'AMD driver'
 AMD_FLOOR_CHECK = 'AMD driver floor'
+AMD_NODES_CHECK = 'AMD device nodes'
+AMD_UDEV_RULE = '/etc/udev/rules.d/99-gittensor-amd.rules'
+AMD_NODE_MODE = 0o666
 
 
 def check_amd_driver(probe: HostProbe) -> list[CheckResult]:
@@ -305,6 +318,10 @@ def check_amd_driver(probe: HostProbe) -> list[CheckResult]:
     for c in cards:
         spec = spec_for_pci_id(c.device_id)
         names.append(spec.gpu_type if spec is not None else f'{c.device_id} (not in the GPU catalog)')
+        if spec is None:  # the controller's gpu_spec check refuses it; the miner hears it here first
+            problems.append(
+                f'{c.render_node} is device {c.device_id}, not a type in the GPU catalog: the pool cannot admit it'
+            )
         if not c.id_ok:
             problems.append(f'{c.render_node} reports no usable serial (unique_id): the pool cannot pin the card')
         if not c.whole:
@@ -313,6 +330,22 @@ def check_amd_driver(probe: HostProbe) -> list[CheckResult]:
         return [CheckResult(AMD_DRIVER_CHECK, False, '; '.join(problems)[:200])]
     detail = f'amdgpu; {len(cards)} card(s): {", ".join(sorted(set(names)))}; {", ".join(c.render_node for c in cards)}'
     rows = [CheckResult(AMD_DRIVER_CHECK, True, detail)]
+    # Measured 10/9 (vault 33): under Sysbox the nodes appear as nobody:nogroup inside the pod, so no group bit can
+    # apply and --group-add is useless; the nodes must be world-readable-writable on the host. A stock udev rule
+    # makes them 0660 root:render; docker/agent/sysbox-setup.sh sets 0666 and drops a rule that keeps it.
+    nodes = [AMD_KFD, *(render_node_path(c.render_node) for c in cards)]
+    wrong = [n for n in nodes if probe.device_mode(n) != AMD_NODE_MODE]
+    if wrong:
+        rows.append(
+            CheckResult(
+                AMD_NODES_CHECK,
+                False,
+                f'{", ".join(wrong)} not 0666: a pod under Sysbox cannot open the card. Fix: chmod 0666 {" ".join(nodes)} '
+                f'and write {AMD_UDEV_RULE} (docker/agent/sysbox-setup.sh does both)',
+            )
+        )
+    else:
+        rows.append(CheckResult(AMD_NODES_CHECK, True, f'{", ".join(nodes)} are 0666'))
     kmin, dmin = ccfg.AMD_KERNEL_MIN, ccfg.AMD_DKMS_MIN
     if version_tuple(stack.kernel) >= kmin:
         rows.append(CheckResult(AMD_FLOOR_CHECK, True, f'kernel {stack.kernel}'))

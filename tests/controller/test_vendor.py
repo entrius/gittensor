@@ -82,34 +82,32 @@ def test_an_amd_catalog_row_needs_its_ids_and_an_nvidia_row_none():
 def test_an_amd_card_is_attached_by_device_nodes_and_an_nvidia_card_by_gpus():
     assert v.render_node_path('renderD128') == '/dev/dri/renderD128'
     assert v.render_node_path('129') == '/dev/dri/renderD129' and v.render_node_path('/dev/dri/renderD130') == '/dev/dri/renderD130'  # fmt: skip
-    assert v.amd_attach_args(['renderD128']) == [
-        '--device /dev/kfd',
-        '--device /dev/dri/renderD128',
-        '--group-add video',
-        '--group-add render',
-    ]
-    assert v.amd_attach_args([]) == [
-        '--device /dev/kfd',
-        '--group-add video',
-        '--group-add render',
-    ]  # never all of /dev/dri
+    # no --group-add (10/9 droplet): a name does not resolve inside the image, and Sysbox maps the nodes to
+    # nobody:nogroup; the nodes are 0666 on the host instead
+    assert v.amd_attach_args(['renderD128']) == ['--device /dev/kfd', '--device /dev/dri/renderD128']
+    assert v.amd_attach_args([]) == ['--device /dev/kfd']  # never all of /dev/dri
     # the proof container: one card, its render node
     line = slot.create_command(
         'img', 'AMD-0123456789abcdef', 'gt-proof-0', ['--x'], vendor=v.AMD, render_node='renderD128'
     )
-    assert line.startswith('docker create --device /dev/kfd --device /dev/dri/renderD128 --group-add video --group-add render --name gt-proof-0')  # fmt: skip
+    assert line.startswith('docker create --device /dev/kfd --device /dev/dri/renderD128 --name gt-proof-0')
+    assert '--group-add' not in line
     assert '--gpus' not in line and '--label io.gittensor.proof.uuid=AMD-0123456789abcdef img --x' in line
     assert slot.create_command('img', 'GPU-1', 'gt-proof-0').startswith('docker create --gpus="device=GPU-1"')
     # the rental pod: every card of the box by its pinned render node, and no pod without the pin (31 §2 #2)
     pod = rt.pod_run_command(rt.RentalRecord('rnt_1', uuids=['AMD-1', 'AMD-2'], image='x', vendor=v.AMD, render_nodes=NODES))  # fmt: skip
-    assert '--device /dev/kfd --device /dev/dri/renderD128 --device /dev/dri/renderD129 --group-add video --group-add render' in pod  # fmt: skip
+    assert '--device /dev/kfd --device /dev/dri/renderD128 --device /dev/dri/renderD129 ' in pod and '--group-add' not in pod  # fmt: skip
+    # a Sysbox pod gets the host's KFD topology at a side path (sysbox-fs serves the real one empty) and binds it in
+    assert '-v /sys/devices/virtual/kfd:/host-kfd:ro' in pod
+    assert '-v /sys/devices/virtual/kfd' not in rt.pod_run_command(rt.RentalRecord('rnt_1', uuids=['AMD-1', 'AMD-2'], image='x', vendor=v.AMD, render_nodes=NODES), runtime='runc')  # fmt: skip
+    assert rt.kfd_topology_bind_command('c' * 64) == f"docker exec -u 0 {'c' * 64} sh -c 'mount --bind /host-kfd/kfd/topology /sys/devices/virtual/kfd/kfd/topology'"  # fmt: skip
     assert '--gpus' not in pod and '/dev/dri ' not in pod and '--label io.gittensor.uuid=AMD-1,AMD-2' in pod
     with pytest.raises(rt.RentalError, match='no render node pinned for 1 of 2'):
         rt.pod_run_command(rt.RentalRecord('rnt_1', uuids=['AMD-1', 'AMD-2'], image='x', vendor=v.AMD, render_nodes={'AMD-1': 'renderD128'}))  # fmt: skip
     assert '--gpus \'"device=GPU-1"\'' in rt.pod_run_command(rt.RentalRecord('rnt_1', uuids=['GPU-1'], image='x'))
     # a workload instance: one card
     spec = RunSpec('i-1', 'e@1', 'img@sha256:' + '1' * 64, 'AMD-1', None, vendor=v.AMD, render_node='renderD129')
-    assert '--device /dev/kfd --device /dev/dri/renderD129 --group-add video --group-add render' in run_command(spec)
+    assert '--device /dev/kfd --device /dev/dri/renderD129 ' in run_command(spec) and '--group-add' not in run_command(spec)  # fmt: skip
     assert '--gpus "device=GPU-1"' in run_command(RunSpec('i-1', 'e@1', 'img@sha256:' + '1' * 64, 'GPU-1', None))
 
 
@@ -168,8 +166,11 @@ def test_placement_copies_the_pin_to_the_rental_and_skips_an_amd_box_without_one
     assert [a.kind for a in report.actions] == ['place', 'active'] and r.state == rt.ACTIVE
     assert r.vendor == v.AMD and r.render_nodes == nodes and r.uuids == [U1, U2]
     line = next(c for c in runner.calls if c.startswith('docker run -d'))
-    assert '--device /dev/kfd --device /dev/dri/renderD128 --device /dev/dri/renderD129 --group-add video' in line
+    assert '--device /dev/kfd --device /dev/dri/renderD128 --device /dev/dri/renderD129' in line and '--group-add' not in line  # fmt: skip
     assert '--gpus' not in line and '--runtime=sysbox-runc' in line
+    # the pod got the host's KFD topology bound in right after start, before the customer's keys
+    execs = [c for c in runner.calls if c.startswith('docker exec')]
+    assert execs[0].startswith('docker exec -u 0 ') and 'mount --bind /host-kfd/kfd/topology' in execs[0] and 'authorized_keys' in execs[1]  # fmt: skip
     # the record round-trips through rentals.json
     assert rt.RentalStore(tmp_path / 'rentals.json').rentals[r.id].render_nodes == nodes
     # an AMD box with no pin (an old boxes.json, a check that never saw the nodes) is not placed

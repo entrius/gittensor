@@ -190,3 +190,16 @@ def test_the_vendor_is_published_per_box(tmp_path):
     assert doc['boxes'][0]['vendor'] == v.AMD
     doc = build_fleet(tmp_path, {HK: rentable_box()}, {}, {}, False, NOW)
     assert doc['boxes'][0]['vendor'] == v.NVIDIA
+
+
+def test_an_amd_integrated_display_beside_nvidia_cards_is_not_a_mixed_box():
+    # a Lium 2x 5090 host (10/9): the Ryzen's Raphael iGPU (0x164e) loads amdgpu, the KFD shows no compute node
+    assert v.parse_vendor('nvidia\namdgpu\namd_device=0x164e\namd_simd=0\n') == v.NVIDIA
+    assert v.parse_vendor('nvidia\namdgpu\namd_device=0x164e\n') == v.NVIDIA
+    # a real Instinct beside NVIDIA cards is mixed, by its catalog id or by a KFD compute node
+    assert v.parse_vendor('nvidia\namdgpu\namd_device=0x74b9\n') == v.BOTH
+    assert v.parse_vendor('nvidia\namdgpu\namd_device=0x1234\namd_simd=1216\n') == v.BOTH
+    # an AMD-only box: the card by id, the module alone (old output), and an iGPU-only box that is no GPU box at all
+    assert v.parse_vendor('amdgpu\namd_device=0x74b9\namd_simd=1216\n') == v.AMD
+    assert v.parse_vendor('amdgpu\n') == v.AMD
+    assert v.parse_vendor('amdgpu\namd_device=0x164e\n') == ''

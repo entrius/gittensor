@@ -24,7 +24,7 @@ from gittensor.controller.checks.scrape import (
     scrape_host,
 )
 from gittensor.controller.checks.state import ADMIT, IDLE, BoxState, apply_verdict
-from gittensor.controller.checks.vendor import AMD, NVIDIA
+from gittensor.controller.checks.vendor import AMD, NVIDIA, VENDOR_DETECT_COMMAND
 from gittensor.controller.checks.verdict import BENCH, CheckVerdict
 from gittensor.controller.pay.rates import load_rates
 from gittensor.controller.publish import build_fleet
@@ -120,9 +120,7 @@ def test_the_amd_scrape_asks_sysfs_and_opens_nothing_on_the_card():
     assert unknown.gpus[0].name == 'AMD 0x7777' and spec_for_pci_id('0x7777') is None
     # a dead transport on the sysfs step fails that step and leaves no cards
     dead = scrape_host(
-        FakeRunner()
-        .on(a.AMD_SYSFS_COMMAND, ConnectionError('reset'))
-        .on('for m in nvidia amdgpu; do test -d /sys/module/$m && echo $m; done; true', 'amdgpu\n'),
+        FakeRunner().on(a.AMD_SYSFS_COMMAND, ConnectionError('reset')).on(VENDOR_DETECT_COMMAND, 'amdgpu\n'),
         network_targets=(),
     )
     assert dead.vendor == AMD and dead.gpus == [] and 'ConnectionError' in dead.errors['amd_sysfs']

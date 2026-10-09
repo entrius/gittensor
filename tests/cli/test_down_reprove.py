@@ -30,5 +30,7 @@ def test_a_reprove_in_flight_is_waited_out_then_quiet():
 
 def test_a_stale_proof_container_hits_the_cap():
     clock = Clock()
-    assert not down.wait_for_reprove(quiet_s=45, cap_s=180, poll_s=5, clock=clock, sleep=clock.sleep, containers=lambda: ['x'])
+    assert not down.wait_for_reprove(
+        quiet_s=45, cap_s=180, poll_s=5, clock=clock, sleep=clock.sleep, containers=lambda: ['x']
+    )
     assert clock.t == 180.0

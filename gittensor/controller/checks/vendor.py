@@ -21,7 +21,17 @@ BOTH = 'both'  # both kernel modules loaded: one vendor per box, refused once th
 # Which GPU kernel module the box runs. Read from sysfs, which the agent (privileged, host pid) sees as the host's:
 # the NVIDIA driver registers ``/sys/module/nvidia``, the in-tree AMD driver ``/sys/module/amdgpu``. One line per
 # module found; nothing when neither is loaded (the nvidia-smi scrape then fails closed as it does today).
-VENDOR_DETECT_COMMAND = 'for m in nvidia amdgpu; do test -d /sys/module/$m && echo $m; done; true'
+# After the module lines: every AMD render node's PCI device id (``amd_device=0x74b9``) and every KFD node's
+# ``simd_count`` (``amd_simd=1216``). ``amdgpu`` alone does not make a box AMD: a Ryzen's integrated display (Raphael,
+# 0x164e, seen on a Lium 2x 5090 host 10/9) loads it too. The AMD side counts only when a device is a catalog AMD card
+# or the KFD topology shows a compute node (simd_count > 0); a display-only AMD device beside NVIDIA cards is ignored.
+VENDOR_DETECT_COMMAND = (
+    'for m in nvidia amdgpu; do test -d /sys/module/$m && echo $m; done; '
+    'for n in /sys/class/drm/renderD*/device; do [ "$(cat $n/vendor 2>/dev/null)" = 0x1002 ] '
+    '&& echo "amd_device=$(cat $n/device 2>/dev/null)"; done; '
+    'grep -h "^simd_count " /sys/class/kfd/kfd/topology/nodes/*/properties 2>/dev/null | sed "s/^simd_count /amd_simd=/"; '
+    'true'
+)
 _MODULE_VENDOR = {'nvidia': NVIDIA, 'amdgpu': AMD}
 
 # AMD cards are attached as device nodes, not through a container runtime (30 §1 #5): ``/dev/kfd`` (the compute
@@ -35,8 +45,19 @@ AMD_DRI = '/dev/dri'
 
 
 def parse_vendor(stdout: str) -> str:
-    """``nvidia``, ``amd``, ``both`` or '' (neither module loaded)."""
-    found = {_MODULE_VENDOR[line.strip()] for line in stdout.splitlines() if line.strip() in _MODULE_VENDOR}
+    """``nvidia``, ``amd``, ``both`` or '' (neither module loaded). ``amdgpu`` counts as a GPU vendor only when the
+    command also saw a compute-capable AMD device: a catalog AMD PCI id or a KFD node with ``simd_count`` > 0. Output
+    without any ``amd_device=`` line (no AMD render node at all) keeps the module's word, as before."""
+    lines = [line.strip() for line in stdout.splitlines()]
+    found = {_MODULE_VENDOR[line] for line in lines if line in _MODULE_VENDOR}
+    devices = [line.split('=', 1)[1].strip().lower() for line in lines if line.startswith('amd_device=')]
+    simds = [line.split('=', 1)[1].strip() for line in lines if line.startswith('amd_simd=')]
+    if AMD in found and devices:
+        from gittensor.controller.checks.catalog import spec_for_pci_id  # noqa: PLC0415  (catalog imports this module)
+
+        compute = any(spec_for_pci_id(d) is not None for d in devices) or any(n.isdigit() and int(n) > 0 for n in simds)
+        if not compute:
+            found.discard(AMD)  # an integrated display, not a card the pool could judge
     if len(found) > 1:
         return BOTH
     return found.pop() if found else ''

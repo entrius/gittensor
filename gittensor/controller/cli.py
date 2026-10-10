@@ -2206,8 +2206,9 @@ def rentals_list_command(state_dir, json_mode):
 @click.option('--hours', type=float, default=1.0, show_default=True)
 @click.option('--port', 'ports', multiple=True, type=int, help='A pod port to publish besides 22 (repeatable).')
 @click.option('--box-uid', type=int, default=None, help='Pin the order to one box by UID.')
+@click.option('--box-hotkey', default='', help='Pin the order to one box by hotkey (what the rent page does).')
 @_state_options
-def rentals_order_command(gpu_type, count, image, pubkeys, hours, ports, box_uid, state_dir, json_mode):
+def rentals_order_command(gpu_type, count, image, pubkeys, hours, ports, box_uid, box_hotkey, state_dir, json_mode):
     """Place an order by hand (a test, or an operator renting a box to someone directly). The daemon places it on its
     next pass; `rentals list` shows the SSH address once it is active."""
     from gittensor.controller.rentals import RentalError, RentalStore, place_order
@@ -2224,6 +2225,7 @@ def rentals_order_command(gpu_type, count, image, pubkeys, hours, ports, box_uid
             hours=hours,
             ports=[22, *ports],
             box_uid=box_uid,
+            box_hotkey=box_hotkey,
         )
     except RentalError as e:
         _fail(str(e), json_mode, 2)

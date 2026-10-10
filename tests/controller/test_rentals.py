@@ -154,6 +154,7 @@ def order(
     hours: float = 1.0,
     image: str = 'ubuntu:24.04',
     box_uid: int | None = None,
+    box_hotkey: str = '',
 ) -> rt.RentalRecord:
     return rt.place_order(
         store,
@@ -163,6 +164,7 @@ def order(
         ssh_pubkeys=[KEY],
         hours=hours,
         box_uid=box_uid,
+        box_hotkey=box_hotkey,
         now=NOW,
     )
 
@@ -336,6 +338,63 @@ def test_only_a_rentable_wholly_idle_box_of_the_type_and_size_is_picked(tmp_path
     assert picked is not None and picked.box_id == best.box_id
     pinned = rec._pick(order(store, box_uid=45), set(), NOW)
     assert pinned is not None and pinned.box_id == HK  # a pinned box
+    pinned = rec._pick(order(store, box_hotkey=HK), set(), NOW)
+    assert pinned is not None and pinned.box_id == HK  # the rent page pins by hotkey, the identity
+
+
+HK2 = '5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty'
+
+
+def test_a_pinned_order_never_lands_on_another_box_and_fails_box_busy(tmp_path, boxes):
+    """RENT NOW names one box (box listing, 10/9). Held, benched, gone, the wrong size: ``box_busy`` at once, with a
+    free box of the same type standing right there. Merely mid-check: wait the grace, then ``box_busy``."""
+    runner, clock = pod_runner(), Clock()
+    store, rec = reconciler(tmp_path, boxes, runner, clock)
+    boxes.put(rentable_box())  # HK, free
+    boxes.put(rentable_box(hk=HK2, uid=46))
+    first = order(store, box_hotkey=HK2)
+    rec.run_pass()
+    assert store.rentals[first.id].state == rt.ACTIVE and store.rentals[first.id].box == HK2
+    # the same box again, now held: fails this pass; HK is free and is not taken instead
+    held = order(store, box_hotkey=HK2)
+    report = rec.run_pass()
+    r = store.rentals[held.id]
+    assert r.state == rt.FAILED and r.reason == rt.BOX_BUSY and r.box == ''
+    assert [a for a in report.actions if a.rental == held.id][0].detail.startswith('box_busy: held')
+    # by uid, the CLI's pin, the same
+    r = store.rentals[order(store, box_uid=46).id]
+    rec.run_pass()
+    assert store.rentals[r.id].reason == rt.BOX_BUSY
+    # a box that is not there
+    r = order(store, box_hotkey='5FLSigC9HGRKVhB9FiEo4Y3koPsNmBmLJbpXg2mp1hXcS59Y')
+    rec.run_pass()
+    assert store.rentals[r.id].reason == rt.BOX_BUSY
+    # the wrong size for the box
+    r = order(store, gpu_count=1, box_hotkey=HK)
+    rec.run_pass()
+    assert store.rentals[r.id].reason == rt.BOX_BUSY
+    # benched: off the market
+    benched = rentable_box()
+    benched.status = BENCHED
+    boxes.put(benched)
+    r = order(store, box_hotkey=HK)
+    rec.run_pass()
+    assert store.rentals[r.id].reason == rt.BOX_BUSY
+    # mid-check: not refused, waits the grace, and the reason at the end of it names the pin
+    checking = rentable_box()
+    checking.status = CHECKING
+    boxes.put(checking)
+    r = order(store, box_hotkey=HK)
+    rec.run_pass()
+    assert store.rentals[r.id].state == rt.REQUESTED
+    clock.t = NOW + rt.NO_FIT_GRACE_S + 1
+    rec.run_pass()
+    assert store.rentals[r.id].reason == rt.BOX_BUSY
+    # and the box, idle again, takes the next pin
+    boxes.put(rentable_box())
+    r = order(store, box_hotkey=HK)
+    rec.run_pass()
+    assert store.rentals[r.id].state == rt.ACTIVE and store.rentals[r.id].box == HK
 
 
 # -- what the rest of the controller does with a rental --------------------------------------------------------------------
@@ -386,6 +445,8 @@ def test_the_public_document_marks_a_rented_card_and_nothing_else(tmp_path, boxe
     row = doc['boxes'][0]
     assert row['rentable'] is True and doc['offers'] == {}  # rentable, but rented: not on offer
     assert all(c['state'] == LEASED and c['rental'] is True and 'workload' not in c for c in row['cards'])
+    # the rent page keeps the card, greyed, with the lease end (box listing, 10/9); whose it is stays private
+    assert row['market'] == {'status': 'rented', 'rented_until': r.ends_at}
     text = json.dumps(doc)
     for private in (r.id, CID, KEY, '31000', '203.0.113.7', 'ubuntu:24.04'):
         assert private not in text, private

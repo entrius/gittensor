@@ -307,6 +307,25 @@ def available_host(hosts: Sequence[Mapping[str, Any]]) -> dict:
     }
 
 
+# The rent page's three words for a box (box listing, 10/9).
+AVAILABLE = 'available'  # rentable and every card idle: a RENT NOW button
+RENTED = 'rented'  # a customer's pod holds a card: listed, greyed, with the lease end
+UNAVAILABLE = 'unavailable'  # rentable but not to be had right now: benched, mid-check, draining a placement
+
+
+def market_of(box: BoxState, rentable: bool, gpu_type: str | None, rentals: Mapping[str, Any]) -> dict:
+    """``{status, rented_until}`` for a box row. ``rented_until`` is the latest ``ends_at`` over the rentals holding
+    its cards (what the page says a rented box frees at); whose rental it is stays private. A box its miner never
+    put up for rent (no rent range) and that holds no rental is not on the page at all: status None."""
+    held = [rentals[c.instance_id] for c in box.cards.values() if c.instance_id and c.instance_id in rentals]
+    if held:
+        ends = [e for e in (_num(getattr(r, 'ends_at', None)) for r in held) if e is not None]
+        return {'status': RENTED, 'rented_until': max(ends) if ends else None}
+    if rentable and gpu_type and box.cards and all(c.state == IDLE for c in box.cards.values()):
+        return {'status': AVAILABLE, 'rented_until': None}
+    return {'status': UNAVAILABLE if box.rent_ports else None, 'rented_until': None}
+
+
 def _last_event(events: list[dict], kinds: frozenset[str] | None = None) -> dict | None:
     for event in reversed(events or []):
         kind, at = event.get('kind'), _num(event.get('at'))
@@ -424,7 +443,8 @@ def build_fleet(
         gpu_type = gpu_type_of(box.card_name) if box.card_name else None
         rentable = box_rentable(box, now, min_level=rentable_min_standing)
         host = _host(box, uptime.get(box.box_id), deploy_seconds(box.box_id, rentals))
-        if rentable and gpu_type and cards and all(c['state'] == IDLE for c in cards):
+        market = market_of(box, rentable, gpu_type, rentals)
+        if market['status'] == AVAILABLE and gpu_type:  # available implies a type; the test is for the type checker
             sizes = offers.setdefault(gpu_type, {})
             row = sizes.setdefault(str(len(cards)), {'boxes': 0, 'guaranteed': guaranteed_host(len(cards), gpu_type)})
             row['boxes'] += 1
@@ -459,6 +479,9 @@ def build_fleet(
                 # The host around the cards (host specs, 10/9): measured every round; the shortfalls are advertised here
                 # and in the offer, and refused only where the floor is hard.
                 'host': host,
+                # The box as the rent page lists it (box listing, 10/9): available is the one condition that also counts
+                # it in ``offers``, so the listing and the offer rows never disagree; rented says until when, never whose.
+                'market': market,
             }
         )
     for (gpu_type, size), hosts in offered_hosts.items():

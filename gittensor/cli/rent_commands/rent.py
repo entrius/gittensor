@@ -4,8 +4,9 @@
 """``gitt rent``: a whole GPU box as a pod, from the terminal, the way ``lium`` does it (vault 29 §6).
 
     gitt rent login <key>          save the API key (or export GITTENSOR_API_KEY)
-    gitt rent ls                   what is free right now, $/hr, and your balance
-    gitt rent up RTX5090 [-n dev]  order, wait for active, print the ssh line
+    gitt rent ls                   the boxes for rent, one row each: uid, size, $/hr, host, where, status
+    gitt rent up --box 45 [-n dev] rent that box: order, wait for active, print the ssh line
+    gitt rent up RTX5090 -c 1      any free box of a type and size (the older form, through /offers)
     gitt rent ssh [dev] [-- cmd]   ssh in (one open rental needs no name)
     gitt rent ps                   your rentals
     gitt rent extend [dev] 2       add hours
@@ -33,6 +34,7 @@ from gittensor.cli.rent_commands.api import (
     ApiError,
     RentApi,
     RentConfig,
+    find_box,
     find_offer,
     resolve,
     ssh_public_keys,
@@ -51,6 +53,7 @@ SSH_OPTS = ('-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/nul
 # the failure reasons as a customer should read them (the controller's codes, 29 §3)
 REASONS = {
     'no_box_fits': 'no box of that type and size was free in time (nothing billed); `gitt rent ls` and try again',
+    'box_busy': 'that box was taken; pick another (`gitt rent ls`); nothing billed',
     'pull_failed': 'the box could not pull the image (nothing billed): check the name and tag are public '
     '(`docker pull` it yourself to see), or use a quick-pick',
     'start_failed': 'the pod started but never answered on :22 (nothing billed): the image has to run sshd '
@@ -80,33 +83,6 @@ def _api(cfg: RentConfig) -> RentApi:
             'not logged in: `gitt rent login <api key>` or export GITTENSOR_API_KEY (keys: the app, /keys)', 'usage'
         )
     return RentApi(cfg.url, cfg.key)
-
-
-def _host_cell(box: dict, key: str) -> str:
-    """One host column of `gitt rent ls`: the guaranteed floor (``≥``) when the pool guarantees it, else the least the
-    free boxes of that size have right now, else ``—``."""
-    for source, mark in (('guaranteed', '≥'), ('observed_min', '')):
-        value = (box.get(source) or {}).get(key)
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            return f'{mark}{value:.0f}'
-    return '—'
-
-
-LINKS = {'nvlink': 'NVLink', 'xgmi': 'XGMI', 'pcie': 'PCIe', 'single': '1 card'}
-
-
-def _link(box: dict) -> str:
-    """The worst interconnect among the free boxes of the row, as a word."""
-    return LINKS.get(str((box.get('observed_min') or {}).get('interconnect') or ''), '—')
-
-
-def _where(box: dict) -> str:
-    """The countries the row's free boxes are in: up to three codes, then a count."""
-    countries = (box.get('availability') or {}).get('countries') or []  # the app's name for the row's `available`
-    countries = [c for c in countries if isinstance(c, str)]
-    if not countries:
-        return '—'
-    return ', '.join(countries[:3]) + (f' +{len(countries) - 3}' if len(countries) > 3 else '')
 
 
 def _usd(cents: int | float | None) -> str:
@@ -171,59 +147,91 @@ def login_command(key, url):
     console.print(f'Logged in to {cfg.url}: balance {_usd(bal.get("balance_cents"))}.')
 
 
+def _box_cell(box: dict, key: str, fmt: str = '{:.0f}') -> str:
+    value = (box.get('host') or {}).get(key)
+    return fmt.format(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else '—'
+
+
+def _status_cell(box: dict) -> str:
+    status = str(box.get('status') or '')
+    if status == 'available':
+        return '[green]free[/green]'
+    if status == 'rented':
+        until = box.get('rented_until')
+        return f'[yellow]rented[/yellow] until {_when(until)}' if until else '[yellow]rented[/yellow]'
+    return f'[dim]{status or "—"}[/dim]'
+
+
 @rent_group.command('ls')
-@click.option('--all', 'show_all', is_flag=True, help='every type and size, free or not')
+@click.option('--type', 'gpu_type', default=None, help='only this GPU type (e.g. RTX5090)')
+@click.option('--count', 'count', type=int, default=None, help='only boxes of this size (1, 2, 4, 8)')
+@click.option('--country', default=None, help='only boxes in this country (ISO 3166-1 alpha-2, e.g. US)')
+@click.option('--all', 'show_all', is_flag=True, help='rented and unavailable boxes too')
 @_json_flag
-def ls_command(show_all, json_mode):
-    """What can be rented right now: one row per free box size, with the price and how long your balance lasts."""
+def ls_command(gpu_type, count, country, show_all, json_mode):
+    """The boxes for rent, one row each, best download first: `gitt rent up --box <uid>` rents one of them."""
     cfg = RentConfig.load()
     try:
         api = _api(cfg)
-        offers, bal = api.offers(), api.balance()
+        boxes, bal = api.boxes(), api.balance()
     except ApiError as e:
         _fail(e, json_mode)
         return
     if json_mode:
-        emit_json({'offers': offers, 'balance': bal})
+        emit_json({**boxes, 'balance': bal})
         return
     cents = bal.get('balance_cents') or 0
+    rows = []
+    for b in boxes.get('boxes') or []:
+        if not show_all and b.get('status') != 'available':
+            continue
+        if gpu_type and str(b.get('gpu_type', '')).lower() != gpu_type.lower():
+            continue
+        if count is not None and int(b.get('gpu_count') or 0) != count:
+            continue
+        where = ((b.get('host') or {}).get('location') or {}).get('country') or ''
+        if country and str(where).upper() != country.strip().upper():
+            continue
+        rows.append((b, where))
     table = Table(title='boxes for rent', show_lines=False)
-    for col in ('GPU', 'Box', '$/hr', 'Free', 'RAM', 'CPUs', '↓Mbps', '↑Mbps', 'Link', 'Where', 'Runway'):
-        table.add_column(col, justify='left' if col in ('GPU', 'Box', 'Link', 'Where') else 'right')
-    rows = 0
-    guaranteed_any = False
-    for o in offers.get('offers') or []:
-        for b in o.get('boxes') or []:
-            free = int(b.get('available') or 0)
-            if not free and not show_all:
-                continue
-            per_hr = float(b.get('usd_per_hr') or 0)
-            runway = f'{cents / 100 / per_hr:.1f} h' if per_hr and cents > 0 else '—'
-            host = [_host_cell(b, key) for key in ('ram_gb', 'cpu_threads', 'down_mbps', 'up_mbps')]
-            guaranteed_any = guaranteed_any or any(c.startswith('≥') for c in host)
-            table.add_row(
-                str(o['gpu_type']), f'{b["gpu_count"]}×', f'{per_hr:.2f}', str(free), *host, _link(b), _where(b), runway
-            )
-            rows += 1
+    for col in ('#', 'Box', '$/hr', 'CPU', 'RAM', '↓Mbps', '↑Mbps', 'Where', 'Status', 'Runway', 'Hotkey'):
+        table.add_column(col, justify='left' if col in ('Box', 'Where', 'Status', 'Hotkey') else 'right')
+    for b, where in rows:
+        per_hr = float(b.get('usd_per_hr') or 0)
+        runway = f'{cents / 100 / per_hr:.1f} h' if per_hr and cents > 0 else '—'
+        uid = b.get('uid')
+        table.add_row(
+            str(uid) if uid is not None else '—',
+            f'{b.get("gpu_count")}× {b.get("gpu_type")}',
+            f'{per_hr:.2f}',
+            _box_cell(b, 'cpu_threads'),
+            _box_cell(b, 'ram_gb'),
+            _box_cell(b, 'down_mbps'),
+            _box_cell(b, 'up_mbps'),
+            str(where or '—'),
+            _status_cell(b),
+            runway,
+            f'[dim]{str(b.get("hotkey", ""))[:10]}…[/dim]',
+        )
     if rows:
         console.print(table)
         console.print(
-            '[dim]RAM GB, CPU threads, download / upload Mbps: '
-            + ('≥ is guaranteed by the pool floor; ' if guaranteed_any else '')
-            + 'a plain number is the least a free box of that size has right now; '
-            'Where is the countries the free boxes are in (`gitt rent up --country XX` places in one)[/dim]'
+            '[dim]CPU threads, RAM GB, download / upload Mbps as the pool measured the box; '
+            '`gitt rent up --box <#|hotkey>` rents one, `gitt rent ls --json` has every field and the full hotkey[/dim]'
         )
+    elif show_all or gpu_type or count is not None or country:
+        console.print('No box matches; `gitt rent ls --all` lists every box, rented ones too.')
     else:
-        console.print('Nothing is free right now; `gitt rent ls --all` shows the catalog.')
-    for vendor, image in default_images(offers).items():
+        console.print('Nothing is free right now; `gitt rent ls --all` lists the rented boxes too.')
+    for vendor, image in default_images(boxes).items():
         console.print(f'default image ({vendor}): {image or "none published; give one with --image"}')
-    fleet = offers.get('fleet')
+    fleet = boxes.get('fleet')
     console.print(f'balance {_usd(cents)}' + (f' · fleet {fleet}' if fleet and fleet != 'ok' else ''))
 
 
 def offer_vendor(offers: dict, gpu_type: str) -> str:
-    """The vendor the API names on the offer row (``nvidia`` when it names none: the whole catalog until AMD)."""
-    for o in offers.get('offers') or []:
+    """The vendor the API names on the offer row or the box (``nvidia`` when it names none: the whole catalog until AMD)."""
+    for o in (offers.get('offers') or []) + (offers.get('boxes') or []):
         if str(o.get('gpu_type', '')).lower() == gpu_type.lower():
             return str(o.get('vendor') or 'nvidia')
     return 'nvidia'
@@ -232,7 +240,8 @@ def offer_vendor(offers: dict, gpu_type: str) -> str:
 def default_images(offers: dict) -> dict[str, str]:
     """The first quick-pick per vendor on offer: a CUDA image does not run on an AMD box, so the default follows the
     box's vendor. A vendor with offers and no image maps to '' (the customer must name one)."""
-    vendors = {str(o.get('vendor') or 'nvidia') for o in offers.get('offers') or []} or {'nvidia'}
+    rows = (offers.get('offers') or []) + (offers.get('boxes') or [])  # the offer rows, or the box listing's
+    vendors = {str(o.get('vendor') or 'nvidia') for o in rows} or {'nvidia'}
     out: dict[str, str] = {}
     for vendor in sorted(vendors):
         out[vendor] = ''
@@ -244,7 +253,7 @@ def default_images(offers: dict) -> dict[str, str]:
 
 
 @rent_group.command('up')
-@click.argument('gpu_type')
+@click.argument('gpu_type', required=False)
 @click.option('-c', '--count', default=1, show_default=True, help='GPUs in the box (1, 2, 4, 8)')
 @click.option('-H', '--hours', default=1.0, show_default=True, help='0.25 to 168; billed per minute once active')
 @click.option('-i', '--image', default=None, help='any public image that runs sshd (default: the first quick-pick)')
@@ -259,21 +268,29 @@ def default_images(offers: dict) -> dict[str, str]:
     help='a public key file (default: every ~/.ssh/id_*.pub)',
 )
 @click.option('-n', '--name', default=None, help='a local name for `ssh`, `extend`, `rm`')
-@click.option('--box', 'box_uid', type=int, default=None, help='pin a box by uid (re-rent the same one)')
+@click.option(
+    '--box', 'box_ref', default=None, help='rent this one box: its # from `ls`, its hotkey, or a unique prefix'
+)
 @click.option('--country', default=None, help='place only on a box in this country (ISO 3166-1 alpha-2, e.g. US)')
 @click.option('--queue', is_flag=True, help='order even when nothing is free now (waits up to the placement grace)')
 @click.option('--no-wait', is_flag=True, help='print the id and return; `gitt rent ps` to follow')
 @_json_flag
 def up_command(
-    gpu_type, count, hours, image, ports, envs, key_paths, name, box_uid, country, queue, no_wait, json_mode
+    gpu_type, count, hours, image, ports, envs, key_paths, name, box_ref, country, queue, no_wait, json_mode
 ):
     """Rent a box: order, wait until it is active, print the ssh line.
 
-    A failed start is retried once. Refuses up front when no box of that size is free (``--queue`` to wait anyway).
+    `--box` names one box from `gitt rent ls` (the type and size follow from it); a type alone takes any free box
+    of that type and size. A failed start is retried once. Refuses up front when the box, or every box of that
+    size, is taken (``--queue`` to wait anyway).
     """
     cfg = RentConfig.load()
     try:
         api = _api(cfg)
+        if not gpu_type and not box_ref:
+            raise ApiError(
+                'say which: `gitt rent up --box <#>` (from `gitt rent ls`) or `gitt rent up <gpu type>`', 'usage'
+            )
         _check_hours(hours)
         keys = ssh_public_keys(list(key_paths))
         if not keys:
@@ -292,13 +309,32 @@ def up_command(
                 raise ApiError(
                     f'{name!r} is {held["state"]} ({held["id"]}): pick another name or `gitt rent rm {name}`', 'usage'
                 )
-        offers = api.offers()
-        found = find_offer(offers, gpu_type, count)
-        if found is None:
-            raise ApiError(f'no such box size: {gpu_type} ×{count} (`gitt rent ls --all`)', 'usage')
-        gpu_type, box = found
-        if not int(box.get('available') or 0) and not queue:
-            raise ApiError(f'no {gpu_type} ×{count} box is free right now (`gitt rent ls`; --queue to wait)', 'no_box')
+        pin: dict = {}
+        if box_ref:
+            offers = api.boxes()
+            pinned = find_box(offers, box_ref.strip())
+            if pinned is None:
+                raise ApiError(f'no box {box_ref!r} in the listing (`gitt rent ls --all`: # or hotkey)', 'usage')
+            if gpu_type and str(pinned.get('gpu_type', '')).lower() != gpu_type.lower():
+                raise ApiError(f'box {box_ref} is a {pinned.get("gpu_type")}, not a {gpu_type}', 'usage')
+            gpu_type, count = str(pinned['gpu_type']), int(pinned['gpu_count'])
+            if pinned.get('status') != 'available' and not queue:
+                until = pinned.get('rented_until')
+                raise ApiError(
+                    f'box {box_ref} is {pinned.get("status")}'
+                    + (f' until {_when(until)}' if until else '')
+                    + ' (`gitt rent ls` for a free one; --queue to wait for this one)',
+                    'no_box',
+                )
+            pin = {'box_hotkey': str(pinned['hotkey'])}
+        else:
+            offers = api.offers()
+            found = find_offer(offers, gpu_type, count)
+            if found is None:
+                raise ApiError(f'no such box size: {gpu_type} ×{count} (`gitt rent ls --all`)', 'usage')
+            gpu_type, box = found
+            if not int(box.get('available') or 0) and not queue:
+                raise ApiError(f'no {gpu_type} ×{count} box is free right now (`gitt rent ls`; --queue to wait)', 'no_box')  # fmt: skip
         if image is None:
             vendor = offer_vendor(offers, gpu_type)
             image = default_images(offers).get(vendor)
@@ -308,6 +344,7 @@ def up_command(
                     'usage',
                 )
         body = {
+            **pin,
             'gpu_type': gpu_type,
             'gpu_count': count,
             'hours': hours,
@@ -317,8 +354,6 @@ def up_command(
         }
         if env:
             body['env'] = env
-        if box_uid is not None:
-            body['box_uid'] = box_uid
         if country:
             code = country.strip().upper()
             if len(code) != 2 or not code.isalpha():

@@ -122,6 +122,9 @@ class RentApi:
     def offers(self) -> dict:
         return self._call('GET', '/rentals/offers')
 
+    def boxes(self) -> dict:
+        return self._call('GET', '/rentals/boxes')
+
     def balance(self) -> dict:
         return self._call('GET', '/balance')
 
@@ -163,6 +166,17 @@ def find_offer(offers: dict, gpu_type: str, gpu_count: int) -> tuple[str, dict] 
             if int(b.get('gpu_count', 0)) == gpu_count:
                 return str(o['gpu_type']), b
     return None
+
+
+def find_box(boxes: dict, ref: str) -> dict | None:
+    """The box a customer means by ``--box``: its uid, its hotkey, or a unique prefix of the hotkey; None when the
+    listing has no such box (or the prefix fits more than one)."""
+    rows = [b for b in (boxes.get('boxes') or []) if isinstance(b, dict)]
+    exact = [b for b in rows if str(b.get('hotkey', '')) == ref or (b.get('uid') is not None and str(b['uid']) == ref)]
+    if exact:
+        return exact[0]
+    prefix = [b for b in rows if len(ref) >= 6 and str(b.get('hotkey', '')).startswith(ref)]
+    return prefix[0] if len(prefix) == 1 else None
 
 
 def resolve(cfg: RentConfig, rentals: list[dict], ref: str | None) -> dict:

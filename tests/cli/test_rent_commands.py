@@ -54,6 +54,58 @@ OFFERS = {
 }
 
 
+HK = '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY'
+HK2 = '5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty'
+HOST = {
+    'cpu_threads': 32,
+    'cpu_model': 'AMD Ryzen 9 7950X',
+    'ram_gb': 125.4,
+    'disk_total_gb': 1863,
+    'disk_free_gb': 1200,
+    'down_mbps': 227.3,
+    'up_mbps': 180,
+    'rtt_ms': 12,
+    'interconnect': 'single',
+    'power_w': 575,
+    'power_limited': False,
+    'port_count': 100,
+    'location': {'country': 'DE', 'region': 'Hesse', 'city': 'Frankfurt'},
+    'uptime_30d_pct': 99.7,
+    'admitted_at': 1_700_000_000,
+    'deploy_s': 42.0,
+}
+BOXES = {
+    'boxes': [
+        {
+            'hotkey': HK,
+            'uid': 45,
+            'gpu_type': 'RTX5090',
+            'gpu_count': 1,
+            'vram_gb_per_card': 32,
+            'usd_per_hr': 0.65,
+            'status': 'available',
+            'rented_until': None,
+            'host': HOST,
+            'shortfalls': [],
+        },
+        {
+            'hotkey': HK2,
+            'uid': 46,
+            'gpu_type': 'RTX5090',
+            'gpu_count': 2,
+            'vram_gb_per_card': 32,
+            'usd_per_hr': 1.3,
+            'status': 'rented',
+            'rented_until': 1_760_007_200,
+            'host': {**HOST, 'location': {'country': 'US', 'region': None, 'city': None}},
+            'shortfalls': ['ram_below_floor'],
+        },
+    ],
+    'fleet': 'ok',
+    'images': OFFERS['images'],
+}
+
+
 class _Resp(io.BytesIO):
     def __enter__(self):
         return self
@@ -80,6 +132,8 @@ class FakeProduct:
         assert req.get_header('Authorization') == 'Bearer gt_testkey'
         if (m, path) == ('GET', '/rentals/offers'):
             return self._ok(OFFERS)
+        if (m, path) == ('GET', '/rentals/boxes'):
+            return self._ok(BOXES)
         if (m, path) == ('GET', '/balance'):
             return self._ok(self.balance)
         if (m, path) == ('GET', '/rentals'):
@@ -175,20 +229,51 @@ def invoke(*args):
     return CliRunner(env={'COLUMNS': '200'}).invoke(cli, ['rent', *args], catch_exceptions=False)
 
 
-def test_ls_shows_only_free_sizes_with_runway_and_the_balance(product):
+def test_ls_lists_the_free_boxes_one_row_each_with_runway_and_the_balance(product):
+    """Lium's listing (box listing, 10/9): one row per box with its uid, size, price, host, country and status."""
     r = invoke('ls')
     assert r.exit_code == 0, r.output
-    assert 'RTX5090' in r.output and '0.65' in r.output and '15.1 h' in r.output  # $9.84 / $0.65
-    assert 'H100' not in r.output and 'balance $9.84' in r.output
-    # the host columns (host specs, 10/9): ≥ is the pool's floor, a plain number the least a free box has right now
-    assert 'RAM' in r.output and 'CPUs' in r.output and '↓Mbps' in r.output and '↑Mbps' in r.output
-    assert '125' in r.output and '32' in r.output and '≥100' in r.output and '≥50' in r.output
-    assert '≥ is guaranteed' in r.output and '1 card' in r.output and 'DE, FI, NL +1' in r.output
+    assert (
+        '45' in r.output and '1× RTX5090' in r.output and '0.65' in r.output and '15.1 h' in r.output
+    )  # $9.84 / $0.65
+    assert '32' in r.output and '125' in r.output and '227' in r.output and '180' in r.output and 'DE' in r.output
+    assert 'free' in r.output and 'balance $9.84' in r.output and '5GrwvaEF5z…' in r.output
+    assert '46' not in r.output  # rented: only with --all
     everything = invoke('ls', '--all').output
-    assert 'H100' in everything and '—' in everything  # a row with no host facts yet shows a dash, not a guess
+    assert '2× RTX5090' in everything and 'rented' in everything and 'US' in everything
+    assert '46' not in invoke('ls', '--all', '--country', 'de').output
+    assert (
+        '45' not in invoke('ls', '--count', '2', '--all').output
+        and '46' in invoke('ls', '--count', '2', '--all').output
+    )
+    assert 'No box matches' in invoke('ls', '--type', 'H100').output
     payload = json.loads(invoke('ls', '--json').output)
     assert payload['balance']['balance_cents'] == 984
-    assert payload['offers']['offers'][0]['boxes'][0]['observed_min']['cpu_threads'] == 32  # passed through as is
+    assert payload['boxes'][1]['hotkey'] == HK2 and payload['boxes'][0]['host']['cpu_threads'] == 32  # passed through
+
+
+def test_up_box_pins_the_order_to_one_box_by_hotkey(product):
+    """`--box` is the normal way now: the # or hotkey from `ls`; the order carries box_hotkey, the type and size follow."""
+    r = invoke('up', '--box', '45', '-n', 'dev')
+    assert r.exit_code == 0, r.output + r.stderr
+    body = product.orders[0]
+    assert body['box_hotkey'] == HK and body['gpu_type'] == 'RTX5090' and body['gpu_count'] == 1
+    assert 'box_uid' not in body and 'ssh root@203.0.113.7 -p 40047' in r.output
+    r = invoke('up', '--box', HK2[:12], '--queue', '--no-wait')  # a unique hotkey prefix, and a rented box queued
+    assert r.exit_code == 0, r.output + r.stderr
+    assert product.orders[1]['box_hotkey'] == HK2 and product.orders[1]['gpu_count'] == 2
+    r = invoke('up', '--box', '46')
+    assert r.exit_code == 1 and 'box 46 is rented until' in r.stderr and len(product.orders) == 2
+    r = invoke('up', 'H100', '--box', '45')
+    assert r.exit_code == 2 and 'box 45 is a RTX5090, not a H100' in r.stderr
+    r = invoke('up', '--box', '99')
+    assert r.exit_code == 2 and "no box '99' in the listing" in r.stderr
+    r = invoke('up')
+    assert r.exit_code == 2 and 'say which' in r.stderr
+    # the reason word when the box was taken between `ls` and the order
+    product.script, product.fail_reason = ['requested', 'failed'], 'box_busy'
+    r = invoke('up', '--box', '45')
+    assert r.exit_code == 1 and 'that box was taken; pick another' in r.output
 
 
 def test_up_orders_with_the_keys_under_ssh_waits_for_active_and_prints_the_ssh_line(product):
@@ -219,6 +304,8 @@ def test_up_orders_with_the_keys_under_ssh_waits_for_active_and_prints_the_ssh_l
 def test_the_default_image_follows_the_boxs_vendor_and_an_amd_box_without_one_asks_for_image(product, monkeypatch):
     amd = {'gpu_type': 'MI300X', 'vendor': 'amd', 'usd_per_card_hr': 2.59, 'boxes': [{'gpu_count': 1, 'usd_per_hr': 2.59, 'available': 1}]}  # fmt: skip
     monkeypatch.setitem(OFFERS, 'offers', OFFERS['offers'] + [amd])
+    amd_box = {**BOXES['boxes'][0], 'hotkey': HK2, 'uid': 47, 'gpu_type': 'MI300X', 'vendor': 'amd', 'usd_per_hr': 2.59}
+    monkeypatch.setitem(BOXES, 'boxes', BOXES['boxes'] + [amd_box])  # `ls` reads the listing: its rows carry the vendor
     r = invoke('ls')
     assert 'default image (nvidia): ' + OFFERS['images'][0]['image'] in r.output
     assert 'default image (amd): none published; give one with --image' in r.output

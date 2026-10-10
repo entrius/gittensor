@@ -508,11 +508,13 @@ def check_host_spec(
     and the download link must carry ``download_min_mbps``. ``history`` is the box's ``BoxState.host`` record from
     the last round; the evidence's ``host`` is the new one, which ``state.apply_verdict`` writes back.
 
-    RAM, CPU and the disk ratio are advertised minimums until ``hard`` is flipped: the check passes and every
+    RAM, CPU, the disk ratio and upload are advertised minimums until ``hard`` is flipped: the check passes and every
     shortfall is listed with its measured value and the floor (published as the box's ``shortfalls``); with ``hard``
-    a shortfall fails, and a field the scrape could not read fails closed like ``disk_free`` does.
+    a shortfall fails, and a field the scrape could not read fails closed like ``disk_free`` does. Upload stays
+    advertised because its probe is one SSH stream and latency-bound (``cfg.HOST_SPEC_HARD``): under ``hard`` it
+    follows the download rule below, ``fail_after`` sampled rounds under the floor.
 
-    Download and upload are the hard floors at launch, and they must not repeat 9/19 (``check_network``: one Hugging
+    Download is the hard floor at launch, and it must not repeat 9/19 (``check_network``: one Hugging
     Face miss benched a healthy box and took the fleet to zero for 4 h). So: an HTTP failure, a zero-byte or short
     transfer, or a runner error is no sample, never a fail, and leaves that direction's EMA where it was; the EMA per
     box and direction runs across rounds; and only ``fail_after`` consecutive *sampled* rounds with the EMA under the
@@ -614,7 +616,7 @@ def check_host_spec(
         code
         for code, failing in (
             (w.DOWNLOAD_BELOW_FLOOR, below_rounds >= fail_after),
-            (w.UPLOAD_BELOW_FLOOR, up_below >= fail_after),
+            (w.UPLOAD_BELOW_FLOOR, hard and up_below >= fail_after),  # advertised until the flip
             (w.PORTS_BELOW_FLOOR, w.PORTS_BELOW_FLOOR in shortfalls),
         )
         if failing

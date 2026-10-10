@@ -83,6 +83,7 @@ class Clock:
 
 def reconciler(tmp_path, boxes: StateStore, runner: FakeRunner, clock: Clock, probe=lambda h, p: True, **kw):
     store = rt.RentalStore(tmp_path / 'rentals.json')
+    kw.setdefault('heartbeat_s', None)  # the beat's own tests turn it on; a bare pod_runner answers no nvidia-smi
     rec = rt.RentalReconciler(
         boxes, store, lambda box: runner, wall=clock, sleep=clock.sleep, probe=probe, background=False, prepull=(), **kw
     )
@@ -446,3 +447,118 @@ def test_the_controller_records_a_dev_boxs_narrow_rent_range():
     assert parse_rent_ports_label('31000-31003\n') == [31000, 31003]
     assert parse_rent_ports_label('31000-31099\n') == [31000, 31099]
     assert parse_rent_ports_label('\n') == [] and parse_rent_ports_label('junk') == []
+
+
+# -- the rental's heartbeat (10/10) ---------------------------------------------------------------------------------------
+
+
+SMI_LINE = '{u}, NVIDIA GeForce RTX 5090, 580.65.06, 32607, 575.00, 575.00, 600.00, 00000000:0{n}:00.0, 12.0\n'
+INNER = 'd' * 64  # a container the customer started inside the pod (docker in docker)
+
+
+def beat_runner(runner: FakeRunner, uuids=(U1, U2), holders: str | None = None) -> FakeRunner:
+    """An honest rented box: the pinned cards as recorded, the NVML library unchanged, and the only GPU handles on the
+    host inside the pod, one of them in a container nested in the pod."""
+    from gittensor.controller.checks.scrape import DEVICE_HOLDERS_COMMAND, NVML_MD5_COMMAND
+
+    runner.on(regex(r'^nvidia-smi --query-gpu'), ''.join(SMI_LINE.format(u=u, n=i + 1) for i, u in enumerate(uuids)))
+    runner.on(NVML_MD5_COMMAND, 'a' * 32 + '  /usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1\n')
+    if holders is None:
+        holders = (
+            '/proc/1/root/proc/10/fd /dev/nvidia0\n/proc/1/root/proc/11/fd /dev/nvidia1\n'
+            f'== 10 python3\n0::/system.slice/docker-{CID}.scope\n'
+            f'== 11 python3\n0::/docker/{CID}/docker/{INNER}\n'
+        )
+    runner.on(DEVICE_HOLDERS_COMMAND, holders)
+    return runner
+
+
+def active_rental(tmp_path, boxes, runner, clock, **kw):
+    store, rec = reconciler(tmp_path, boxes, runner, clock, heartbeat_s=60.0, **kw)
+    r = order(store)
+    rec.run_pass()
+    assert store.rentals[r.id].state == rt.ACTIVE
+    return store, rec, store.rentals[r.id]
+
+
+def test_an_active_pod_gets_the_leases_heartbeat_once_a_minute_and_a_nested_container_is_ours(tmp_path, boxes):
+    runner, clock = beat_runner(pod_runner()), Clock()
+    store, rec, r = active_rental(tmp_path, boxes, runner, clock)
+    clock.t = NOW + 10
+    report = rec.run_pass()
+    (beat,) = [a for a in report.actions if a.kind == 'heartbeat']
+    assert beat.detail == 'ok' and beat.rental == r.id
+    r = store.rentals[r.id]
+    assert r.last_beat_at == NOW + 10 and r.heartbeat['ok'] and r.heartbeat['failed'] == []
+    assert r.heartbeat['same_card']['ok'] and r.heartbeat['card_ours_alone']['holders'] == [10, 11]
+    assert r.state == rt.ACTIVE and r.pay_open and r.pay_through == NOW + 10
+    asked = len([c for c in runner.calls if c.startswith('nvidia-smi --query-gpu')])
+    clock.t = NOW + 40  # inside the interval: the pod is inspected, the questions are not asked again
+    assert [a.kind for a in rec.run_pass().actions] == []
+    assert len([c for c in runner.calls if c.startswith('nvidia-smi --query-gpu')]) == asked
+    clock.t = NOW + 70
+    assert [a.kind for a in rec.run_pass().actions] == ['heartbeat']
+    assert boxes.boxes[HK].status == IDLE  # nothing held against the box
+
+
+def test_a_card_swapped_under_a_rental_is_a_heartbeat_failure_that_ends_it_and_benches_the_box(tmp_path, boxes):
+    runner, clock = beat_runner(pod_runner()), Clock()
+    store, rec, r = active_rental(tmp_path, boxes, runner, clock)
+    clock.t = NOW + 30
+    rec.run_pass()  # seen running at NOW + 30
+    other = 'GPU-00000000-0000-4000-8000-000000000000'
+    runner.on(regex(r'^nvidia-smi --query-gpu'), SMI_LINE.format(u=other, n=1) + SMI_LINE.format(u=U2, n=2))
+    clock.t = NOW + 90
+    report = rec.run_pass()
+    (lost,) = [a for a in report.actions if a.kind == 'lost']
+    assert lost.detail.startswith('heartbeat failed (same_card): pinned card(s) missing: ' + U1)
+    r = store.rentals[r.id]
+    assert r.state == rt.FAILED and r.reason == rt.BOX_LOST
+    assert r.ended_at == r.stopped_at == NOW + 30  # the customer is billed through the last pass that saw the pod
+    assert r.heartbeat['failed'] == ['same_card'] and not r.pay_open
+    assert any(c.startswith(f'docker stop --time {rt.STOP_GRACE_S} {CID}') for c in runner.calls)  # the pod removed
+    box = boxes.boxes[HK]
+    assert box.status == BENCHED and box.withheld_from == NOW + 90
+    event = box.standing_events[-1]
+    assert event['kind'] == 'heartbeat_failed' and event['failed'] == ['same_card'] and event['rental'] == r.id
+    assert all(c.state == CHECKING for c in box.cards.values()) or not box.cards
+
+
+def test_a_foreign_holder_of_a_gpu_node_under_a_rental_fails_the_beat(tmp_path, boxes):
+    foreign = 'e' * 64  # a container beside the pod, not inside it
+    holders = (
+        '/proc/1/root/proc/10/fd /dev/nvidia0\n/proc/1/root/proc/12/fd /dev/nvidia1\n'
+        f'== 10 python3\n0::/system.slice/docker-{CID}.scope\n== 12 python3\n0::/system.slice/docker-{foreign}.scope\n'
+    )
+    runner, clock = beat_runner(pod_runner(), holders=holders), Clock()
+    store, rec, r = active_rental(tmp_path, boxes, runner, clock)
+    clock.t = NOW + 60
+    report = rec.run_pass()
+    (lost,) = [a for a in report.actions if a.kind == 'lost']
+    assert lost.detail.startswith('heartbeat failed (card_ours_alone): foreign device holder(s): pid 12')
+    assert store.rentals[r.id].state == rt.FAILED and boxes.boxes[HK].status == BENCHED
+    assert boxes.boxes[HK].standing_events[-1]['failed'] == ['card_ours_alone']
+
+
+def test_a_tool_that_did_not_answer_is_no_verdict_on_a_rental(tmp_path, boxes):
+    runner, clock = beat_runner(pod_runner()), Clock()
+    store, rec, r = active_rental(tmp_path, boxes, runner, clock)
+    runner.on(regex(r'^nvidia-smi --query-gpu'), CommandResult(1, '', 'NVML: Driver/library version mismatch'))
+    clock.t = NOW + 60
+    report = rec.run_pass()
+    (beat,) = [a for a in report.actions if a.kind == 'heartbeat']
+    assert beat.detail.startswith('no verdict: nvidia-smi exit 1')
+    r = store.rentals[r.id]
+    assert r.state == rt.ACTIVE and r.pay_open and r.heartbeat['unanswered'] == ['same_card']
+    assert boxes.boxes[HK].status == IDLE and not [e for e in boxes.boxes[HK].standing_events if e['kind'] == 'heartbeat_failed']  # fmt: skip
+    assert report.ok  # a hiccup is not an error of the pass either
+
+
+def test_the_beat_is_off_when_the_reconciler_is_given_none(tmp_path, boxes):
+    runner, clock = pod_runner(), Clock()  # no nvidia-smi answers: a question asked would be a 127
+    store, rec = reconciler(tmp_path, boxes, runner, clock)  # the test default: heartbeat_s=None
+    r = order(store)
+    rec.run_pass()
+    clock.t = NOW + 600
+    assert [a.kind for a in rec.run_pass().actions] == [] and store.rentals[r.id].state == rt.ACTIVE
+    assert not [c for c in runner.calls if c.startswith('nvidia-smi')]

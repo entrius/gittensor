@@ -444,13 +444,18 @@ def check_host(probe: HostProbe, specs: Sequence[CardSpec | None]) -> list[Check
             )
         )
     # Upload is box -> controller over the controller's own SSH session: there is no honest way to measure it from
-    # here, so the row says who measures it and the floor it is held to.
+    # here, so the row says who measures it and what the floor means (advertised until HOST_SPEC_HARD, like RAM).
+    up_fate = (
+        f'refused after {ccfg.BANDWIDTH_FAIL_AFTER} rounds under it'
+        if hard
+        else 'shown to customers on every listing, a box under it is advertised, not refused'
+    )
     rows.append(
         CheckResult(
             UPLOAD_CHECK,
             None,
             f'measured by the controller from its side every round (box to controller, floor {ccfg.UPLOAD_MIN_MBPS:.0f} Mbps, '
-            f'refused after {ccfg.BANDWIDTH_FAIL_AFTER} rounds under it)',
+            f'{up_fate})',
         )
     )
     return rows

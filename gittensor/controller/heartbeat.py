@@ -473,6 +473,75 @@ def run_heartbeat(
     return HeartbeatResult(now, same_card, containers, alone, recorded, devices)
 
 
+# ---------------------------------------------------------------- a rental's beat ------------------------------------
+
+
+@dataclass
+class RentalBeat:
+    """The heartbeat of a rented box (10/10). Until then a rented card was asked only "is our container running", so
+    the fraud ladder's ``heartbeat_failed`` (the one that forfeits two days of pay) could not fire on a card swapped or
+    shared under a customer, and the 48 h holdback rested on nothing. Two of the lease's three questions, asked by the
+    rental reconciler every ``HEARTBEAT_INTERVAL_S``: ``same_card`` exactly as for a lease, and ``alone`` as the
+    box-wide device scan with the pod as the one container of ours (a rental takes the whole box; a container the
+    customer starts inside the pod is attributed to the pod by its cgroup path, see ``parse_cgroups``). "Our container
+    running" is the reconciler's own inspect, which it already made.
+
+    One deliberate difference from the lease: a question whose tool did not answer (nvidia-smi or the sysfs read
+    errored, the handle scan could not run) is **no verdict** here, not a failure. A customer's pod is live, and a
+    tool hiccup is no grounds to end it and bench the box; the next beat asks again. A verdict against the box (a
+    pinned card missing, the power limit or the NVML library changed, a foreign holder of a GPU node) fails the beat.
+    The tells are the answers' evidence: a tool error carries none."""
+
+    at: float
+    same_card: Answer
+    alone: Answer
+
+    @staticmethod
+    def _verdict(answer: Answer) -> bool:
+        return answer.ok or bool(answer.evidence)
+
+    @property
+    def ok(self) -> bool:
+        return self.same_card.ok and self.alone.ok
+
+    @property
+    def failed(self) -> list[str]:
+        names = []
+        if not self.same_card.ok and self._verdict(self.same_card):
+            names.append(SAME_CARD)
+        if not self.alone.ok and self._verdict(self.alone):
+            names.append(CARD_OURS_ALONE)
+        return names
+
+    @property
+    def unanswered(self) -> list[str]:
+        names = []
+        if not self.same_card.ok and not self._verdict(self.same_card):
+            names.append(SAME_CARD)
+        if not self.alone.ok and not self._verdict(self.alone):
+            names.append(CARD_OURS_ALONE)
+        return names
+
+    def reasons(self) -> list[str]:
+        return [a.detail for a in (self.same_card, self.alone) if not a.ok]
+
+    def as_dict(self) -> dict:
+        return {
+            'at': self.at,
+            'ok': self.ok,
+            'failed': self.failed,
+            'unanswered': self.unanswered,
+            SAME_CARD: self.same_card.as_dict(),
+            CARD_OURS_ALONE: self.alone.as_dict(),
+        }
+
+
+def run_rental_heartbeat(runner: HostRunner, box: BoxState, container_id: str, now: float) -> RentalBeat:
+    """One beat over a rented box: the pinned cards as recorded, and every GPU handle on the host inside the pod.
+    Raises a transport error when the box does not answer."""
+    return RentalBeat(now, _same_card(runner, box), _device_holders(runner, {container_id}, box.vendor))
+
+
 def observe_pay(record: InstanceRecord, now: float) -> None:
     """Fold one check's outcome into the record's pay span (``23`` §7). The four conditions hold when the last heartbeat
     passed (it answers "we started it" and "the blessed digest") and the last health probe passed. While they hold the

@@ -39,7 +39,10 @@ from gittensor.cli.rent_commands.api import (
 )
 
 POLL_S = 2
-MIN_HOURS, MAX_HOURS = 0.25, 168  # the API's (shared/types RENTAL_MIN_MINUTES, RENTAL_MAX_HOURS).0
+MIN_HOURS, MAX_HOURS = (
+    0.25,
+    168,
+)  # the API's (shared/types RENTAL_MIN_MINUTES, RENTAL_MAX_HOURS; the controller's cfg.RENTAL_MAX_HOURS).0
 WAIT_ACTIVE_S = 15 * 60  # a cold pull of a big image; ends_at only starts at active (29 §1 #11)
 WAIT_ENDED_S = 5 * 60
 SSH_OPTS = ('-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null', '-o', 'LogLevel=ERROR')
@@ -212,11 +215,32 @@ def ls_command(show_all, json_mode):
         )
     else:
         console.print('Nothing is free right now; `gitt rent ls --all` shows the catalog.')
-    images = offers.get('images') or []
-    if images:
-        console.print(f'default image: {images[0].get("image")}')
+    for vendor, image in default_images(offers).items():
+        console.print(f'default image ({vendor}): {image or "none published; give one with --image"}')
     fleet = offers.get('fleet')
     console.print(f'balance {_usd(cents)}' + (f' · fleet {fleet}' if fleet and fleet != 'ok' else ''))
+
+
+def offer_vendor(offers: dict, gpu_type: str) -> str:
+    """The vendor the API names on the offer row (``nvidia`` when it names none: the whole catalog until AMD)."""
+    for o in offers.get('offers') or []:
+        if str(o.get('gpu_type', '')).lower() == gpu_type.lower():
+            return str(o.get('vendor') or 'nvidia')
+    return 'nvidia'
+
+
+def default_images(offers: dict) -> dict[str, str]:
+    """The first quick-pick per vendor on offer: a CUDA image does not run on an AMD box, so the default follows the
+    box's vendor. A vendor with offers and no image maps to '' (the customer must name one)."""
+    vendors = {str(o.get('vendor') or 'nvidia') for o in offers.get('offers') or []} or {'nvidia'}
+    out: dict[str, str] = {}
+    for vendor in sorted(vendors):
+        out[vendor] = ''
+        for i in offers.get('images') or []:
+            if str(i.get('vendor') or 'nvidia') == vendor and i.get('image'):
+                out[vendor] = str(i['image'])
+                break
+    return out
 
 
 @rent_group.command('up')
@@ -276,10 +300,13 @@ def up_command(
         if not int(box.get('available') or 0) and not queue:
             raise ApiError(f'no {gpu_type} ×{count} box is free right now (`gitt rent ls`; --queue to wait)', 'no_box')
         if image is None:
-            images = offers.get('images') or []
-            if not images:
-                raise ApiError('no default image published; give one with --image', 'usage')
-            image = images[0]['image']
+            vendor = offer_vendor(offers, gpu_type)
+            image = default_images(offers).get(vendor)
+            if not image:
+                raise ApiError(
+                    f'no quick-pick image for {gpu_type} ({vendor}) yet; give one that runs sshd on :22 with --image',
+                    'usage',
+                )
         body = {
             'gpu_type': gpu_type,
             'gpu_count': count,

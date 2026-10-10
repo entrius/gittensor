@@ -216,6 +216,24 @@ def test_up_orders_with_the_keys_under_ssh_waits_for_active_and_prints_the_ssh_l
     assert r.exit_code == 2 and 'two-letter country code' in r.stderr + r.output and len(product.orders) == 2
 
 
+def test_the_default_image_follows_the_boxs_vendor_and_an_amd_box_without_one_asks_for_image(product, monkeypatch):
+    amd = {'gpu_type': 'MI300X', 'vendor': 'amd', 'usd_per_card_hr': 2.59, 'boxes': [{'gpu_count': 1, 'usd_per_hr': 2.59, 'available': 1}]}  # fmt: skip
+    monkeypatch.setitem(OFFERS, 'offers', OFFERS['offers'] + [amd])
+    r = invoke('ls')
+    assert 'default image (nvidia): ' + OFFERS['images'][0]['image'] in r.output
+    assert 'default image (amd): none published; give one with --image' in r.output
+    r = invoke('up', 'mi300x')
+    assert r.exit_code != 0 and 'no quick-pick image for MI300X (amd) yet' in r.output + r.stderr
+    assert product.orders == []  # refused before the API was asked
+    rocm = {'name': 'ROCm', 'image': 'example/rocm-sshd:1', 'vendor': 'amd'}
+    monkeypatch.setitem(OFFERS, 'images', OFFERS['images'] + [rocm])
+    r = invoke('up', 'mi300x')
+    assert r.exit_code == 0, r.output + r.stderr
+    assert product.orders[0]['image'] == 'example/rocm-sshd:1'
+    r = invoke('up', 'rtx5090')  # the NVIDIA default is untouched by the AMD entry
+    assert product.orders[1]['image'] == OFFERS['images'][0]['image']
+
+
 def test_up_refuses_up_front_when_nothing_of_that_size_is_free(product):
     r = invoke('up', 'RTX5090', '-c', '2')
     assert r.exit_code == 1 and 'no RTX5090 ×2 box is free right now' in r.stderr and product.orders == []

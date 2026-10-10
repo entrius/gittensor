@@ -263,8 +263,8 @@ def _host(box: BoxState, uptime_pct: float | None, deploy_s: float | None) -> di
 
 def guaranteed_host(size: int, gpu_type: str = '', hard: bool | None = None) -> dict:
     """What a box of this size is guaranteed to have: the configured floors x the size for every floor that is hard.
-    Download, upload and the port range are hard from the start; RAM, CPU threads and the disk ratio (OUR catalog
-    row's VRAM x the size) only once ``HOST_SPEC_HARD`` is flipped. A floor that is not hard is None here, and the
+    Download and the port range are hard from the start; RAM, CPU threads, the disk ratio (OUR catalog row's VRAM x
+    the size) and upload only once ``HOST_SPEC_HARD`` is flipped. A floor that is not hard is None here, and the
     customer is shown what free boxes currently have instead."""
     hard = cfg.HOST_SPEC_HARD if hard is None else hard
     spec = load_catalog().get(gpu_type) if gpu_type else None
@@ -274,7 +274,7 @@ def guaranteed_host(size: int, gpu_type: str = '', hard: bool | None = None) -> 
         'cpu_threads': cfg.CPU_THREADS_MIN_PER_GPU * size if hard else None,
         'disk_total_gb': round(cfg.DISK_TOTAL_MIN_X_VRAM * vram_gb, 1) if hard and vram_gb is not None else None,
         'down_mbps': cfg.DOWNLOAD_MIN_MBPS,
-        'up_mbps': cfg.UPLOAD_MIN_MBPS,
+        'up_mbps': cfg.UPLOAD_MIN_MBPS if hard else None,
         'port_count': cfg.PORTS_MIN,
     }
 

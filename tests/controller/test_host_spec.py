@@ -350,11 +350,17 @@ def test_the_download_floor_fails_only_after_three_sampled_rounds_under_it():
     assert not rounds([50.0] * cfg.BANDWIDTH_FAIL_AFTER, hard=False)[-1].passed
 
 
-def test_upload_has_its_own_ema_and_count_under_the_same_rules():
+def test_upload_has_its_own_ema_and_count_and_is_advertised_until_the_flip():
+    # Advertised (the default, Alex 10/10: the probe is one SSH stream, a good pod measured 55 against 50): the EMA and
+    # the count run the same way, the shortfall is listed and published, and the check never fails on it.
     results = rounds([20.0, None, 20.0, 20.0], direction='up')
-    assert [r.passed for r in results] == [True, True, True, False]
+    assert [r.passed for r in results] == [True, True, True, True]
     assert [r.evidence['host']['up_below_rounds'] for r in results] == [1, 1, 2, 3]
     assert [r.evidence['host']['down_below_rounds'] for r in results] == [0, 0, 0, 0]  # the directions never mix
+    assert all(r.evidence['host']['shortfalls'] == [w.UPLOAD_BELOW_FLOOR] for r in results)
+    # Hard: the download rule, three sampled rounds under the floor, then the public phrase that names the fix.
+    results = rounds([20.0, None, 20.0, 20.0], direction='up', hard=True)
+    assert [r.passed for r in results] == [True, True, True, False]
     failed = results[-1]
     assert failed.evidence[w.PUBLIC] == {'code': w.UPLOAD_BELOW_FLOOR, 'mbps': 20, 'floor': 50}
     assert w.render(failed.evidence[w.PUBLIC]) == 'upload measured 20 Mbps over the last 3 rounds, and the floor is 50 Mbps'  # fmt: skip
@@ -436,8 +442,8 @@ def test_the_full_check_feeds_the_record_through_and_the_recorded_box_is_admitte
 
 def test_guaranteed_is_the_hard_floors_times_the_size_and_observed_min_the_least_free_box():
     assert guaranteed_host(2, 'RTX5090', hard=False) == {
-        'ram_gb': None, 'cpu_threads': None, 'disk_total_gb': None, 'down_mbps': 100.0, 'up_mbps': 50.0, 'port_count': 100,
-    }  # fmt: skip
+        'ram_gb': None, 'cpu_threads': None, 'disk_total_gb': None, 'down_mbps': 100.0, 'up_mbps': None, 'port_count': 100,
+    }  # fmt: skip  # upload is advertised until the flip, like RAM
     assert guaranteed_host(4, 'RTX5090', hard=True) == {
         'ram_gb': 64.0, 'cpu_threads': 16, 'disk_total_gb': 207.6, 'down_mbps': 100.0, 'up_mbps': 50.0, 'port_count': 100,
     }  # fmt: skip
@@ -520,7 +526,7 @@ def test_the_document_carries_the_host_per_box_and_the_three_objects_per_offer_r
     offer = doc['offers']['RTX5090']['2']
     assert offer == {
         'boxes': 1,
-        'guaranteed': {'ram_gb': None, 'cpu_threads': None, 'disk_total_gb': None, 'down_mbps': 100.0, 'up_mbps': 50.0, 'port_count': 100},  # noqa: E501
+        'guaranteed': {'ram_gb': None, 'cpu_threads': None, 'disk_total_gb': None, 'down_mbps': 100.0, 'up_mbps': None, 'port_count': 100},  # noqa: E501
         'observed_min': {
             'ram_gb': 125.4, 'cpu_threads': 32.0, 'disk_total_gb': 1967.8, 'disk_free_gb': 1343.1, 'vram_gb': 68.4,
             'down_mbps': 227.3, 'up_mbps': 180.0, 'port_count': 100.0, 'power_w': 575.0, 'rtt_ms': 42.0, 'interconnect': PCIE,

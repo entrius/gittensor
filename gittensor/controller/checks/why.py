@@ -100,8 +100,8 @@ UUID_CLAIMED_ELSEWHERE = 'uuid_claimed_elsewhere'
 STACK_UNREADABLE = 'stack_unreadable'
 STACK_BELOW_FLOOR = 'stack_below_floor'
 
-# host_spec (host specs, 10/9): the host around the cards. RAM, CPU and the disk ratio are advertised until HOST_SPEC_HARD;
-# the download floor is hard from the start, after BANDWIDTH_FAIL_AFTER sampled rounds under it. The measured value
+# host_spec (host specs, 10/9): the host around the cards. RAM, CPU, the disk ratio and upload are advertised until
+# HOST_SPEC_HARD; the download floor is hard from the start, after BANDWIDTH_FAIL_AFTER sampled rounds under it. The measured value
 # is in the phrase on purpose: the miner is told what we saw and what the floor is, so the fix is one number away.
 RAM_BELOW_FLOOR = 'ram_below_floor'
 CPU_BELOW_FLOOR = 'cpu_below_floor'

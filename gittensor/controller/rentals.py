@@ -21,7 +21,11 @@ keys, container ports and ``ends_at``) that this reconciler carries through its 
 * **Confirm** (every pass, ``starting`` with a container / ``active`` / ``ending``): the pod is inspected. Running
   extends the pay span. Gone or stopped without our stop is ``box_lost``: with the agent answering throughout that is
   the heartbeat failure of ``23`` §4a (bench, pay withheld); after missed visits it is a stop, not a cheat (Kimbo
-  9/16). An unreachable box counts a miss; ``LOST_AFTER_MISSES`` of them end the rental the same way.
+  9/16). An unreachable box counts a miss; ``LOST_AFTER_MISSES`` of them end the rental the same way. Every
+  ``heartbeat_s`` an active pod also gets the lease's heartbeat (``heartbeat.RentalBeat``, 10/10): the pinned cards
+  as recorded and every GPU handle on the host inside the pod. A verdict against the box ends the rental
+  (``box_lost``: the customer is not billed past the last beat), removes the pod and benches the box with pay
+  withheld, the same ``heartbeat_failed`` as a pod gone under us. A tool that did not answer is no verdict.
 * **End** (``active`` past ``ends_at``, or ``ending`` ordered by the app / an operator): ``docker stop`` with
   ``STOP_GRACE_S``, remove, cards to CHECKING (the next round re-proves them), ``ended``, the span closed at the stop,
   a ``clean_lease`` standing event with the leased seconds.
@@ -71,6 +75,7 @@ from gittensor.controller.checks.state import (
     transition_card,
 )
 from gittensor.controller.checks.vendor import AMD, NVIDIA, amd_attach_args
+from gittensor.controller.heartbeat import RentalBeat, run_rental_heartbeat
 from gittensor.controller.locks import BoxLocks
 from gittensor.controller.manifest import gpu_type_of
 from gittensor.controller.runspec import PlacementError, PullToken, image_present_command, pull_command
@@ -171,6 +176,8 @@ class RentalRecord:
     # the watch
     last_seen_at: float | None = None  # the pod was inspected running
     misses: int = 0  # consecutive passes the box did not answer
+    last_beat_at: float | None = None  # the last ``RentalBeat`` (same card, ours alone) asked of the box
+    heartbeat: dict = field(default_factory=dict)  # that beat, ``RentalBeat.as_dict``: the operator's evidence
     # pay (the ledger's names)
     pay_from: float | None = None
     pay_through: float | None = None
@@ -393,7 +400,7 @@ def _public_host(box: BoxState) -> str:
 
 @dataclass
 class RentalAction:
-    kind: str  # place | active | failed | ending | ended | lost | prepull | miss
+    kind: str  # place | active | alive | heartbeat | failed | ending | ended | lost | prepull | miss
     rental: str
     box: str
     detail: str = ''
@@ -435,11 +442,14 @@ class RentalReconciler:
         firewall: bool = True,
         min_standing: str = PROBATION,
         alive_interval_s: float | None = None,
+        heartbeat_s: float | None = cfg.HEARTBEAT_INTERVAL_S,
     ):
         """``runtime`` / ``firewall`` are the dev overrides (`gitt controller run --rental-runtime runc
         --no-rental-firewall`): our own test boxes, never a miner's. ``min_standing`` is the rental gate: probation
-        (any admitted box) since issue #1818, the 48 h pay holdback being what a new box has at stake."""
+        (any admitted box) since issue #1818, the 48 h pay holdback being what a new box has at stake. ``heartbeat_s``
+        is how often an active pod gets the lease's heartbeat (``RentalBeat``); None asks nothing (tests)."""
         self.boxes, self.rentals = boxes, rentals
+        self.heartbeat_s = heartbeat_s
         self.make_runner = make_runner
         self.box_locks = box_locks or BoxLocks()
         self._lock = lock or threading.RLock()
@@ -557,10 +567,13 @@ class RentalReconciler:
                 self._finish(r, FAILED, START_FAILED)
                 report.actions.append(RentalAction('failed', r.id, r.box, 'start interrupted'))
                 continue
+            beat: RentalBeat | None = None
             try:
-                result = self._runner(box, runners).run(
-                    pod_running_command(r.container_id), timeout=cfg.SSH_COMMAND_TIMEOUT_S
-                )
+                runner = self._runner(box, runners)
+                result = runner.run(pod_running_command(r.container_id), timeout=cfg.SSH_COMMAND_TIMEOUT_S)
+                running = result.ok and result.stdout.strip() == 'true'
+                if running and r.state == ACTIVE and self._beat_due(r, now):
+                    beat = run_rental_heartbeat(runner, box, r.container_id, now)
             except (*_TRANSPORT, PlacementError) as e:
                 r.misses += 1
                 r.pay_open = False  # not paid for a span we could not see; it reopens when the pod answers
@@ -569,8 +582,15 @@ class RentalReconciler:
                 if r.misses >= LOST_AFTER_MISSES:
                     self._lost(r, box, answered=False, report=report)
                 continue
-            running = result.ok and result.stdout.strip() == 'true'
             if running:
+                if beat is not None:
+                    r.last_beat_at, r.heartbeat = now, beat.as_dict()
+                    if beat.failed:
+                        self._put(r)
+                        self._cheat(r, box, runner, beat, report)
+                        continue
+                    said = 'ok' if beat.ok else 'no verdict: ' + '; '.join(beat.reasons())[:300]
+                    report.actions.append(RentalAction('heartbeat', r.id, r.box, said))
                 if r.state == ACTIVE:
                     if not r.pay_open:
                         r.pay_from = r.pay_from if r.pay_from is not None else now
@@ -583,6 +603,35 @@ class RentalReconciler:
                     report.actions.append(RentalAction('alive', r.id, r.box, f'pod {r.container_id[:12]} running on {r.host}; pay open'))  # fmt: skip
                 continue
             self._lost(r, box, answered=True, report=report)
+
+    def _beat_due(self, r: RentalRecord, now: float) -> bool:
+        if self.heartbeat_s is None:
+            return False
+        return r.last_beat_at is None or now - r.last_beat_at >= self.heartbeat_s
+
+    def _cheat(
+        self, r: RentalRecord, box: BoxState, runner: HostRunner, beat: RentalBeat, report: RentalReport
+    ) -> None:
+        """The beat found the box is not what the customer was given (a card swapped, a limit or the NVML library
+        changed, a foreign holder of a GPU node): the heartbeat failure of 23 §4a, as for a lease. The pod is removed
+        (its cards are not what was sold), the rental ends ``box_lost`` at the last pass that saw it running (the
+        customer is not billed past there), the box is benched with pay withheld from now, and the standing event
+        carries the names and the reasons for the operator."""
+        now = self.wall()
+        detail = '; '.join(beat.reasons())[:300]
+        try:
+            runner.run(pod_remove_command(r.container_id), timeout=STOP_GRACE_S + cfg.SSH_COMMAND_TIMEOUT_S)
+        except (*_TRANSPORT, PlacementError) as e:
+            report.errors.append(f'{r.id}: remove after a failed heartbeat: {type(e).__name__}: {e}'[:300])
+        with self._lock:
+            if r.box in self.boxes.boxes:
+                self._put_box(
+                    apply_heartbeat_failure(self._box(r.box), beat.failed, now, rental=r.id, reasons=beat.reasons())
+                )
+        self._finish(r, FAILED, BOX_LOST, ended_at=r.last_seen_at or r.started_at or now)
+        report.actions.append(
+            RentalAction('lost', r.id, r.box, f'heartbeat failed ({", ".join(beat.failed)}): {detail}')
+        )
 
     def _lost(self, r: RentalRecord, box: BoxState, answered: bool, report: RentalReport) -> None:
         """The pod is gone (or the box is, after the misses). ``answered``: the agent was reachable, so a container we

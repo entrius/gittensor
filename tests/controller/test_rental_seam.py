@@ -173,6 +173,25 @@ def test_a_down_app_is_one_error_not_a_crash(tmp_path):
         p.client.orders()
 
 
+def test_an_order_or_an_extension_past_the_longest_rental_is_refused(tmp_path):
+    from gittensor.controller.checks import config as cfg
+
+    too_long = order('rnt_long', ends_at=NOW + (cfg.RENTAL_MAX_HOURS + 1) * 3600)
+    store, p = poller(tmp_path, FakeApp([too_long, order()]))
+    report = p.take_orders()
+    assert report.placed == ['rnt_app1'] and 'rnt_long' not in store.rentals
+    assert 'rnt_long' in report.errors[0] and 'more than 168 h ahead' in report.errors[0]
+    r = store.rentals['rnt_app1']
+    r.state = rt.ACTIVE
+    store.put(r)
+    p.client._open.orders = [order(state='active', ends_at=NOW + (cfg.RENTAL_MAX_HOURS + 1) * 3600)]
+    report = p.take_orders()
+    assert report.extended == [] and 'not extended' in report.errors[0]
+    assert store.rentals['rnt_app1'].ends_at == NOW + 3600  # ours stands
+    p.client._open.orders = [order(state='active', ends_at=NOW + cfg.RENTAL_MAX_HOURS * 3600)]
+    assert p.take_orders().extended == ['rnt_app1']  # exactly the longest: fine
+
+
 def test_a_bad_order_is_skipped_with_an_error_and_the_rest_are_taken(tmp_path):
     bad = order('rnt_bad', ends_at=NOW - 1)  # already over
     store, p = poller(tmp_path, FakeApp([bad, order('rnt_ok')]))

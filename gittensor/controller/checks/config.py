@@ -78,9 +78,11 @@ DISK_TOTAL_MIN_X_VRAM = 1.5  # Lium's idle-pay rule
 PORTS_MIN = 100  # the rent range a rentable box offers: `gitt up`'s RENT_PORTS_MIN, judged by the controller too
 BANDWIDTH_EMA_ALPHA = 0.3  # per box and direction, across rounds: new = alpha x sample + (1 - alpha) x old
 BANDWIDTH_FAIL_AFTER = 3  # consecutive sampled rounds with the EMA below the floor before the check fails
-# RAM, CPU threads and the disk ratio are advertised minimums only (the offer shows what free boxes have) until this
-# is flipped; then a shortfall fails the check like any other. Download, upload and the port range are hard from
-# the start.
+# RAM, CPU threads, the disk ratio AND UPLOAD are advertised minimums only (the offer shows what free boxes have) until
+# this is flipped; then a shortfall fails the check like any other. Download and the port range are hard from the
+# start. Upload is advertised rather than hard (Alex 10/10) because the probe below is one SSH stream and latency-bound:
+# a good 5090 pod measured 55 Mbps against a 50 floor on 10/9, so a hard floor would strike honest boxes. The
+# customer sees the measured number on every listing instead; the floor becomes hard with the rest.
 HOST_SPEC_HARD = False
 # The download probe (``scrape.DOWNLOAD_PROBE_COMMAND``): one real transfer per box per round of a fixed public object
 # we pull anyway, the 29.8 MB Ubuntu base layer of the pinned proof image (``PROOF_IMAGE_DIGEST``, amd64 manifest). It
@@ -166,6 +168,11 @@ RECONCILE_INTERVAL_S = 30.0
 # lease (no bench, nothing withheld: the card goes to CHECKING, the reconciler undeploys the instance when the box
 # answers again, the one-box probe re-proves the card). The round's own unreachable count and its 12 h bench stay.
 HEARTBEAT_INTERVAL_S = 60.0
+# The longest rental, and how far ahead an extension may put ``ends_at`` (Alex 10/10: 7 days; Lium's pods run until
+# stopped, ours run until ``ends_at`` and are extended from the app). The app holds its orders to the same number
+# (shared/types RENTAL_MAX_HOURS); the controller refuses an order or an extension past it so a bug or a forged
+# seam row cannot hold a miner's box for a month.
+RENTAL_MAX_HOURS = 168.0
 HEARTBEAT_UNREACHABLE_AFTER = 3
 WATCH_TICK_S = 5.0  # how often the watch looks for a heartbeat or health probe that is due
 POWER_LIMIT_TOLERANCE_W = 1.0  # nvidia-smi rounds the limit; a real change is tens of watts

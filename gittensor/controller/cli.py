@@ -2489,10 +2489,12 @@ class _DaemonPrinter:
         self._emit('error', {'loop': loop, 'message': message}, f'[red]{loop} error:[/red] {escape(message)}')
 
     def rental(self, action: Any) -> None:
-        """One typed line per rental action (place, active, alive, failed, ending, ended, lost, miss): grep the
-        rental id and the whole story is there, including what the box's docker said on a failed start."""
+        """One typed line per rental action (place, active, alive, heartbeat, failed, ending, ended, lost, miss): grep
+        the rental id and the whole story is there, including what the box's docker said on a failed start."""
         bad = action.kind in ('failed', 'lost', 'miss')
-        mark = '[red]✗[/red]' if bad else ('[dim]·[/dim]' if action.kind == 'alive' else '[green]✓[/green]')
+        mark = (
+            '[red]✗[/red]' if bad else ('[dim]·[/dim]' if action.kind in ('alive', 'heartbeat') else '[green]✓[/green]')
+        )
         line = f'{mark} rental {action.kind} {escape(action.rental)} {escape(action.box[:16])} {escape(action.detail)}'
         self._emit('rental', {**asdict(action), 'ok': not bad}, line)
 

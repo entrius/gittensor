@@ -23,6 +23,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from gittensor.controller.checks import config as cfg
 from gittensor.controller.rentals import (
     ACTIVE,
     ENDED,
@@ -156,6 +157,8 @@ class RentalPoller:
                 elif state == ACTIVE and r is not None and r.state in (STARTING_R, ACTIVE):
                     ends_at = o.get('ends_at')
                     if isinstance(ends_at, (int, float)) and float(ends_at) != r.ends_at:
+                        if float(ends_at) - now > cfg.RENTAL_MAX_HOURS * 3600.0:
+                            raise RentalError(f'ends_at is more than {cfg.RENTAL_MAX_HOURS:.0f} h ahead: not extended')
                         r.ends_at = float(ends_at)
                         self.store.put(r)
                         report.extended.append(rid)
@@ -168,6 +171,8 @@ class RentalPoller:
         hours = max(0.0, ends_at - now) / 3600.0 if ends_at else 0.0
         if hours <= 0:
             raise RentalError('ends_at is not in the future')
+        if hours > cfg.RENTAL_MAX_HOURS:
+            raise RentalError(f'ends_at is more than {cfg.RENTAL_MAX_HOURS:.0f} h ahead (the longest rental)')
         keys = [str(k) for k in (o.get('ssh_pubkeys') or [])]
         ports = [int(p) for p in (o.get('ports') or [22])]
         env = {str(k): str(v) for k, v in (o.get('env') or {}).items()}

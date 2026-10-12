@@ -111,10 +111,10 @@ class TestLoadMasterRepositories:
         repos = load_master_repo_weights()
         assert isinstance(repos, dict)
 
-    def test_master_repositories_not_empty(self):
-        """Should load at least the entrius core repos."""
+    def test_master_repositories_shares_within_pool(self):
+        """Configured shares never exceed the pool; an empty registry (all OSS emissions burn) is valid."""
         repos = load_master_repo_weights()
-        assert len(repos) > 0, 'Should have at least one repository'
+        assert sum(config.emission_share for config in repos.values()) <= 1.0
 
     def test_repo_configs_are_repository_config_objects(self):
         """Each entry should be a RepositoryConfig object."""

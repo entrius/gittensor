@@ -179,7 +179,8 @@ def wait_for_run(
             pause = POLL_SECONDS
         if time.monotonic() + pause > deadline:
             raise CathedralError(
-                f'run {run_id} is not done {timeout:g}s after it began, the most that still leaves time to submit '
-                f'before its seed block goes stale; {keeps_going} (a stale result cannot be submitted)'
+                f"run {run_id} is still {seen} and its seed block's freshness window is nearly over "
+                f'({max(timeout, 0):g}s were left): a result after this could not be submitted before its seed block '
+                f'goes stale. {keeps_going} if you want to see it anyway'
             )
         sleep(pause)

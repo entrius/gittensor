@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 import requests
 
 from gittensor.challenges.attestation import DEV, Attestation, verify
+from gittensor.challenges.cathedral import Author, receipt_error
 from gittensor.challenges.head_to_head import SKIPPED
 from gittensor.challenges.runner import BUILD, SOLVE
 
@@ -187,7 +188,13 @@ def run_mismatch(result: dict, config: Config) -> str | None:
 
 
 def submission_error(
-    att: Attestation, config: Config, challenger_sha: str, king_sha: str, block: int, seed_block_hash: str
+    att: Attestation,
+    config: Config,
+    challenger_sha: str,
+    king_sha: str,
+    block: int,
+    seed_block_hash: str,
+    author: Author | None = None,
 ) -> str | None:
     """Why the maintainer would close this PR, or ``None``: every check it runs that a miner can run first. ``block``
     is the chain's current block and ``seed_block_hash`` the chain's hash of the attested seed block."""
@@ -196,10 +203,12 @@ def submission_error(
     if signer.get('kind') == DEV and signer.get('pubkey') != accepted:
         return f"dev signer {signer.get('pubkey')} is not the challenge's dev_attestation_pubkey ({accepted})"
     try:
-        if not verify(att, accepted):
+        if not verify(att, accepted, config.attestation.get('trusted_keys')):
             return 'the attestation signature does not verify'
     except NotImplementedError as e:
         return str(e)
+    if error := receipt_error(att, config, author):
+        return f'the Cathedral receipt is not acceptable: {error}'
     if result.get('crown') is not True:
         return 'the attested result is not a crown'
     if mismatch := run_mismatch(result, config):

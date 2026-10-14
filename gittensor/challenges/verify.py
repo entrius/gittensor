@@ -24,6 +24,7 @@ import click
 import requests
 
 from gittensor.challenges.attestation import DEV, Attestation, verify
+from gittensor.challenges.cathedral import Author, receipt_error
 from gittensor.challenges.checkout import (
     ATTESTATION,
     CLA_TEXT,
@@ -65,11 +66,16 @@ class Config:
     crown_label: str
     maintainers: list[str]
     dev_attestation_pubkey: str | None
+    # Who may vouch besides the dev key: {kind, min_trust, trusted_keys, ...}. Optional, so older configs still load.
+    attestation: dict = field(default_factory=dict)
 
     @classmethod
     def from_json(cls, text: str) -> Config:
         doc = json.loads(text)
-        return cls(**{f.name: doc[f.name] for f in fields(cls)})
+        return cls(
+            **{f.name: doc[f.name] for f in fields(cls) if f.name != 'attestation'},
+            attestation=doc.get('attestation') or {},
+        )
 
 
 @dataclass(frozen=True)
@@ -85,6 +91,7 @@ class PullRequest:
     commits: int
     created_at: datetime
     author_hotkey: Callable[[], str | None] = lambda: None  # the author's miner hotkey, looked up only when checked
+    author_id: int = 0  # the author's GitHub id, the stable name a Cathedral receipt is issued to
     head: str = ''  # the head commit sha
     base: str = MAIN
     draft: bool = False
@@ -192,12 +199,19 @@ def decide(pr: PullRequest, repo: Repo, chain: Callable[[int], Chain], config: C
         return stop('close')
     try:
         att = Attestation.from_json(pr.attestation or '')
-        genuine, detail = verify(att, config.dev_attestation_pubkey), f'signed by {att.signer}'
+        genuine = verify(att, config.dev_attestation_pubkey, config.attestation.get('trusted_keys'))
+        detail = f'signed by {att.signer.get("kind")} key {att.signer.get("key_id") or att.signer.get("pubkey")}'
     except (ValueError, NotImplementedError) as e:
         att, genuine, detail = None, False, str(e)
     if not passed('signature', genuine, detail if genuine else f'attestation not genuine: {detail}') or att is None:
         return stop('close')
     if not passed('image', att.signer['kind'] == DEV or att.image == config.image, f'ran image {att.image}'):
+        return stop('close')
+    why = receipt_error(att, config, Author(pr.author, pr.author_id, hotkey))
+    receipt = (
+        'no receipt (dev signer)' if att.signer['kind'] == DEV else f'receipt names {pr.author} and ran as attested'
+    )
+    if not passed('receipt', why is None, why or receipt):
         return stop('close')
     result, facts = att.result, chain(att.seed_block)
     age = facts.created_block - att.seed_block
@@ -367,6 +381,7 @@ def pull_request(repo: str, number: int, actor: str | None = None) -> PullReques
         commits=meta['commits'],
         created_at=datetime.fromisoformat(meta['created_at']),
         author_hotkey=partial(miner_hotkey, meta['user']['id']),
+        author_id=meta['user']['id'],
         head=meta['head']['sha'],
         base=meta['base']['ref'],
         draft=meta['draft'],

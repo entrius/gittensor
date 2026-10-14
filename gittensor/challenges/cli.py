@@ -38,6 +38,7 @@ from gittensor.challenges.checkout import (
     CONFIG,
     KING_FILE,
     MAIN,
+    SLACK_BLOCKS,
     Checkout,
     dir_files,
     miner_hotkey,
@@ -357,13 +358,13 @@ def attest_command(challenge, dev_key, image, runner_name, resume, login, networ
     refuse_ignored(root, path)
     king = root / upstream.king
     if runner_name == 'cathedral':
-        att = cathedral_attestation(checkout, upstream, solver, resume, canonical_login(login))
+        att, left = cathedral_attestation(checkout, upstream, solver, resume, canonical_login(login), network)
         doc, signer = att.result, f'Cathedral key {att.signer.get("key_id")}'
     else:
         block, block_hash = finalized_block(network)
         console.print(f'{path} vs KING {upstream.king} on block {block}')
         doc = head_to_head(config.module, solver, king, config.tier, config.seeds, block_hash, config.margin)
-        att, signer = None, f'dev signer {pubkey}'
+        att, left, signer = None, None, f'dev signer {pubkey}'
     if not doc['crown']:
         invalid = doc['n'] - doc['challenger']['valid']
         why = f'{invalid} of {doc["n"]} seeds are invalid' if invalid else 'the 99% lower bound is under the margin'
@@ -371,38 +372,55 @@ def attest_command(challenge, dev_key, image, runner_name, resume, login, networ
     att = att or sign_dev(dev_key, doc, block, image)
     (checkout.root / ATTESTATION).write_text(att.to_json())
     console.print(f'wrote {ATTESTATION} ({signer}); next: gitt challenge submit --agree-cla')
+    if left is not None:
+        console.print(
+            f'about {left * cathedral_runner.BLOCK_SECONDS // 60} min ({left} blocks) are left to open the PR'
+        )
 
 
-def cathedral_attestation(checkout: Checkout, upstream: Upstream, solver: Path, resume: str | None, login: str):
-    """The attestation Cathedral returns for ``solver``, checked against upstream's challenge.json and this solver."""
-    root, path = checkout.root, solver.relative_to(checkout.root).as_posix()
+def cathedral_attestation(
+    checkout: Checkout, upstream: Upstream, solver: Path, resume: str | None, login: str, network: str
+) -> tuple[Attestation, int | None]:
+    """The attestation Cathedral returns for ``solver``, checked against upstream's challenge.json and this solver,
+    and the blocks left before its seed block is too old to submit (``None`` when the chain cannot be read)."""
+    root, path, config = checkout.root, solver.relative_to(checkout.root).as_posix(), upstream.config
+    king = root / upstream.king
+    if not resume:  # the same check eval, attest and submit run, before a paid request is made
+        for name, directory in (('solver', solver), ('KING', king)):
+            if error := source_error(dir_files(directory)):
+                raise click.ClickException(f'the {name} is not source only ({error}): nothing was sent')
     try:
         client = cathedral_runner.Client.from_env()
         if resume:
-            run_id = resume
+            run_id, seed_block = resume, client.get_run(resume)['seed_block']
         else:
             body = cathedral_runner.run_request(
                 upstream.repo,
                 git(root, 'rev-parse', BASE),
                 git(root, 'show', f'{BASE}:{CONFIG}'),
                 (path, solver),
-                (upstream.king, root / upstream.king),
+                (upstream.king, king),
                 {'github_login': login, 'github_id': gh_user_id()},
+                network,
             )
             run = client.create_run(body)
-            run_id = run['run_id']
-            console.print(f'Cathedral accepted run {run_id}: seed block {run["seed_block"]}, attempt {run["attempt"]}')
-            console.print(f'if this stops, `gitt challenge attest --runner cathedral --resume {run_id}` keeps waiting')
-        text = cathedral_runner.wait_for_run(client, run_id, lambda status: console.print(f'run {run_id}: {status}'))
+            run_id, seed_block = run['run_id'], run['seed_block']
+            console.print(f'Cathedral accepted run {run_id}: seed block {seed_block}, attempt {run["attempt"]}')
+            console.print(f'if this stops, `{cathedral_runner.resume_command(run_id)}` keeps waiting')
+        seconds = cathedral_runner.fresh_seconds(
+            seed_block, config.freshness_blocks, block_now(network, seed_block) or seed_block
+        )
+        text = cathedral_runner.wait_for_run(
+            client, run_id, seconds, lambda status: console.print(f'run {run_id}: {status}')
+        )
     except cathedral_runner.CathedralError as e:
         raise click.ClickException(str(e)) from e
-    except KeyError as e:
-        raise click.ClickException(f'Cathedral accepted the run but left out {e}') from e
+    except (KeyError, TypeError) as e:
+        raise click.ClickException(f'Cathedral answered without {e}: nothing written') from e
     try:
         att = Attestation.from_json(text)
     except ValueError as e:
         raise click.ClickException(f'Cathedral returned something that is not an attestation: {e}') from e
-    config = upstream.config
     if not verify(att, None, config.attestation.get('trusted_keys')):
         raise click.ClickException('the attestation is not signed by a Cathedral key that challenge.json pins')
     if error := receipt_error(att, config, Author(login, gh_user_id())):
@@ -410,7 +428,20 @@ def cathedral_attestation(checkout: Checkout, upstream: Upstream, solver: Path, 
     ran = att.result['challenger']['sha'], att.result['king']['sha']
     if ran != (solver_sha(solver), upstream.king_sha):
         raise click.ClickException(f'Cathedral ran {ran}, not this solver and KING: nothing written')
-    return att
+    now = block_now(network, att.seed_block)
+    left = None if now is None else att.seed_block + config.freshness_blocks - SLACK_BLOCKS - now
+    if left is not None and left <= 0:
+        raise click.ClickException(f'seed block {att.seed_block} is already too old to submit: nothing written')
+    return att, left
+
+
+def block_now(network: str, seed_block: int) -> int | None:
+    """The chain's current block, or ``None`` when it cannot be read: the caller then counts from the seed block."""
+    try:
+        return chain_now(network, seed_block)[0]
+    except Exception as e:  # bittensor raises many kinds of errors
+        err_console.print(f'[yellow]cannot read the chain ({e}): freshness is not checked here[/yellow]')
+        return None
 
 
 @challenge_group.command('submit')

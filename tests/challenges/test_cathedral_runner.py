@@ -8,8 +8,10 @@ crown. The endpoints are proposed, so the fake is the only server these tests ta
 import base64
 import io
 import json
+import os
 import shutil
 import tarfile
+from collections.abc import Callable
 
 import pytest
 import requests
@@ -30,33 +32,40 @@ HASH = 'ab' * 32
 
 
 class FakeSession:
-    """Cathedral's side of the proposed API: accepts a run, reports ``statuses`` in turn, then returns ``attest``."""
+    """Cathedral's side of the proposed API: accepts a run, reports ``statuses`` in turn, then returns ``attest``. A
+    status can also be an exception to raise or a ``FakeResponse`` to answer with, for a network or HTTP failure."""
 
     def __init__(self):
-        self.headers, self.calls, self.statuses, self.attest = {}, [], ['queued', 'running', 'succeeded'], None
+        self.headers, self.calls, self.statuses = {}, [], ['queued', 'running', 'succeeded']
+        self.attest: Callable[[], str] = lambda: ''
+        self.accepted: FakeResponse | None = None
 
     def request(self, method, url, timeout, json=None, headers=None):
         self.calls.append((method, url, json, headers))
         if method == 'POST':
             body = {'run_id': 'run-1', 'status': 'accepted', 'seed_block': 1000, 'seed_block_hash': HASH, 'attempt': 1}
-        else:
-            status = self.statuses.pop(0)
-            body = {
-                'status': status,
-                'attestation': self.attest() if status == 'succeeded' else None,
-            }
-            body['error'] = 'no capacity' if status == 'failed' else None
+            return self.accepted or FakeResponse(body)
+        status = self.statuses.pop(0)
+        if isinstance(status, Exception):
+            raise status
+        if isinstance(status, FakeResponse):
+            return status
+        body = {'status': status, 'seed_block': 1000, 'attestation': self.attest() if status == 'succeeded' else None}
+        body['error'] = 'no capacity' if status == 'failed' else None
         return FakeResponse(body)
 
 
 class FakeResponse:
-    def __init__(self, body):
-        self.body = body
+    def __init__(self, body, code=200, text=''):
+        self.body, self.status_code, self.text = body, code, text
 
     def raise_for_status(self):
-        pass
+        if self.status_code >= 400:
+            raise requests.HTTPError(f'{self.status_code} Error', response=self)  # type: ignore[arg-type]
 
     def json(self):
+        if isinstance(self.body, Exception):
+            raise self.body
         return self.body
 
 
@@ -90,6 +99,7 @@ def cathedral(challenge_repo, solver, tmp_path, monkeypatch):
     monkeypatch.setattr(cathedral_runner.time, 'sleep', lambda seconds: None)
     monkeypatch.setattr('gittensor.challenges.cli.gh_user_id', lambda: 4242)
     monkeypatch.setattr('gittensor.challenges.cli.gh_user', lambda: 'alice')
+    monkeypatch.setattr('gittensor.challenges.cli.chain_now', lambda network, block: (1010, HASH))
     return root, session, config
 
 
@@ -233,3 +243,172 @@ def test_the_p0_quote_binding_is_checked_and_a_swapped_claim_is_refused(cathedra
     doc['signer']['receipt']['tee']['e2e_pubkey_b64'] = base64.b64encode(b'x' * 32).decode()
     swapped = Attestation.from_json(json.dumps(doc))
     assert 'signature' in (receipt_error(swapped, fake_config) or '')
+
+
+def unpacked(tar_b64, into):
+    with tarfile.open(fileobj=io.BytesIO(base64.b64decode(tar_b64))) as tar:
+        tar.extractall(into, filter='fully_trusted')
+    return into
+
+
+def test_a_symlink_is_packed_as_a_symlink_so_the_tree_sha_is_git_s(tmp_path, solver):
+    one = tmp_path / 'one'
+    shutil.copytree(solver('good'), one)
+    (one / 'data.txt').write_text('x' * 100)
+    os.symlink('data.txt', one / 'link')
+    tar_b64 = cathedral_runner.solver_tar_b64(one)
+
+    members = {m.name: m for m in tarfile.open(fileobj=io.BytesIO(base64.b64decode(tar_b64))).getmembers()}
+    assert members['link'].issym() and members['link'].linkname == 'data.txt' and members['data.txt'].size == 100
+    assert solver_sha(unpacked(tar_b64, tmp_path / 'two')) == solver_sha(one)
+
+
+def test_a_symlink_to_nothing_or_a_special_file_is_an_error_before_anything_is_packed(tmp_path, solver):
+    one = tmp_path / 'one'
+    shutil.copytree(solver('good'), one)
+    os.symlink('missing', one / 'dangling')
+    with pytest.raises(cathedral_runner.CathedralError, match='dangling is a symlink to nothing'):
+        cathedral_runner.solver_tar_b64(one)
+
+    (one / 'dangling').unlink()
+    os.mkfifo(one / 'pipe')
+    with pytest.raises(cathedral_runner.CathedralError, match='pipe is a special file'):
+        cathedral_runner.solver_tar_b64(one)
+
+
+@pytest.mark.parametrize(
+    'spoil', [lambda d: os.symlink('missing', d / 'link'), lambda d: (d / 'blob').write_bytes(b'\0')]
+)
+def test_a_solver_that_is_not_source_only_is_refused_before_a_paid_request(cathedral, spoil):
+    root, session, _ = cathedral
+    spoil(root / 'solvers' / 'alice' / '1')
+
+    result = attest()
+
+    assert result.exit_code != 0 and 'not source only' in result.output and 'nothing was sent' in result.output
+    assert not session.calls and not (root / ATTESTATION).exists()
+
+
+def test_a_poll_that_fails_for_a_moment_is_tried_again_with_a_growing_pause(cathedral):
+    root, session, _ = cathedral
+    blip = FakeResponse({}, 502, 'bad gateway')
+    session.statuses = ['running', requests.ConnectionError('reset'), blip, requests.Timeout('slow'), 'succeeded']
+
+    result = attest()
+
+    assert result.exit_code == 0, result.output
+    assert [c[0] for c in session.calls] == ['POST', 'GET', 'GET', 'GET', 'GET', 'GET'] and (
+        root / ATTESTATION
+    ).exists()
+
+
+def test_the_pauses_between_failed_polls_double_up_to_a_cap(cathedral):
+    _, session, _ = cathedral
+    client = cathedral_runner.Client('https://x', 'k', session)
+    session.statuses = [requests.ConnectionError('down')] * 3 + ['succeeded']
+    pauses = []
+
+    cathedral_runner.wait_for_run(client, 'run-1', 3600, sleep=pauses.append)
+
+    assert pauses == [5, 10, 20]
+
+
+def test_polling_gives_up_after_a_run_of_failures_and_prints_the_exact_resume_command(cathedral):
+    root, session, _ = cathedral
+    session.statuses = ['running'] + [requests.ConnectionError('down')] * cathedral_runner.POLL_RETRIES
+
+    result = attest()
+
+    resume = 'gitt challenge attest --runner cathedral --resume run-1'
+    assert result.exit_code != 0 and 'gave up after 8 tries in a row' in result.output
+    assert resume in result.output.replace('\n', ' ') and not (root / ATTESTATION).exists()
+
+
+def test_a_failure_that_will_not_pass_is_not_retried_and_shows_what_cathedral_said(cathedral):
+    _, session, _ = cathedral
+    session.statuses = [FakeResponse({}, 401, '{"error": "key revoked"}'), 'succeeded']
+
+    result = attest()
+
+    assert result.exit_code != 0 and 'key revoked' in result.output and '--resume run-1' in result.output
+    assert len([c for c in session.calls if c[0] == 'GET']) == 1
+
+
+@pytest.mark.parametrize('body', [['x'], 'text', None, ValueError('no json')])
+def test_an_answer_that_is_not_a_json_object_is_a_clean_error_with_the_resume_command(cathedral, body):
+    _, session, _ = cathedral
+    session.statuses = [FakeResponse(body)]
+
+    result = attest()
+
+    assert result.exit_code == 1 and isinstance(result.exception, SystemExit), result.output
+    assert '--resume run-1' in result.output.replace('\n', ' ')
+
+
+def test_a_run_that_was_accepted_with_something_that_is_not_an_object_says_so(cathedral):
+    _, session, _ = cathedral
+    session.accepted = FakeResponse(['run-1'])
+
+    result = attest()
+
+    assert result.exit_code == 1 and isinstance(result.exception, SystemExit) and 'not a JSON object' in result.output
+
+
+def test_the_wait_is_the_freshness_window_less_the_slack_and_a_margin_to_submit():
+    # seed 1000, window 150, 5 blocks of slack, 50 for the PR: the run has until block 1095, 12 s a block
+    assert cathedral_runner.fresh_seconds(1000, 150, 1000) == 95 * 12
+    assert cathedral_runner.fresh_seconds(1000, 150, 1090) == 5 * 12
+    assert cathedral_runner.fresh_seconds(1000, 150, 1200) < 0
+
+
+def test_a_run_still_going_when_its_window_closes_stops_and_says_how_to_resume(cathedral, monkeypatch):
+    root, session, _ = cathedral
+    session.statuses = ['running'] * 10
+    monkeypatch.setattr('gittensor.challenges.cli.chain_now', lambda network, block: (1094, HASH))
+
+    result = attest()
+
+    flat = result.output.replace('\n', ' ')
+    assert result.exit_code != 0 and 'before its seed block goes stale' in flat
+    assert '--resume run-1' in flat and not (root / ATTESTATION).exists()
+
+
+def test_the_miner_is_told_how_long_is_left_to_open_the_pr(cathedral):
+    result = attest()
+
+    # seed 1000, window 150, 5 slack, chain at 1010: 135 blocks, 27 minutes
+    assert result.exit_code == 0 and 'about 27 min (135 blocks) are left to open the PR' in result.output
+
+
+def test_an_attestation_that_came_back_too_old_to_submit_is_not_written(cathedral, monkeypatch):
+    root, _, _ = cathedral
+    blocks = iter([1010, 1200])
+    monkeypatch.setattr('gittensor.challenges.cli.chain_now', lambda network, block: (next(blocks), HASH))
+
+    result = attest()
+
+    assert result.exit_code != 0 and 'too old to submit' in result.output and not (root / ATTESTATION).exists()
+
+
+def test_the_network_option_reaches_cathedral_and_the_chain_reads(cathedral, monkeypatch):
+    _, session, _ = cathedral
+    asked = []
+    monkeypatch.setattr(
+        'gittensor.challenges.cli.chain_now', lambda network, block: (asked.append(network), 1010, HASH)[1:]
+    )
+
+    result = attest('--network', 'test')
+
+    assert result.exit_code == 0, result.output
+    assert session.calls[0][2]['seed'] == {'mode': 'latest_finalized', 'network': 'test'} and set(asked) == {'test'}
+
+
+def test_a_chain_that_cannot_be_read_does_not_stop_the_run(cathedral, monkeypatch):
+    def down(network, block):
+        raise ConnectionError('no route')
+
+    monkeypatch.setattr('gittensor.challenges.cli.chain_now', down)
+
+    result = attest()
+
+    assert result.exit_code == 0 and 'freshness is not checked here' in result.output

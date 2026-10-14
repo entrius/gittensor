@@ -208,7 +208,9 @@ def test_an_attestation_for_someone_else_or_another_solver_is_not_written(cathed
 
 def test_an_attestation_signed_by_a_key_challenge_json_does_not_pin_is_not_written(cathedral):
     root, session, config = cathedral
-    config['attestation']['trusted_keys'] = {}
+    config['attestation']['trusted_keys'][cathedral_fake.KEY_ID]['public_key_base64'] = base64.b64encode(
+        bytes(32)
+    ).decode()
     (root / CONFIG).write_text(json.dumps(config))
     shutil_git_commit(root)
 
@@ -412,3 +414,27 @@ def test_a_chain_that_cannot_be_read_does_not_stop_the_run(cathedral, monkeypatc
     result = attest()
 
     assert result.exit_code == 0 and 'freshness is not checked here' in result.output
+
+
+@pytest.mark.parametrize(
+    'attestation, reason',
+    [
+        (None, 'does not name Cathedral'),
+        (
+            {'kind': 'cathedral', 'trusted_keys': {'k': {'algorithm': 'ed25519', 'public_key_base64': 'REPLACE-ME'}}},
+            'pins no usable',
+        ),
+    ],
+)
+def test_a_challenge_that_cannot_accept_a_receipt_yet_stops_before_a_paid_request(cathedral, attestation, reason):
+    root, session, config = cathedral
+    config = {k: v for k, v in config.items() if k != 'attestation'} | (
+        {'attestation': attestation} if attestation else {}
+    )
+    (root / CONFIG).write_text(json.dumps(config))
+    shutil_git_commit(root)
+
+    result = attest()
+
+    assert result.exit_code != 0 and reason in result.output and 'nothing was sent' in result.output
+    assert not session.calls and not (root / ATTESTATION).exists()

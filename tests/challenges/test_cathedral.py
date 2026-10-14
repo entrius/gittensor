@@ -21,6 +21,7 @@ from gittensor.challenges.cathedral import (
     QUOTE_BODY,
     QUOTE_HEADER,
     Author,
+    pinned_error,
     receipt_bytes,
     receipt_error,
 )
@@ -277,6 +278,20 @@ def test_a_polaris_policy_is_held_to_the_cathedral_signer_too():
 
     assert 'accepts only a Cathedral attestation' in refusal(dev, config)
     assert refusal(Attestation.from_json(json.dumps(SAMPLE)), config) == 'accepted'
+
+
+def test_a_challenge_with_no_usable_pinned_key_is_known_before_any_run_is_paid_for():
+    placeholder = {KEY_ID: {**POLICY['trusted_keys'][KEY_ID], 'public_key_base64': 'REPLACE-WITH-THE-PUBLIC-KEY'}}
+    revoked = {KEY_ID: {**POLICY['trusted_keys'][KEY_ID], 'status': 'revoked'}}
+
+    assert pinned_error(CONFIG) is None
+    assert pinned_error(replace(CONFIG, attestation={**POLICY, 'kind': 'polaris'})) is None
+    assert 'does not name Cathedral' in (pinned_error(replace(CONFIG, attestation={})) or '')
+    assert 'does not name Cathedral' in (pinned_error(replace(CONFIG, attestation={'kind': 'dev'})) or '')
+    for keys in (placeholder, revoked, {}, None, ['x']):
+        assert 'no usable Cathedral key' in (
+            pinned_error(replace(CONFIG, attestation={**POLICY, 'trusted_keys': keys})) or ''
+        )
 
 
 def judge(config: Config = CONFIG, **pr_changes):

@@ -84,6 +84,18 @@ def image_measurement(fields: dict[str, bytes]) -> str:
     return f'tdx-image-sha256:{h.hexdigest()}'
 
 
+def pinned_error(config) -> str | None:
+    """Why no Cathedral attestation can be accepted under ``config`` yet, or ``None``: challenge.json does not name
+    Cathedral, or pins no key that parses (a placeholder). A miner checks this before paying for a run."""
+    policy = config.attestation
+    if policy.get('kind') not in (CATHEDRAL, POLARIS):
+        return 'challenge.json does not name Cathedral as its attestation'
+    keys = policy.get('trusted_keys')
+    if not isinstance(keys, dict) or not any(trusted_pubkey(keys, key_id) for key_id in keys):
+        return 'challenge.json pins no usable Cathedral key yet'
+    return None
+
+
 def receipt_error(att: Attestation, config, author: Author | None = None) -> str | None:
     """Why the attestation's Cathedral receipt is not acceptable for ``config``, or ``None``. When challenge.json says
     ``attestation.kind`` is ``cathedral`` (or ``polaris``, the platform's planned name, whose signer is Cathedral) any

@@ -32,7 +32,7 @@ from rich.table import Table
 
 from gittensor.challenges import cathedral_runner, runner
 from gittensor.challenges.attestation import Attestation, dev_pubkey, sign_dev, verify
-from gittensor.challenges.cathedral import Author, receipt_error
+from gittensor.challenges.cathedral import Author, pinned_error, receipt_error
 from gittensor.challenges.checkout import (
     ATTESTATION,
     CONFIG,
@@ -385,6 +385,8 @@ def cathedral_attestation(
     and the blocks left before its seed block is too old to submit (``None`` when the chain cannot be read)."""
     root, path, config = checkout.root, solver.relative_to(checkout.root).as_posix(), upstream.config
     king = root / upstream.king
+    if error := pinned_error(config):  # a run no key could vouch for is not worth paying for
+        raise click.ClickException(f'{error} on {MAIN}: nothing was sent')
     if not resume:  # the same check eval, attest and submit run, before a paid request is made
         for name, directory in (('solver', solver), ('KING', king)):
             if error := source_error(dir_files(directory)):
